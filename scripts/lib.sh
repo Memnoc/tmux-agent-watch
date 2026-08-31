@@ -71,9 +71,9 @@ classify_output() {
 symbol_for_state() {
   case "$1" in
     working) tmux_option @agent-watch-working-symbol '●' ;;
-    needs_input) tmux_option @agent-watch-needs-input-symbol '?' ;;
-    done) tmux_option @agent-watch-done-symbol '✓' ;;
-    failed) tmux_option @agent-watch-failed-symbol '!' ;;
+    needs_input) tmux_option @agent-watch-needs-input-symbol '●' ;;
+    done) tmux_option @agent-watch-done-symbol '●' ;;
+    failed) tmux_option @agent-watch-failed-symbol '●' ;;
   esac
 }
 

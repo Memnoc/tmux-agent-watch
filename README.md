@@ -5,12 +5,12 @@ tmux workflow you already use.
 
 Each recognized agent gets a small state marker in the existing window list:
 
-| Marker | State |
-| --- | --- |
-| `●` | working |
-| `?` | needs input |
-| `✓` | ready for review |
-| `!` | failed |
+| Marker | Color | State |
+| --- | --- | --- |
+| `●` | blue | working |
+| `●` | gold | needs input |
+| `●` | green | ready for review |
+| `●` | red | failed |
 
 The plugin currently recognizes Codex, Claude Code, and OpenCode. Other windows
 remain unchanged.
@@ -86,4 +86,3 @@ set -g @plugin 'tmux-plugins/tmux-continuum'
 
 Version one intentionally does not orchestrate agents, retain task history,
 track tokens, or introduce its own project model. tmux remains the interface.
-
