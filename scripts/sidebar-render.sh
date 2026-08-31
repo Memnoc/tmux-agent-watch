@@ -81,7 +81,13 @@ render_context() {
   done < <(printf '%s\n' "$context" | fold -s -w 30)
 }
 
+sleep_pid=''
+wake_renderer() {
+  [ -n "$sleep_pid" ] && kill "$sleep_pid" 2>/dev/null || true
+}
+
 previous_frame=''
+trap wake_renderer USR1
 while tmux has-session -t "$session" 2>/dev/null; do
   expanded="$(tmux show-option -qv -t "$session" @agent_watch_sidebar_expanded 2>/dev/null || true)"
   current_window="$(tmux display-message -p -t "$session:" '#{window_id}')"
@@ -155,5 +161,8 @@ while tmux has-session -t "$session" 2>/dev/null; do
     printf '\033[H\033[J%s' "$frame"
     previous_frame="$frame"
   fi
-  sleep 1
+  sleep 1 &
+  sleep_pid=$!
+  wait "$sleep_pid" 2>/dev/null || true
+  sleep_pid=''
 done

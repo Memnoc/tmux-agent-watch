@@ -48,6 +48,10 @@ sidebar_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep 'Space.*scripts/
 [ -n "$sidebar_binding" ] || { printf 'not ok: sidebar binding missing\n'; exit 1; }
 printf 'ok: sidebar binding installed\n'
 
+restart_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep ' A .*scripts/sidebar-restart.sh' || true)"
+[ -n "$restart_binding" ] || { printf 'not ok: sidebar restart binding missing\n'; exit 1; }
+printf 'ok: sidebar restart binding installed\n'
+
 swap_bindings="$(tmux -L "$SOCKET" list-keys -T prefix | grep -c 'scripts/safe-swap.sh')"
 [ "$swap_bindings" = 2 ] || { printf 'not ok: guarded pane swap bindings missing\n'; exit 1; }
 printf 'ok: pane swap bindings protect sidebar position\n'
@@ -115,6 +119,15 @@ agent_name="$(tmux -L "$SOCKET" display-message -p -t agents:0 '#{window_name}')
 [ "$agent_name" = codex ] || { printf 'not ok: sidebar changed agent window name to %s\n' "$agent_name"; exit 1; }
 printf 'ok: sidebar created for agent session\n'
 
+old_sidebar="$sidebar"
+TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/sidebar-restart.sh"
+sidebar="$(tmux -L "$SOCKET" show-option -qv -t agents @agent_watch_sidebar_pane)"
+[ "$sidebar" != "$old_sidebar" ] &&
+  [ "$(tmux -L "$SOCKET" show-option -pqv -t "$sidebar" @agent_watch_sidebar)" = 1 ] || {
+  printf 'not ok: sidebar restart did not replace the generated pane\n'; exit 1;
+}
+printf 'ok: sidebar restart replaces only the generated pane\n'
+
 tmux -L "$SOCKET" kill-pane -t "$sidebar"
 TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/sidebar-resize.sh"
 sidebar="$(tmux -L "$SOCKET" show-option -qv -t agents @agent_watch_sidebar_pane)"
@@ -171,6 +184,15 @@ TMUX="$socket_path,$server_pid,0" TMUX_PANE="$second_pane" "$ROOT/scripts/sideba
 expanded="$(tmux -L "$SOCKET" show-option -qv -t agents @agent_watch_sidebar_expanded)"
 [ "$expanded" = on ] || { printf 'not ok: sidebar did not expand\n'; exit 1; }
 printf 'ok: sidebar expands with one action\n'
+
+sleep 1
+TMUX="$socket_path,$server_pid,0" TMUX_PANE="$second_pane" "$ROOT/scripts/sidebar-resize.sh"
+sleep 0.2
+collapsed_frame="$(tmux -L "$SOCKET" capture-pane -p -t "$sidebar")"
+if printf '%s' "$collapsed_frame" | grep -q '[[:alpha:]]'; then
+  printf 'not ok: stale expanded text remains after sidebar collapse\n'; exit 1
+fi
+printf 'ok: sidebar collapse redraws within 200ms\n'
 
 tmux -L "$SOCKET" new-window -d -t agents -n shell
 tmux -L "$SOCKET" select-window -t agents:shell

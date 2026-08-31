@@ -39,6 +39,7 @@ required.
 
 - `prefix + a` jumps to the oldest agent requiring attention.
 - `prefix + Space` expands or collapses the left sidebar.
+- `prefix + A` kills and recreates the sidebar if it becomes stuck.
 - `prefix + m` uses normal tmux pane zoom to temporarily hide the sidebar.
 - Click an agent row in the sidebar to select its window.
 - Existing window navigation and naming continue to work normally.
@@ -134,6 +135,7 @@ Set options before loading the plugin:
 set -g @agent-watch-interval 2
 set -g @agent-watch-next-key a
 set -g @agent-watch-sidebar-key Space
+set -g @agent-watch-restart-key A
 set -g @agent-watch-hud on
 set -g @agent-watch-status off
 set -g @agent-watch-sidebar on

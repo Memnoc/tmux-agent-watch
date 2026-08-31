@@ -28,3 +28,6 @@ if ! tmux resize-pane -t "$sidebar" -x "$width" 2>/dev/null; then
   [ -n "$sidebar" ] || exit 1
   tmux resize-pane -t "$sidebar" -x "$width"
 fi
+
+renderer_pid="$(tmux display-message -p -t "$sidebar" '#{pane_pid}' 2>/dev/null || true)"
+[ -n "$renderer_pid" ] && kill -USR1 "$renderer_pid" 2>/dev/null || true
