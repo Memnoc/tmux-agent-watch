@@ -115,6 +115,19 @@ agent_name="$(tmux -L "$SOCKET" display-message -p -t agents:0 '#{window_name}')
 [ "$agent_name" = codex ] || { printf 'not ok: sidebar changed agent window name to %s\n' "$agent_name"; exit 1; }
 printf 'ok: sidebar created for agent session\n'
 
+tmux -L "$SOCKET" kill-pane -t "$sidebar"
+TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/sidebar-resize.sh"
+sidebar="$(tmux -L "$SOCKET" show-option -qv -t agents @agent_watch_sidebar_pane)"
+tmux -L "$SOCKET" display-message -p -t "$sidebar" '#{pane_id}' >/dev/null 2>&1 || {
+  printf 'not ok: sidebar toggle did not recover a stale pane ID\n'; exit 1;
+}
+expanded="$(tmux -L "$SOCKET" show-option -qv -t agents @agent_watch_sidebar_expanded)"
+[ "$expanded" = on ] || {
+  printf 'not ok: recovered sidebar did not honor the requested expansion\n'; exit 1;
+}
+printf 'ok: sidebar toggle recovers stale pane metadata\n'
+TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/sidebar-resize.sh"
+
 tmux -L "$SOCKET" select-pane -t "$first_pane"
 tmux -L "$SOCKET" select-pane -L
 focused_pane="$(tmux -L "$SOCKET" display-message -p '#{pane_id}')"
