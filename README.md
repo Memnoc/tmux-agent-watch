@@ -1,5 +1,7 @@
 # tmux-agent-watch
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 `tmux-agent-watch` shows which agent windows need you, without replacing the
 tmux workflow you already use.
 
@@ -113,3 +115,7 @@ set -g @plugin 'tmux-plugins/tmux-continuum'
 
 Version one intentionally does not orchestrate agents, retain task history,
 track tokens, or introduce its own project model. tmux remains the interface.
+
+## License
+
+Released under the [MIT License](LICENSE).
