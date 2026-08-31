@@ -50,7 +50,8 @@ The three-column collapsed sidebar shows one dot per agent in stable tmux order.
 The expanded view groups agents that need attention above working agents, and
 adds a repository path when it clarifies the window name, semantic state, age,
 plus a complete, word-wrapped summary of what the agent is doing, did, or needs.
-A single sidebar pane follows the selected window within each session.
+A single sidebar pane follows the selected agent window within each session.
+Fresh shell windows remain full-width until an agent starts in them.
 
 The normal horizontal window list is replaced by a single-row agent HUD. It
 shows aggregate working/waiting/review counts on the left and the selected

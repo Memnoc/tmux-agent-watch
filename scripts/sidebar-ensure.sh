@@ -13,6 +13,8 @@ session="$(tmux display-message -p -t "$target" '#{session_name}' 2>/dev/null ||
 target_pane="$(tmux display-message -p -t "$target" '#{pane_id}' 2>/dev/null || true)"
 target_window="$(tmux display-message -p -t "$target" '#{window_id}' 2>/dev/null || true)"
 [ -n "$session" ] && [ -n "$target_pane" ] || exit 0
+target_state="$(tmux show-option -wqv -t "$target_window" @agent_watch_state 2>/dev/null || true)"
+[ -n "$target_state" ] || exit 0
 target_name="$(tmux display-message -p -t "$target_window" '#{window_name}')"
 target_auto="$(tmux display-message -p -t "$target_window" '#{automatic-rename}')"
 

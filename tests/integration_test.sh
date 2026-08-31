@@ -199,5 +199,7 @@ tmux -L "$SOCKET" select-window -t agents:shell
 sleep 1
 shell_window="$(tmux -L "$SOCKET" display-message -p -t agents:shell '#{window_id}')"
 sidebar_window="$(tmux -L "$SOCKET" display-message -p -t "$sidebar" '#{window_id}')"
-[ "$sidebar_window" = "$shell_window" ] || { printf 'not ok: sidebar did not persist into ordinary window\n'; exit 1; }
-printf 'ok: sidebar persists across every session window\n'
+[ "$sidebar_window" != "$shell_window" ] || { printf 'not ok: sidebar invaded a new shell window\n'; exit 1; }
+shell_panes="$(tmux -L "$SOCKET" display-message -p -t agents:shell '#{window_panes}')"
+[ "$shell_panes" = 1 ] || { printf 'not ok: new shell window has %s panes\n' "$shell_panes"; exit 1; }
+printf 'ok: new shell windows remain full-width until an agent starts\n'
