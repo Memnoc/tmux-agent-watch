@@ -83,10 +83,21 @@ state="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_state)"
 [ "$state" = needs_input ] || { printf 'not ok: Codex permission hook produced %s\n' "$state"; exit 1; }
 printf 'ok: Codex lifecycle events publish exact states\n'
 
+TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/opencode-hook.sh" working
+TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/opencode-hook.sh" permission 'Approve file write'
+message="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_message)"
+[ "$message" = 'Approve file write' ] || {
+  printf 'not ok: OpenCode lifecycle hook lost its permission reason\n'; exit 1;
+}
+TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/opencode-hook.sh" idle
+state="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_state)"
+[ "$state" = done ] || { printf 'not ok: OpenCode idle hook produced %s\n' "$state"; exit 1; }
+printf 'ok: OpenCode lifecycle events publish exact states\n'
+
 fleet_output="$(TMUX="$socket_path,$server_pid,0" "$ROOT/scripts/hud.sh" fleet agents @0)"
 selected_output="$(TMUX="$socket_path,$server_pid,0" "$ROOT/scripts/hud.sh" selected agents @0)"
 printf '%s' "$fleet_output" | grep -Fq '1 agents' || { printf 'not ok: HUD fleet count missing\n'; exit 1; }
-printf '%s' "$selected_output" | grep -Fq 'WAITING' || { printf 'not ok: HUD selected state missing\n'; exit 1; }
+printf '%s' "$selected_output" | grep -Fq 'REVIEW' || { printf 'not ok: HUD selected state missing\n'; exit 1; }
 printf 'ok: HUD renders fleet and selected agent\n'
 
 sidebar="$(tmux -L "$SOCKET" show-option -qv -t agents @agent_watch_sidebar_pane)"

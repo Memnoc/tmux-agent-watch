@@ -108,6 +108,22 @@ interrupt = [{ type = "command", command = "/path/to/tmux-agent-watch/scripts/co
 Review and trust the hooks when Codex prompts you. The plugin never bypasses
 Codex hook trust. Older Codex versions continue to use terminal observation.
 
+### OpenCode lifecycle plugin
+
+OpenCode publishes session and permission events through local plugins. Copy
+the provided integration into OpenCode's global plugin directory and replace
+`/path/to` inside the copied file with this repository's location:
+
+```sh
+mkdir -p ~/.config/opencode/plugins
+cp /path/to/tmux-agent-watch/integrations/opencode-agent-watch.js \
+  ~/.config/opencode/plugins/tmux-agent-watch.js
+```
+
+The adapter maps busy/retry status to `WORKING`, permission requests to
+`WAITING`, idle sessions to `REVIEW`, and session errors to `FAILED`. OpenCode
+continues to use terminal observation when the integration is not installed.
+
 ## Options
 
 Set options before loading the plugin:
