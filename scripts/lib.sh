@@ -28,7 +28,7 @@ strip_terminal_noise() {
 }
 
 classify_output() {
-  local command="$1" output="$2" tail_text last_line
+  local command="$1" output="$2" tail_text last_line response prompt_seen
 
   if ! is_agent_command "$command"; then
     printf 'unmanaged\t'
@@ -39,18 +39,32 @@ classify_output() {
   last_line="$(printf '%s\n' "$tail_text" | tail -n 1)"
 
   if printf '%s\n' "$tail_text" | grep -Eqi \
-    '(esc to interrupt|ctrl.c to interrupt|working\.\.\.|thinking\.\.\.|baking…|running command|tokens[^[:alnum:]]*$)'; then
+    '(esc to interrupt|ctrl.c to interrupt|working\.\.\.|thinking\.\.\.|baking…|running command)'; then
     printf 'working\t%s' "$last_line"
   elif printf '%s\n' "$tail_text" | grep -Eqi \
-    '(do you want to proceed|allow (this )?(command|action)|approve|permission|waiting for (your )?(input|approval)|please (choose|confirm)|[?][[:space:]]*$)'; then
+    '(do you want to proceed|allow (this )?(command|action)|approve|permission|waiting for (your )?(input|approval)|please (choose|confirm))'; then
     printf 'needs_input\t%s' "$last_line"
-  elif printf '%s\n' "$tail_text" | grep -Eqi \
-    '(^|[[:space:]])(error|failed|fatal|panic|traceback)(:|[[:space:]])|[1-9][0-9]* failed'; then
-    printf 'failed\t%s' "$last_line"
-  elif printf '%s\n' "$tail_text" | tail -n 6 | grep -Eq '^[[:space:]›❯>]+$|^[[:space:]]*[›❯][[:space:]]*$'; then
-    printf 'done\t%s' "$(printf '%s\n' "$tail_text" | tail -n 7 | grep -Ev '^[[:space:]›❯>]+$|^[[:space:]]*[›❯][[:space:]]*$' | tail -n 1)"
   else
-    printf 'working\t%s' "$last_line"
+    # Codex and Claude keep their input prompt visible at the bottom. Text on
+    # that line is a placeholder or user input, never an agent question. Find
+    # the final prompt and inspect only the response immediately before it.
+    prompt_seen="$(printf '%s\n' "$tail_text" | grep -Ec '^[[:space:]]*[›❯>]')"
+    if [ "$prompt_seen" -gt 0 ]; then
+      response="$(printf '%s\n' "$tail_text" | awk '
+        { line[NR]=$0; if ($0 ~ /^[[:space:]]*[›❯>]/) prompt=NR }
+        END {
+          start=(prompt > 8 ? prompt - 8 : 1)
+          for (i=start; i<prompt; i++) print line[i]
+        }')"
+
+      if printf '%s\n' "$response" | tail -n 4 | grep -Eq '[?][[:space:]]*$'; then
+        printf 'needs_input\t%s' "$(printf '%s\n' "$response" | tail -n 1)"
+      else
+        printf 'done\t%s' "$(printf '%s\n' "$response" | tail -n 1)"
+      fi
+    else
+      printf 'working\t%s' "$last_line"
+    fi
   fi
 }
 
