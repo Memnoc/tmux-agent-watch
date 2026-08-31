@@ -29,3 +29,10 @@ done < <(tmux list-panes -a -F '#{window_id}|#{pane_id}|#{pane_current_command}|
 while IFS= read -r window_id; do
   [ -n "${agent_windows[$window_id]:-}" ] || set_window_state "$window_id" unmanaged
 done < <(tmux list-windows -a -F '#{window_id}' 2>/dev/null)
+
+if [ "$(tmux_option @agent-watch-sidebar on)" = on ]; then
+  while IFS= read -r session; do
+    [ -n "$session" ] && "$PLUGIN_DIR/scripts/sidebar-ensure.sh" "$session:"
+  done < <(tmux list-windows -a -F '#{session_name}|#{@agent_watch_state}' 2>/dev/null |
+    awk -F '|' '$2 != "" && !seen[$1]++ { print $1 }')
+fi

@@ -3,7 +3,8 @@
 `tmux-agent-watch` shows which agent windows need you, without replacing the
 tmux workflow you already use.
 
-Each recognized agent gets a small state marker in the existing window list:
+Each recognized agent gets the same color-coded state in the horizontal window
+list and a session sidebar:
 
 | Marker | Color | State |
 | --- | --- | --- |
@@ -36,8 +37,15 @@ required.
 ## Use
 
 - `prefix + a` jumps to the oldest agent requiring attention.
-- `prefix + A` opens the agent overview. Enter a row number to focus it.
+- `prefix + Space` expands or collapses the left sidebar.
+- `prefix + m` uses normal tmux pane zoom to temporarily hide the sidebar.
+- Click an agent row in the sidebar to select its window.
 - Existing window navigation and naming continue to work normally.
+
+The collapsed sidebar shows dots and window names in stable tmux order. The
+expanded view groups agents that need attention above working agents, and adds
+state age plus one contextual line for actionable items. A single sidebar pane
+follows the selected window within each session.
 
 The observer checks panes every two seconds. Automatic terminal classification
 is conservative by design. Agent hooks can report an exact state with:
@@ -56,7 +64,11 @@ Set options before loading the plugin:
 ```tmux
 set -g @agent-watch-interval 2
 set -g @agent-watch-next-key a
-set -g @agent-watch-overview-key A
+set -g @agent-watch-sidebar-key Space
+set -g @agent-watch-status on
+set -g @agent-watch-sidebar on
+set -g @agent-watch-sidebar-width 20
+set -g @agent-watch-sidebar-expanded-width 38
 set -g @agent-watch-working-color '#9ccfd8'
 set -g @agent-watch-needs-input-color '#f6c177'
 set -g @agent-watch-done-color '#a6da95'
@@ -66,6 +78,14 @@ set -g @agent-watch-failed-color '#ed8796'
 The symbols are configurable with `@agent-watch-working-symbol`,
 `@agent-watch-needs-input-symbol`, `@agent-watch-done-symbol`, and
 `@agent-watch-failed-symbol`.
+
+The horizontal status markers and vertical sidebar are complementary by
+default. Either surface can be disabled independently:
+
+```tmux
+set -g @agent-watch-status off
+set -g @agent-watch-sidebar off
+```
 
 ## Session persistence
 
