@@ -11,10 +11,9 @@ sidebar="$(tmux show-option -qv -t "$session" @agent_watch_sidebar_pane 2>/dev/n
 expanded="$(tmux show-option -qv -t "$session" @agent_watch_sidebar_expanded 2>/dev/null || true)"
 if [ "$expanded" = on ]; then
   tmux set-option -q -t "$session" @agent_watch_sidebar_expanded off
-  width="$(tmux_option @agent-watch-sidebar-width 20)"
+  width="$(tmux_option @agent-watch-sidebar-width 3)"
 else
   tmux set-option -q -t "$session" @agent_watch_sidebar_expanded on
   width="$(tmux_option @agent-watch-sidebar-expanded-width 38)"
 fi
 tmux resize-pane -t "$sidebar" -x "$width"
-

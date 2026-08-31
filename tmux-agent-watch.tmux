@@ -11,17 +11,19 @@ option() {
 }
 
 install_window_formats() {
-  local format current
+  local format current style_format
+  style_format='#{@agent_watch_window_style}'
   for format in window-status-format window-status-current-format; do
     current="$(tmux show-option -gqv "$format")"
-    if [ "$(option @agent-watch-status on)" != on ]; then
-      tmux set-option -gq "$format" "${current//'#{@agent_watch_marker}'/}"
-      continue
+    current="${current//'#{@agent_watch_marker}'/}"
+    current="${current//'#{@agent_watch_window_style}'/}"
+    if [ "$(option @agent-watch-status off)" = on ]; then
+      current="#{@agent_watch_marker}${current}"
     fi
-    case "$current" in
-      *'#{@agent_watch_marker}'*) ;;
-      *) tmux set-option -gq "$format" "#{@agent_watch_marker}${current}" ;;
-    esac
+    if [ "$(option @agent-watch-color-window-names on)" = on ]; then
+      current="${current//#I/${style_format}#I}"
+    fi
+    tmux set-option -gq "$format" "$current"
   done
 }
 
@@ -38,6 +40,9 @@ cleanup_plugin_hooks() {
 
 cleanup_plugin_hooks
 install_window_formats
+if [ "$(option @agent-watch-hud on)" = on ]; then
+  "$PLUGIN_DIR/scripts/hud-install.sh"
+fi
 
 tmux bind-key "$(option @agent-watch-next-key a)" run-shell "$PLUGIN_DIR/scripts/next-attention.sh"
 tmux bind-key "$(option @agent-watch-sidebar-key Space)" run-shell "$PLUGIN_DIR/scripts/sidebar-resize.sh"

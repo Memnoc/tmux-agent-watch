@@ -3,8 +3,7 @@
 `tmux-agent-watch` shows which agent windows need you, without replacing the
 tmux workflow you already use.
 
-Each recognized agent gets the same color-coded state in the horizontal window
-list and a session sidebar:
+Each recognized agent gets a color-coded state in a session sidebar:
 
 | Marker | Color | State |
 | --- | --- | --- |
@@ -42,10 +41,17 @@ required.
 - Click an agent row in the sidebar to select its window.
 - Existing window navigation and naming continue to work normally.
 
-The collapsed sidebar shows dots and window names in stable tmux order. The
-expanded view groups agents that need attention above working agents, and adds
-state age plus one contextual line for actionable items. A single sidebar pane
-follows the selected window within each session.
+The three-column collapsed sidebar shows one dot per agent in stable tmux order.
+The expanded view groups agents that need attention above working agents, and
+adds repository path, semantic state, age, plus a complete, word-wrapped summary
+of what the agent is doing, did, or needs. A single sidebar pane follows the
+selected window within each session.
+
+The normal horizontal window list is replaced by a three-row agent HUD:
+
+1. Current session and aggregate working/waiting/review counts.
+2. Selected agent, Git branch, process, state, and state age.
+3. The selected agent's complete task, outcome, or request.
 
 The observer checks panes every two seconds. Automatic terminal classification
 is conservative by design. Agent hooks can report an exact state with:
@@ -65,9 +71,10 @@ Set options before loading the plugin:
 set -g @agent-watch-interval 2
 set -g @agent-watch-next-key a
 set -g @agent-watch-sidebar-key Space
-set -g @agent-watch-status on
+set -g @agent-watch-hud on
+set -g @agent-watch-status off
 set -g @agent-watch-sidebar on
-set -g @agent-watch-sidebar-width 20
+set -g @agent-watch-sidebar-width 3
 set -g @agent-watch-sidebar-expanded-width 38
 set -g @agent-watch-working-color '#9ccfd8'
 set -g @agent-watch-needs-input-color '#f6c177'
@@ -79,12 +86,13 @@ The symbols are configurable with `@agent-watch-working-symbol`,
 `@agent-watch-needs-input-symbol`, `@agent-watch-done-symbol`, and
 `@agent-watch-failed-symbol`.
 
-The horizontal status markers and vertical sidebar are complementary by
-default. Either surface can be disabled independently:
+The sidebar and HUD are the default surfaces. The earlier tmux window list can
+be retained instead of the HUD, with optional state-colored names:
 
 ```tmux
-set -g @agent-watch-status off
-set -g @agent-watch-sidebar off
+set -g @agent-watch-hud off
+set -g @agent-watch-status on
+set -g @agent-watch-color-window-names on
 ```
 
 ## Session persistence

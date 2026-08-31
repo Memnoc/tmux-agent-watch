@@ -19,7 +19,7 @@ while IFS='|' read -r window_id pane_id command dead; do
   fi
 
   agent_windows["$window_id"]=1
-  output="$(tmux capture-pane -p -t "$pane_id" -S -80 2>/dev/null || true)"
+  output="$(tmux capture-pane -p -t "$pane_id" -S -200 2>/dev/null || true)"
   result="$(classify_output "$command" "$output")"
   state="${result%%$'\t'*}"
   message="${result#*$'\t'}"
