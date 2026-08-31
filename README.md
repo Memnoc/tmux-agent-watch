@@ -92,6 +92,22 @@ These commands receive Claude's event JSON on standard input and use the
 inherited `TMUX_PANE` to update the correct window. Outside tmux they do
 nothing. Terminal parsing remains the fallback when hooks are not configured.
 
+### Codex CLI lifecycle hooks
+
+Codex CLI 0.151.0 and newer exposes stable lifecycle hooks. Add these entries
+to `~/.codex/config.toml`, replacing `/path/to` with the plugin's location:
+
+```toml
+[hooks]
+userPromptSubmit = [{ type = "command", command = "/path/to/tmux-agent-watch/scripts/codex-hook.sh userPromptSubmit" }]
+permissionRequest = [{ type = "command", command = "/path/to/tmux-agent-watch/scripts/codex-hook.sh permissionRequest" }]
+stop = [{ type = "command", command = "/path/to/tmux-agent-watch/scripts/codex-hook.sh stop" }]
+interrupt = [{ type = "command", command = "/path/to/tmux-agent-watch/scripts/codex-hook.sh interrupt" }]
+```
+
+Review and trust the hooks when Codex prompts you. The plugin never bypasses
+Codex hook trust. Older Codex versions continue to use terminal observation.
+
 ## Options
 
 Set options before loading the plugin:
