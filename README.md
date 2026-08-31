@@ -42,6 +42,8 @@ required.
 - `prefix + m` uses normal tmux pane zoom to temporarily hide the sidebar.
 - Click an agent row in the sidebar to select its window.
 - Existing window navigation and naming continue to work normally.
+- The generated sidebar rejects keyboard focus and keeps its reserved left
+  position if a pane-layout command attempts to move it.
 
 The three-column collapsed sidebar shows one dot per agent in stable tmux order.
 The expanded view groups agents that need attention above working agents, and

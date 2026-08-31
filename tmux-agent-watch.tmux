@@ -29,7 +29,7 @@ install_window_formats() {
 
 cleanup_plugin_hooks() {
   local hook slot command
-  for hook in client-attached after-new-window after-select-window; do
+  for hook in client-attached after-new-window after-select-pane after-select-window; do
     while read -r slot command; do
       case "$command" in
         *"$PLUGIN_DIR"*) tmux set-hook -gu "$slot" ;;
@@ -46,11 +46,15 @@ fi
 
 tmux bind-key "$(option @agent-watch-next-key a)" run-shell "$PLUGIN_DIR/scripts/next-attention.sh"
 tmux bind-key "$(option @agent-watch-sidebar-key Space)" run-shell "$PLUGIN_DIR/scripts/sidebar-resize.sh"
+tmux bind-key '{' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -U"
+tmux bind-key '}' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -D"
 tmux bind-key -n MouseDown1Pane if-shell -F '#{==:#{@agent_watch_sidebar},1}' \
   "run-shell '$PLUGIN_DIR/scripts/sidebar-click.sh #{pane_id} #{mouse_y}'" \
   'select-pane -t ='
 tmux set-hook -g 'client-attached[100]' "run-shell -b '$PLUGIN_DIR/scripts/start-watcher.sh'"
 tmux set-hook -g 'after-new-window[100]' "run-shell -b '$PLUGIN_DIR/scripts/scan.sh'"
+tmux set-hook -g 'after-select-pane[100]' \
+  "if-shell -F '#{==:#{@agent_watch_sidebar},1}' 'select-pane -l'"
 tmux set-hook -g 'after-select-window[100]' "run-shell -b '$PLUGIN_DIR/scripts/sidebar-ensure.sh #{pane_id}'"
 
 "$PLUGIN_DIR/scripts/start-watcher.sh"

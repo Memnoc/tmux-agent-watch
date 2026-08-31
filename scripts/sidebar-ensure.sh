@@ -31,7 +31,16 @@ fi
 
 if [ -n "$sidebar" ]; then
   sidebar_window="$(tmux display-message -p -t "$sidebar" '#{window_id}')"
-  [ "$sidebar_window" = "$target_window" ] && exit 0
+  if [ "$sidebar_window" = "$target_window" ]; then
+    sidebar_left="$(tmux display-message -p -t "$sidebar" '#{pane_left}')"
+    if [ "$sidebar_left" != 0 ]; then
+      leftmost="$(tmux list-panes -t "$target_window" -F '#{pane_id}|#{pane_left}' |
+        awk -F '|' '$2 == 0 { print $1; exit }')"
+      [ -n "$leftmost" ] && tmux swap-pane -d -s "$sidebar" -t "$leftmost"
+      tmux resize-pane -t "$sidebar" -x "$width" 2>/dev/null || true
+    fi
+    exit 0
+  fi
   [ "$target_pane" = "$sidebar" ] && exit 0
   source_name="$(tmux display-message -p -t "$sidebar_window" '#{window_name}')"
   source_auto="$(tmux display-message -p -t "$sidebar_window" '#{automatic-rename}')"

@@ -48,6 +48,10 @@ sidebar_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep 'Space.*scripts/
 [ -n "$sidebar_binding" ] || { printf 'not ok: sidebar binding missing\n'; exit 1; }
 printf 'ok: sidebar binding installed\n'
 
+swap_bindings="$(tmux -L "$SOCKET" list-keys -T prefix | grep -c 'scripts/safe-swap.sh')"
+[ "$swap_bindings" = 2 ] || { printf 'not ok: guarded pane swap bindings missing\n'; exit 1; }
+printf 'ok: pane swap bindings protect sidebar position\n'
+
 tmux -L "$SOCKET" run-shell "$ROOT/tmux-agent-watch.tmux"
 tmux -L "$SOCKET" run-shell "$ROOT/tmux-agent-watch.tmux"
 hook_count="$(tmux -L "$SOCKET" show-hooks -g after-new-window | grep -c "$ROOT/scripts/scan.sh")"
@@ -58,7 +62,8 @@ state="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_state)"
 [ "$state" = working ] || { printf 'not ok: expected working, got %s\n' "$state"; exit 1; }
 printf 'ok: observer classified agent\n'
 
-first_pane="$(tmux -L "$SOCKET" list-panes -t agents:0 -F '#{pane_id}' | head -n 1)"
+first_pane="$(tmux -L "$SOCKET" list-panes -t agents:0 -F '#{pane_id}|#{@agent_watch_sidebar}' |
+  awk -F '|' '$2 != 1 { print $1; exit }')"
 printf '{"prompt":"implement exact lifecycle states"}' |
   TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/claude-hook.sh" UserPromptSubmit
 hook_message="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_message)"
@@ -109,6 +114,22 @@ sidebar_width="$(tmux -L "$SOCKET" display-message -p -t "$sidebar" '#{pane_widt
 agent_name="$(tmux -L "$SOCKET" display-message -p -t agents:0 '#{window_name}')"
 [ "$agent_name" = codex ] || { printf 'not ok: sidebar changed agent window name to %s\n' "$agent_name"; exit 1; }
 printf 'ok: sidebar created for agent session\n'
+
+tmux -L "$SOCKET" select-pane -t "$first_pane"
+tmux -L "$SOCKET" select-pane -L
+focused_pane="$(tmux -L "$SOCKET" display-message -p '#{pane_id}')"
+[ "$focused_pane" != "$sidebar" ] || {
+  printf 'not ok: sidebar accepted focus from normal pane navigation\n'; exit 1;
+}
+printf 'ok: sidebar rejects normal pane focus\n'
+
+tmux -L "$SOCKET" swap-pane -d -s "$sidebar" -t "$first_pane"
+sleep 3
+sidebar_left="$(tmux -L "$SOCKET" display-message -p -t "$sidebar" '#{pane_left}')"
+[ "$sidebar_left" = 0 ] || {
+  printf 'not ok: sidebar did not recover its reserved left position\n'; exit 1;
+}
+printf 'ok: sidebar recovers its position after pane swaps\n'
 
 tmux -L "$SOCKET" new-window -d -t agents -n second "$TMP_DIR/codex 30"
 second_pane="$(tmux -L "$SOCKET" list-panes -t agents:second -F '#{pane_id}' | head -n 1)"
