@@ -10,7 +10,7 @@ while IFS='|' read -r window_id pane_id command dead; do
 
   if [ "$dead" = 1 ] && is_agent_command "$command"; then
     agent_windows["$window_id"]=1
-    set_window_state "$window_id" failed 'process exited'
+    set_window_state "$window_id" failed 'process exited' process
     continue
   fi
 

@@ -17,5 +17,4 @@ esac
 
 window_id="${TMUX_PANE:+$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}')}"
 [ -n "$window_id" ] || { printf 'agent-watch: not inside tmux\n' >&2; exit 1; }
-set_window_state "$window_id" "$state" "$message"
-
+set_window_state "$window_id" "$state" "$message" hook

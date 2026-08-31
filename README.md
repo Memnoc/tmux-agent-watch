@@ -55,7 +55,8 @@ agent's state and age on the right. Detailed summaries live in the expanded
 sidebar, keeping the terminal workspace clear.
 
 The observer checks panes every two seconds. Automatic terminal classification
-is conservative by design. Agent hooks can report an exact state with:
+is conservative by design. Exact lifecycle hooks take precedence over the
+observer. Agent hooks can report an exact state with:
 
 ```sh
 /path/to/tmux-agent-watch/scripts/status.sh working
@@ -63,6 +64,33 @@ is conservative by design. Agent hooks can report an exact state with:
 /path/to/tmux-agent-watch/scripts/status.sh done "Ready for review"
 /path/to/tmux-agent-watch/scripts/status.sh failed "Tests failed"
 ```
+
+### Claude Code lifecycle hooks
+
+Claude Code can publish deterministic state changes. Add these entries to the
+`hooks` object in `~/.claude/settings.json`, replacing `/path/to` with the
+plugin's location:
+
+```json
+{
+  "UserPromptSubmit": [{
+    "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh UserPromptSubmit" }]
+  }],
+  "PermissionRequest": [{
+    "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh PermissionRequest" }]
+  }],
+  "Stop": [{
+    "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh Stop" }]
+  }],
+  "StopFailure": [{
+    "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh StopFailure" }]
+  }]
+}
+```
+
+These commands receive Claude's event JSON on standard input and use the
+inherited `TMUX_PANE` to update the correct window. Outside tmux they do
+nothing. Terminal parsing remains the fallback when hooks are not configured.
 
 ## Options
 

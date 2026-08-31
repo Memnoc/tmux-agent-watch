@@ -152,8 +152,13 @@ color_for_state() {
 }
 
 set_window_state() {
-  local window_id="$1" state="$2" message="${3:-}" previous now marker color symbol
+  local window_id="$1" state="$2" message="${3:-}" source="${4:-observer}"
+  local previous previous_source now marker color symbol
   previous="$(window_option "$window_id" @agent_watch_state)"
+  previous_source="$(window_option "$window_id" @agent_watch_source)"
+  if [ "$state" != unmanaged ] && [ "$source" = observer ] && [ "$previous_source" = hook ]; then
+    return
+  fi
   if [ "$state" = working ] && [ "$previous" = working ] && [ "$message" = Working ]; then
     message="$(window_option "$window_id" @agent_watch_message)"
     message="${message:-Working}"
@@ -165,6 +170,7 @@ set_window_state() {
     tmux set-option -wq -t "$window_id" @agent_watch_marker ''
     tmux set-option -wq -t "$window_id" @agent_watch_window_style ''
     tmux set-option -wq -t "$window_id" @agent_watch_message ''
+    tmux set-option -wq -t "$window_id" @agent_watch_source ''
     return
   fi
 
@@ -187,6 +193,7 @@ set_window_state() {
   tmux set-option -wq -t "$window_id" @agent_watch_state "$state"
   tmux set-option -wq -t "$window_id" @agent_watch_marker "$marker"
   tmux set-option -wq -t "$window_id" @agent_watch_window_style "#[fg=${color}]"
+  tmux set-option -wq -t "$window_id" @agent_watch_source "$source"
   message="${message//|/¦}"
   tmux set-option -wq -t "$window_id" @agent_watch_message "$message"
 }

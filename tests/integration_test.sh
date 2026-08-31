@@ -58,10 +58,24 @@ state="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_state)"
 [ "$state" = working ] || { printf 'not ok: expected working, got %s\n' "$state"; exit 1; }
 printf 'ok: observer classified agent\n'
 
+first_pane="$(tmux -L "$SOCKET" list-panes -t agents:0 -F '#{pane_id}' | head -n 1)"
+printf '{"prompt":"implement exact lifecycle states"}' |
+  TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/claude-hook.sh" UserPromptSubmit
+hook_message="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_message)"
+hook_source="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_source)"
+[ "$hook_message" = 'implement exact lifecycle states' ] && [ "$hook_source" = hook ] || {
+  printf 'not ok: lifecycle hook did not publish an exact state\n'; exit 1;
+}
+printf '{}' | TMUX="$socket_path,$server_pid,0" TMUX_PANE="$first_pane" "$ROOT/scripts/claude-hook.sh" Stop
+sleep 2
+state="$(tmux -L "$SOCKET" show-option -wqv -t agents:0 @agent_watch_state)"
+[ "$state" = done ] || { printf 'not ok: observer overwrote exact hook state with %s\n' "$state"; exit 1; }
+printf 'ok: exact lifecycle state outranks observer fallback\n'
+
 fleet_output="$(TMUX="$socket_path,$server_pid,0" "$ROOT/scripts/hud.sh" fleet agents @0)"
 selected_output="$(TMUX="$socket_path,$server_pid,0" "$ROOT/scripts/hud.sh" selected agents @0)"
 printf '%s' "$fleet_output" | grep -Fq '1 agents' || { printf 'not ok: HUD fleet count missing\n'; exit 1; }
-printf '%s' "$selected_output" | grep -Fq 'WORKING' || { printf 'not ok: HUD selected state missing\n'; exit 1; }
+printf '%s' "$selected_output" | grep -Fq 'REVIEW' || { printf 'not ok: HUD selected state missing\n'; exit 1; }
 printf 'ok: HUD renders fleet and selected agent\n'
 
 sidebar="$(tmux -L "$SOCKET" show-option -qv -t agents @agent_watch_sidebar_pane)"
