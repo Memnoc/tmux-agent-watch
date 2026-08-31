@@ -19,8 +19,8 @@ state_color() {
 state_label() {
   case "$1" in
     working) printf 'WORKING' ;;
-    needs_input) printf 'WAITING FOR YOU' ;;
-    done) printf 'READY TO REVIEW' ;;
+    needs_input) printf 'WAITING' ;;
+    done) printf 'REVIEW' ;;
     failed) printf 'FAILED' ;;
     *) printf 'SHELL' ;;
   esac
@@ -44,25 +44,17 @@ case "$mode" in
     waiting="$(printf '%s\n' "$rows" | awk -F '|' '$1=="needs_input" {n++} END {print n+0}')"
     review="$(printf '%s\n' "$rows" | awk -F '|' '$1=="done" {n++} END {print n+0}')"
     failed="$(printf '%s\n' "$rows" | awk -F '|' '$1=="failed" {n++} END {print n+0}')"
-    oldest="$(printf '%s\n' "$rows" | awk -F '|' '$2!="" && (oldest=="" || $2<oldest) {oldest=$2} END {print oldest}')"
-
     printf '#[fg=#c4a7e7,bold] %s #[default]  %s agents' "$session" "$agents"
     [ "$working" -gt 0 ] && printf '  #[fg=#9ccfd8]● %s working#[default]' "$working"
     [ "$waiting" -gt 0 ] && printf '  #[fg=#f6c177]● %s waiting#[default]' "$waiting"
     [ "$review" -gt 0 ] && printf '  #[fg=#a6da95]● %s review#[default]' "$review"
     [ "$failed" -gt 0 ] && printf '  #[fg=#eb6f92]● %s failed#[default]' "$failed"
-    [ -n "$oldest" ] && printf '  #[fg=#908caa]oldest %s#[default]' "$(age "$oldest")"
     ;;
   selected)
-    details="$(tmux display-message -p -t "$window_id" '#{window_name}|#{pane_current_path}|#{pane_current_command}|#{@agent_watch_state}|#{@agent_watch_since}' 2>/dev/null || true)"
-    IFS='|' read -r name path command state since <<< "$details"
-    branch="$(git -C "$path" branch --show-current 2>/dev/null || true)"
-    dirty=''
-    if [ -n "$branch" ] && [ -n "$(git -C "$path" status --porcelain 2>/dev/null || true)" ]; then dirty='*'; fi
+    details="$(tmux display-message -p -t "$window_id" '#{window_name}|#{@agent_watch_state}|#{@agent_watch_since}' 2>/dev/null || true)"
+    IFS='|' read -r name state since <<< "$details"
     color="$(state_color "$state")"
     printf '#[fg=#e0def4,bold] %s#[default]' "${name:-shell}"
-    [ -n "$branch" ] && printf '  #[fg=#9ccfd8]%s%s#[default]' "$branch" "$dirty"
-    printf '  #[fg=#908caa]%s#[default]' "${command:-shell}"
     printf '  #[fg=%s,bold]%s#[default] #[fg=#908caa]· %s#[default]' "$color" "$(state_label "$state")" "$(age "$since")"
     ;;
   summary)

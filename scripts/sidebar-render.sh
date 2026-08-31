@@ -53,10 +53,15 @@ display_path() {
 state_label() {
   case "$1" in
     working) printf 'WORKING' ;;
-    needs_input) printf 'WAITING FOR YOU' ;;
-    done) printf 'READY TO REVIEW' ;;
+    needs_input) printf 'WAITING' ;;
+    done) printf 'REVIEW' ;;
     failed) printf 'FAILED' ;;
   esac
+}
+
+show_path() {
+  local name="$1" path="$2"
+  [ "$path" != "$HOME" ] && [ "${path##*/}" != "$name" ]
 }
 
 useful_context() {
@@ -104,10 +109,13 @@ while tmux has-session -t "$session" 2>/dev/null; do
         row_number=$((row_number + 1))
         while IFS='|' read -r window_id name state since message path; do
           agent_row "$name" "$state" "$([ "$window_id" = "$current_window" ] && printf 1 || printf 0)" 27
-          click_map="${click_map}${row_number}=${window_id};$((row_number + 1))=${window_id};$((row_number + 2))=${window_id};"
+          click_map="${click_map}${row_number}=${window_id};$((row_number + 1))=${window_id};"
           row_number=$((row_number + 1))
-          printf '    \033[38;2;156;207;216m%.30s\033[0m\n' "$(display_path "$path")"
-          row_number=$((row_number + 1))
+          if show_path "$name" "$path"; then
+            printf '    \033[38;2;156;207;216m%.30s\033[0m\n' "$(display_path "$path")"
+            click_map="${click_map}${row_number}=${window_id};"
+            row_number=$((row_number + 1))
+          fi
           printf '    %b%s\033[0m · %s\n' "$(color "$state")" "$(state_label "$state")" "$(age "$since")"
           row_number=$((row_number + 1))
           context="$(useful_context "$message")"
@@ -122,14 +130,18 @@ while tmux has-session -t "$session" 2>/dev/null; do
         row_number=$((row_number + 1))
         while IFS='|' read -r window_id name state since message path; do
           agent_row "$name" "$state" "$([ "$window_id" = "$current_window" ] && printf 1 || printf 0)" 27
-          click_map="${click_map}${row_number}=${window_id};$((row_number + 1))=${window_id};$((row_number + 2))=${window_id};"
+          click_map="${click_map}${row_number}=${window_id};$((row_number + 1))=${window_id};"
           row_number=$((row_number + 1))
-          printf '    \033[38;2;156;207;216m%.30s\033[0m\n' "$(display_path "$path")"
-          row_number=$((row_number + 1))
+          if show_path "$name" "$path"; then
+            printf '    \033[38;2;156;207;216m%.30s\033[0m\n' "$(display_path "$path")"
+            click_map="${click_map}${row_number}=${window_id};"
+            row_number=$((row_number + 1))
+          fi
           printf '    %b%s\033[0m · %s\n' "$(color "$state")" "$(state_label "$state")" "$(age "$since")"
           row_number=$((row_number + 1))
           context="$(useful_context "$message")"
           [ -n "$context" ] && render_context "$context" "$window_id"
+          printf '\n'; row_number=$((row_number + 1))
         done <<< "$working"
       fi
       printf '\034%s' "$click_map"

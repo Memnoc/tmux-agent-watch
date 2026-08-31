@@ -43,15 +43,14 @@ required.
 
 The three-column collapsed sidebar shows one dot per agent in stable tmux order.
 The expanded view groups agents that need attention above working agents, and
-adds repository path, semantic state, age, plus a complete, word-wrapped summary
-of what the agent is doing, did, or needs. A single sidebar pane follows the
-selected window within each session.
+adds a repository path when it clarifies the window name, semantic state, age,
+plus a complete, word-wrapped summary of what the agent is doing, did, or needs.
+A single sidebar pane follows the selected window within each session.
 
-The normal horizontal window list is replaced by a three-row agent HUD:
-
-1. Current session and aggregate working/waiting/review counts.
-2. Selected agent, Git branch, process, state, and state age.
-3. The selected agent's complete task, outcome, or request.
+The normal horizontal window list is replaced by a single-row agent HUD. It
+shows aggregate working/waiting/review counts on the left and the selected
+agent's state and age on the right. Detailed summaries live in the expanded
+sidebar, keeping the terminal workspace clear.
 
 The observer checks panes every two seconds. Automatic terminal classification
 is conservative by design. Agent hooks can report an exact state with:

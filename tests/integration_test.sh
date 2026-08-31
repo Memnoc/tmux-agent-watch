@@ -31,13 +31,11 @@ case "$format" in
 esac
 
 hud_fleet="$(tmux -L "$SOCKET" show-option -gqv status-format[0])"
-hud_selected="$(tmux -L "$SOCKET" show-option -gqv status-format[1])"
-hud_summary="$(tmux -L "$SOCKET" show-option -gqv status-format[2])"
-case "$hud_fleet$hud_selected$hud_summary" in
-  *'scripts/hud.sh fleet'*'scripts/hud.sh selected'*'scripts/hud.sh summary'*) ;;
-  *) printf 'not ok: three-row HUD is not installed\n'; exit 1 ;;
+case "$hud_fleet" in
+  *'scripts/hud.sh fleet'*'scripts/hud.sh selected'*) printf 'ok: one-row HUD is installed\n' ;;
+  *) printf 'not ok: one-row HUD is not installed\n'; exit 1 ;;
 esac
-case "$hud_fleet$hud_selected$hud_summary" in
+case "$hud_fleet" in
   *'#{W:'*) printf 'not ok: horizontal window list remains in HUD\n'; exit 1 ;;
   *) printf 'ok: HUD replaces horizontal window list\n' ;;
 esac
@@ -62,11 +60,9 @@ printf 'ok: observer classified agent\n'
 
 fleet_output="$(TMUX="$socket_path,$server_pid,0" "$ROOT/scripts/hud.sh" fleet agents @0)"
 selected_output="$(TMUX="$socket_path,$server_pid,0" "$ROOT/scripts/hud.sh" selected agents @0)"
-summary_output="$(TMUX="$socket_path,$server_pid,0" "$ROOT/scripts/hud.sh" summary agents @0)"
 printf '%s' "$fleet_output" | grep -Fq '1 agents' || { printf 'not ok: HUD fleet count missing\n'; exit 1; }
 printf '%s' "$selected_output" | grep -Fq 'WORKING' || { printf 'not ok: HUD selected state missing\n'; exit 1; }
-printf '%s' "$summary_output" | grep -Fq '/home/memnoc/tmux-agent-watch' || { printf 'not ok: HUD summary fallback missing\n'; exit 1; }
-printf 'ok: HUD renders fleet, selected agent, and summary\n'
+printf 'ok: HUD renders fleet and selected agent\n'
 
 sidebar="$(tmux -L "$SOCKET" show-option -qv -t agents @agent_watch_sidebar_pane)"
 [ -n "$sidebar" ] || { printf 'not ok: sidebar was not created\n'; exit 1; }
