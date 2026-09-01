@@ -51,10 +51,15 @@ tmux bind-key "$(option @agent-watch-worktree-key W)" command-prompt -p 'Branch:
   "run-shell '$PLUGIN_DIR/scripts/worktree-new.sh --repo \"#{pane_current_path}\" \"%%\"'"
 tmux bind-key "$(option @agent-watch-finish-key X)" display-popup -EE -w 70% -h 30% \
   -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/worktree-finish.sh"
-tmux bind-key "$(option @agent-watch-lazygit-key g)" display-popup -EE -w 90% -h 90% \
-  -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/worktree-lazygit.sh"
 tmux bind-key "$(option @agent-watch-help-key H)" display-popup -E -w 72 -h 24 \
   "$PLUGIN_DIR/scripts/help.sh"
+if [ "$(option @agent-watch-v2 on)" = on ]; then
+  tmux bind-key "$(option @agent-watch-cockpit-key P)" display-popup -EE -w 90% -h 80% \
+    -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/v2.sh cockpit"
+else
+  tmux bind-key "$(option @agent-watch-cockpit-key P)" display-popup -EE -w 78 -h 26 \
+    -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/cockpit.sh"
+fi
 tmux bind-key '{' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -U"
 tmux bind-key '}' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -D"
 tmux bind-key -n MouseDown1Pane if-shell -F '#{==:#{@agent_watch_sidebar},1}' \
@@ -64,7 +69,11 @@ tmux bind-key -n WheelUpPane if-shell -F '#{==:#{@agent_watch_sidebar},1}' \
   'run-shell ":"' \
   'if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" "send-keys -M" "copy-mode -e"'
 tmux set-hook -g 'client-attached[100]' "run-shell -b '$PLUGIN_DIR/scripts/start-watcher.sh'"
-tmux set-hook -g 'after-new-window[100]' "run-shell -b '$PLUGIN_DIR/scripts/scan.sh'"
+if [ "$(option @agent-watch-v2 on)" = on ]; then
+  tmux set-hook -g 'after-new-window[100]' "run-shell -b '$PLUGIN_DIR/scripts/v2.sh scan'"
+else
+  tmux set-hook -g 'after-new-window[100]' "run-shell -b '$PLUGIN_DIR/scripts/scan.sh'"
+fi
 tmux set-hook -g 'after-select-pane[100]' \
   "if-shell -F '#{==:#{@agent_watch_sidebar},1}' 'select-pane -l'"
 tmux set-hook -g 'after-select-window[100]' "run-shell -b '$PLUGIN_DIR/scripts/sidebar-ensure.sh #{pane_id}'"

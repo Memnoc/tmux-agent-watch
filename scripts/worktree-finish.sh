@@ -2,6 +2,13 @@
 
 set -eu
 
+PLUGIN_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+v2="$(tmux show-option -gqv @agent-watch-v2 2>/dev/null || true)"
+if [ "${v2:-on}" = on ]; then
+  base="$(tmux show-option -gqv @agent-watch-base-branch 2>/dev/null || true)"
+  exec "$PLUGIN_DIR/scripts/v2.sh" workspace finish --path "$(pwd)" --base "${base:-main}"
+fi
+
 worktree="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   printf 'agent-watch: current directory is not inside a Git worktree\n' >&2
   exit 1
