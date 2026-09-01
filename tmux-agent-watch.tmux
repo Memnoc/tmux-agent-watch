@@ -53,6 +53,8 @@ tmux bind-key "$(option @agent-watch-finish-key X)" display-popup -EE -w 70% -h 
   -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/worktree-finish.sh"
 tmux bind-key "$(option @agent-watch-lazygit-key g)" display-popup -EE -w 90% -h 90% \
   -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/worktree-lazygit.sh"
+tmux bind-key "$(option @agent-watch-help-key H)" display-popup -E -w 72 -h 24 \
+  "$PLUGIN_DIR/scripts/help.sh"
 tmux bind-key '{' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -U"
 tmux bind-key '}' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -D"
 tmux bind-key -n MouseDown1Pane if-shell -F '#{==:#{@agent_watch_sidebar},1}' \

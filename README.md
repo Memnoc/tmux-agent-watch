@@ -37,6 +37,7 @@ required.
 
 ## Use
 
+- `prefix + H` opens a quick-reference help popup. Press `q` or Escape to close it.
 - `prefix + a` jumps to the oldest agent requiring attention.
 - `prefix + Space` expands or collapses the left sidebar.
 - `prefix + A` kills and recreates the sidebar if it becomes stuck.
@@ -50,6 +51,9 @@ required.
   position if a pane-layout command attempts to move it.
 
 The three-column collapsed sidebar shows one dot per agent in stable tmux order.
+`●` identifies a normal agent, while `◆` identifies an agent running in a linked
+Git worktree. In worktree details, `CLEAN` means there are no uncommitted
+changes; `DIRTY` means changes need to be reviewed, committed, or discarded.
 The expanded view groups agents that need attention above working agents, and
 adds a repository path when it clarifies the window name, semantic state, age,
 plus a complete, word-wrapped summary of what the agent is doing, did, or needs.
@@ -181,6 +185,7 @@ set -g @agent-watch-restart-key A
 set -g @agent-watch-worktree-key W
 set -g @agent-watch-finish-key X
 set -g @agent-watch-lazygit-key g
+set -g @agent-watch-help-key H
 set -g @agent-watch-agent codex
 set -g @agent-watch-base-branch main
 set -g @agent-watch-git-interval 10
