@@ -40,6 +40,9 @@ required.
 - `prefix + a` jumps to the oldest agent requiring attention.
 - `prefix + Space` expands or collapses the left sidebar.
 - `prefix + A` kills and recreates the sidebar if it becomes stuck.
+- `prefix + W` creates a branch worktree and starts an agent in a new window.
+- `prefix + X` safely finishes the selected clean, merged worktree.
+- `prefix + g` opens lazygit for the selected agent workspace in a popup.
 - `prefix + m` uses normal tmux pane zoom to temporarily hide the sidebar.
 - Click an agent row in the sidebar to select its window.
 - Existing window navigation and naming continue to work normally.
@@ -52,6 +55,44 @@ adds a repository path when it clarifies the window name, semantic state, age,
 plus a complete, word-wrapped summary of what the agent is doing, did, or needs.
 A single sidebar pane follows the selected agent window within each session.
 Fresh shell windows remain full-width until an agent starts in them.
+
+### Parallel worktrees
+
+Press `prefix + W`, enter a new branch name such as `feature/auth`, and the
+plugin creates a linked worktree next to the repository under
+`<repository>-worktrees/feature-auth`. It then opens a tmux window in that
+worktree and starts Codex. The observer also recognizes agents started inside
+worktrees created manually or through another tool. The expanded sidebar labels
+them with their branch, clean or dirty state, and worktree path.
+
+Press `prefix + g` to open lazygit in the selected agent's worktree. This is an
+optional integration: the plugin reports a clear error when `lazygit` is not
+installed.
+
+Set `@agent-watch-agent` to use another installed agent:
+
+```tmux
+set -g @agent-watch-agent claude
+```
+
+The scripts can also be used directly. Extra arguments after the branch are
+treated as the exact agent command and arguments:
+
+```sh
+scripts/worktree-new.sh feature/auth opencode
+scripts/worktree-new.sh --repo /path/to/repository feature/auth opencode
+scripts/worktree-remove.sh feature/auth
+```
+
+Removal refuses dirty worktrees, closes the matching tmux window only after Git
+successfully removes the worktree, and retains the branch for review or merge.
+Set `AGENT_WATCH_WORKTREE_ROOT` when a different worktree parent is required.
+
+After merging a worktree branch into `main`, press `prefix + X` from its agent
+window. The guarded finish popup refuses primary checkouts, dirty worktrees, and
+branches that are not merged into the configured base branch. Confirming removes
+the linked directory and closes its window while retaining the branch. Projects
+that do not use `main` can set `@agent-watch-base-branch`.
 
 The normal horizontal window list is replaced by a single-row agent HUD. It
 shows aggregate working/waiting/review counts on the left and the selected
@@ -137,6 +178,12 @@ set -g @agent-watch-interval 2
 set -g @agent-watch-next-key a
 set -g @agent-watch-sidebar-key Space
 set -g @agent-watch-restart-key A
+set -g @agent-watch-worktree-key W
+set -g @agent-watch-finish-key X
+set -g @agent-watch-lazygit-key g
+set -g @agent-watch-agent codex
+set -g @agent-watch-base-branch main
+set -g @agent-watch-git-interval 10
 set -g @agent-watch-hud on
 set -g @agent-watch-status off
 set -g @agent-watch-sidebar on
@@ -178,8 +225,9 @@ set -g @plugin 'tmux-plugins/tmux-continuum'
 
 ## Scope
 
-Version one intentionally does not orchestrate agents, retain task history,
-track tokens, or introduce its own project model. tmux remains the interface.
+The plugin does not retain task history, track tokens, or introduce its own
+project model. Its optional worktree launcher handles only branch isolation and
+process startup; tmux remains the interface.
 
 ## License
 

@@ -171,6 +171,11 @@ set_window_state() {
     tmux set-option -wq -t "$window_id" @agent_watch_window_style ''
     tmux set-option -wq -t "$window_id" @agent_watch_message ''
     tmux set-option -wq -t "$window_id" @agent_watch_source ''
+    tmux set-option -wq -t "$window_id" @agent_watch_repo ''
+    tmux set-option -wq -t "$window_id" @agent_watch_branch ''
+    tmux set-option -wq -t "$window_id" @agent_watch_worktree ''
+    tmux set-option -wq -t "$window_id" @agent_watch_git_status ''
+    tmux set-option -wq -t "$window_id" @agent_watch_git_checked ''
     return
   fi
 
@@ -196,4 +201,39 @@ set_window_state() {
   tmux set-option -wq -t "$window_id" @agent_watch_source "$source"
   message="${message//|/¦}"
   tmux set-option -wq -t "$window_id" @agent_watch_message "$message"
+}
+
+set_window_git_context() {
+  local window_id="$1" path="$2" repo branch git_dir common_dir status worktree
+  local previous_repo checked now interval
+  repo="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -z "$repo" ]; then
+    tmux set-option -wq -t "$window_id" @agent_watch_repo ''
+    tmux set-option -wq -t "$window_id" @agent_watch_branch ''
+    tmux set-option -wq -t "$window_id" @agent_watch_worktree ''
+    tmux set-option -wq -t "$window_id" @agent_watch_git_status ''
+    tmux set-option -wq -t "$window_id" @agent_watch_git_checked ''
+    return
+  fi
+
+  branch="$(git -C "$path" branch --show-current 2>/dev/null || true)"
+  git_dir="$(git -C "$path" rev-parse --absolute-git-dir 2>/dev/null || true)"
+  common_dir="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [ "$git_dir" != "$common_dir" ]; then worktree="$repo"; else worktree=''; fi
+  previous_repo="$(window_option "$window_id" @agent_watch_repo)"
+  checked="$(window_option "$window_id" @agent_watch_git_checked)"
+  status="$(window_option "$window_id" @agent_watch_git_status)"
+  now="$(date +%s)"
+  interval="$(tmux_option @agent-watch-git-interval 10)"
+  if [ "$previous_repo" != "$repo" ] || [ -z "$checked" ] ||
+    [ "$((now - checked))" -ge "$interval" ]; then
+    if [ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]; then status=dirty; else status=clean; fi
+    checked="$now"
+  fi
+
+  tmux set-option -wq -t "$window_id" @agent_watch_repo "$repo"
+  tmux set-option -wq -t "$window_id" @agent_watch_branch "${branch:-detached}"
+  tmux set-option -wq -t "$window_id" @agent_watch_worktree "$worktree"
+  tmux set-option -wq -t "$window_id" @agent_watch_git_status "$status"
+  tmux set-option -wq -t "$window_id" @agent_watch_git_checked "$checked"
 }

@@ -47,11 +47,20 @@ fi
 tmux bind-key "$(option @agent-watch-next-key a)" run-shell "$PLUGIN_DIR/scripts/next-attention.sh"
 tmux bind-key "$(option @agent-watch-sidebar-key Space)" run-shell "$PLUGIN_DIR/scripts/sidebar-resize.sh"
 tmux bind-key "$(option @agent-watch-restart-key A)" run-shell "$PLUGIN_DIR/scripts/sidebar-restart.sh"
+tmux bind-key "$(option @agent-watch-worktree-key W)" command-prompt -p 'Branch:' \
+  "run-shell '$PLUGIN_DIR/scripts/worktree-new.sh --repo \"#{pane_current_path}\" \"%%\"'"
+tmux bind-key "$(option @agent-watch-finish-key X)" display-popup -EE -w 70% -h 30% \
+  -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/worktree-finish.sh"
+tmux bind-key "$(option @agent-watch-lazygit-key g)" display-popup -EE -w 90% -h 90% \
+  -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/worktree-lazygit.sh"
 tmux bind-key '{' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -U"
 tmux bind-key '}' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -D"
 tmux bind-key -n MouseDown1Pane if-shell -F '#{==:#{@agent_watch_sidebar},1}' \
   "run-shell '$PLUGIN_DIR/scripts/sidebar-click.sh #{pane_id} #{mouse_y}'" \
   'select-pane -t ='
+tmux bind-key -n WheelUpPane if-shell -F '#{==:#{@agent_watch_sidebar},1}' \
+  'run-shell ":"' \
+  'if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" "send-keys -M" "copy-mode -e"'
 tmux set-hook -g 'client-attached[100]' "run-shell -b '$PLUGIN_DIR/scripts/start-watcher.sh'"
 tmux set-hook -g 'after-new-window[100]' "run-shell -b '$PLUGIN_DIR/scripts/scan.sh'"
 tmux set-hook -g 'after-select-pane[100]' \

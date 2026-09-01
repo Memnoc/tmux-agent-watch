@@ -25,18 +25,20 @@ age() {
 }
 
 agent_row() {
-  local name="$1" state="$2" current="$3" width="$4"
+  local name="$1" state="$2" current="$3" width="$4" worktree="$5" marker='●'
+  [ -n "$worktree" ] && marker='◆'
   if [ "$current" = 1 ]; then printf '\033[48;2;57;53;82m'; fi
-  printf ' %b●\033[0m%s %-*.*s' "$(color "$state")" \
+  printf ' %b%s\033[0m%s %-*.*s' "$(color "$state")" "$marker" \
     "$([ "$current" = 1 ] && printf '\033[48;2;57;53;82m' || true)" \
     "$width" "$width" "$name"
   printf '\033[0m\n'
 }
 
 compact_dot() {
-  local state="$1" current="$2"
+  local state="$1" current="$2" worktree="$3" marker='●'
+  [ -n "$worktree" ] && marker='◆'
   if [ "$current" = 1 ]; then printf '\033[48;2;57;53;82m'; fi
-  printf ' %b●\033[0m' "$(color "$state")"
+  printf ' %b%s\033[0m' "$(color "$state")" "$marker"
   if [ "$current" = 1 ]; then printf '\033[48;2;57;53;82m'; fi
   printf ' \033[0m\n'
 }
@@ -89,17 +91,20 @@ wake_renderer() {
 previous_frame=''
 trap wake_renderer USR1
 while tmux has-session -t "$session" 2>/dev/null; do
+  if [ "$(tmux display-message -p -t "$TMUX_PANE" '#{pane_in_mode}' 2>/dev/null || true)" = 1 ]; then
+    tmux copy-mode -q -t "$TMUX_PANE" 2>/dev/null || true
+  fi
   expanded="$(tmux show-option -qv -t "$session" @agent_watch_sidebar_expanded 2>/dev/null || true)"
   current_window="$(tmux display-message -p -t "$session:" '#{window_id}')"
-  rows="$(tmux list-windows -t "$session" -F '#{window_id}|#{window_name}|#{@agent_watch_state}|#{@agent_watch_since}|#{@agent_watch_message}|#{pane_current_path}')"
+  rows="$(tmux list-windows -t "$session" -F '#{window_id}|#{window_name}|#{@agent_watch_state}|#{@agent_watch_since}|#{@agent_watch_message}|#{pane_current_path}|#{@agent_watch_branch}|#{@agent_watch_worktree}|#{@agent_watch_git_status}')"
   click_map=''
   row_number=0
 
   if [ "$expanded" != on ]; then
     frame="$(
-      while IFS='|' read -r window_id name state since message path; do
+      while IFS='|' read -r window_id name state since message path branch worktree git_status; do
         [ -n "$state" ] || continue
-        compact_dot "$state" "$([ "$window_id" = "$current_window" ] && printf 1 || printf 0)"
+        compact_dot "$state" "$([ "$window_id" = "$current_window" ] && printf 1 || printf 0)" "$worktree"
         click_map="${click_map}${row_number}=${window_id};"
         row_number=$((row_number + 1))
       done <<< "$rows"
@@ -113,11 +118,18 @@ while tmux has-session -t "$session" 2>/dev/null; do
       if [ -n "$attention" ]; then
         printf ' \033[1mNEEDS YOU\033[0m\n'
         row_number=$((row_number + 1))
-        while IFS='|' read -r window_id name state since message path; do
-          agent_row "$name" "$state" "$([ "$window_id" = "$current_window" ] && printf 1 || printf 0)" 27
+        while IFS='|' read -r window_id name state since message path branch worktree git_status; do
+          agent_row "$name" "$state" "$([ "$window_id" = "$current_window" ] && printf 1 || printf 0)" 27 "$worktree"
           click_map="${click_map}${row_number}=${window_id};$((row_number + 1))=${window_id};"
           row_number=$((row_number + 1))
-          if show_path "$name" "$path"; then
+          if [ -n "$worktree" ]; then
+            printf '    \033[38;2;156;207;216m%.30s\033[0m\n' "◆ WT $branch · ${git_status^^}"
+            click_map="${click_map}${row_number}=${window_id};"
+            row_number=$((row_number + 1))
+            printf '    \033[38;2;144;140;170m%.30s\033[0m\n' "$(display_path "$path")"
+            click_map="${click_map}${row_number}=${window_id};"
+            row_number=$((row_number + 1))
+          elif show_path "$name" "$path"; then
             printf '    \033[38;2;156;207;216m%.30s\033[0m\n' "$(display_path "$path")"
             click_map="${click_map}${row_number}=${window_id};"
             row_number=$((row_number + 1))
@@ -134,12 +146,18 @@ while tmux has-session -t "$session" 2>/dev/null; do
       if [ -n "$working" ]; then
         printf ' \033[1mWORKING\033[0m\n'
         row_number=$((row_number + 1))
-        while IFS='|' read -r window_id name state since message path; do
-          agent_row "$name" "$state" "$([ "$window_id" = "$current_window" ] && printf 1 || printf 0)" 27
+        while IFS='|' read -r window_id name state since message path branch worktree git_status; do
+          agent_row "$name" "$state" "$([ "$window_id" = "$current_window" ] && printf 1 || printf 0)" 27 "$worktree"
           click_map="${click_map}${row_number}=${window_id};$((row_number + 1))=${window_id};"
           row_number=$((row_number + 1))
-          if show_path "$name" "$path"; then
-            printf '    \033[38;2;156;207;216m%.30s\033[0m\n' "$(display_path "$path")"
+          if [ -n "$worktree" ]; then
+            printf '    \033[38;2;156;207;216m%.30s\033[0m\n' "◆ WT $branch · ${git_status^^}"
+            click_map="${click_map}${row_number}=${window_id};"
+            row_number=$((row_number + 1))
+            printf '    \033[38;2;144;140;170m%.30s\033[0m\n' "$(display_path "$path")"
+            click_map="${click_map}${row_number}=${window_id};"
+            row_number=$((row_number + 1))
+          elif show_path "$name" "$path"; then
             click_map="${click_map}${row_number}=${window_id};"
             row_number=$((row_number + 1))
           fi

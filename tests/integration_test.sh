@@ -52,6 +52,22 @@ restart_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep ' A .*scripts/si
 [ -n "$restart_binding" ] || { printf 'not ok: sidebar restart binding missing\n'; exit 1; }
 printf 'ok: sidebar restart binding installed\n'
 
+worktree_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep ' W .*scripts/worktree-new.sh' || true)"
+[ -n "$worktree_binding" ] || { printf 'not ok: worktree launcher binding missing\n'; exit 1; }
+printf 'ok: worktree launcher binding installed\n'
+
+finish_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep ' X .*scripts/worktree-finish.sh' || true)"
+[ -n "$finish_binding" ] || { printf 'not ok: guided worktree finish binding missing\n'; exit 1; }
+printf 'ok: guided worktree finish binding installed\n'
+
+lazygit_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep ' g .*scripts/worktree-lazygit.sh' || true)"
+[ -n "$lazygit_binding" ] || { printf 'not ok: lazygit popup binding missing\n'; exit 1; }
+printf 'ok: lazygit popup binding installed\n'
+
+sidebar_wheel_binding="$(tmux -L "$SOCKET" list-keys -T root | grep 'WheelUpPane.*@agent_watch_sidebar' || true)"
+[ -n "$sidebar_wheel_binding" ] || { printf 'not ok: sidebar wheel guard missing\n'; exit 1; }
+printf 'ok: sidebar blocks wheel scrolling without changing other panes\n'
+
 swap_bindings="$(tmux -L "$SOCKET" list-keys -T prefix | grep -c 'scripts/safe-swap.sh')"
 [ "$swap_bindings" = 2 ] || { printf 'not ok: guarded pane swap bindings missing\n'; exit 1; }
 printf 'ok: pane swap bindings protect sidebar position\n'
