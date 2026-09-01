@@ -34,3 +34,21 @@ if TMUX_AGENT_WATCH_BASE_URL="file://$TMP_DIR/release" \
   exit 1
 fi
 printf 'ok: release archive installs with verified checksum\n'
+
+# Repackage after the deliberate installer-tamper check above.
+"$ROOT/scripts/package-release.sh" x86_64-unknown-linux-gnu \
+  "$ROOT/target/debug/tmux-agent-watch" "$TMP_DIR/release" >/dev/null
+for target in \
+  aarch64-unknown-linux-gnu \
+  x86_64-apple-darwin \
+  aarch64-apple-darwin
+do
+  cp "$TMP_DIR/release/tmux-agent-watch-x86_64-unknown-linux-gnu.tar.gz" \
+    "$TMP_DIR/release/tmux-agent-watch-$target.tar.gz"
+done
+"$ROOT/scripts/verify-release-bundle.sh" "$TMP_DIR/release" >/dev/null
+grep -Eq '^[0-9a-f]{64}  \./tmux-agent-watch-' "$TMP_DIR/release/SHA256SUMS" || {
+  printf 'not ok: bundle checksums do not use parseable filenames\n'
+  exit 1
+}
+printf 'ok: four-platform release bundle verifies without pipeline truncation\n'
