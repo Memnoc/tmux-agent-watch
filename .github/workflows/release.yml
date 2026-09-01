@@ -51,28 +51,16 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           pattern: tmux-agent-watch-*
           path: dist
           merge-multiple: true
       - name: Verify artifact matrix and archive contents
-        working-directory: dist
-        run: |
-          for target in \
-            x86_64-unknown-linux-gnu \
-            aarch64-unknown-linux-gnu \
-            x86_64-apple-darwin \
-            aarch64-apple-darwin
-          do
-            archive="tmux-agent-watch-${target}.tar.gz"
-            test -f "$archive"
-            tar -tzf "$archive" | grep -Fxq 'tmux-agent-watch/tmux-agent-watch'
-            tar -tzf "$archive" | grep -Fxq 'tmux-agent-watch/PRIVACY.md'
-          done
-          test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
-          sha256sum ./*.tar.gz | sed 's# \./#  #' | sort -k2 > SHA256SUMS
-          sha256sum --check SHA256SUMS
+        run: scripts/verify-release-bundle.sh dist
       - uses: actions/upload-artifact@v7
         with:
           name: release-bundle
