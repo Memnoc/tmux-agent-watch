@@ -38,12 +38,12 @@ required.
 ## Use
 
 - `prefix + H` opens a quick-reference help popup. Press `q` or Escape to close it.
+- `prefix + P` opens the Workspace Cockpit for guided start, review, jump, and finish actions.
 - `prefix + a` jumps to the oldest agent requiring attention.
 - `prefix + Space` expands or collapses the left sidebar.
 - `prefix + A` kills and recreates the sidebar if it becomes stuck.
 - `prefix + W` creates a branch worktree and starts an agent in a new window.
 - `prefix + X` safely finishes the selected clean, merged worktree.
-- `prefix + g` opens lazygit for the selected agent workspace in a popup.
 - `prefix + m` uses normal tmux pane zoom to temporarily hide the sidebar.
 - Click an agent row in the sidebar to select its window.
 - Existing window navigation and naming continue to work normally.
@@ -60,6 +60,84 @@ plus a complete, word-wrapped summary of what the agent is doing, did, or needs.
 A single sidebar pane follows the selected agent window within each session.
 Fresh shell windows remain full-width until an agent starts in them.
 
+### Workspace Cockpit
+
+Press `prefix + P` for the primary worktree workflow. The action-first cockpit
+shows live repository and fleet context, then guides four operations without
+requiring the individual shortcut sequence:
+
+- **Start a quick win** asks for a short task, generates and confirms a branch,
+  lets you choose an agent, creates the linked worktree, and jumps to it.
+- **Review ready work** shows only waiting, failed, and review-ready workspaces
+  and jumps directly to the authoritative agent pane.
+- **Jump to a workspace** lists live agents across tmux sessions.
+- **Finish merged work** lists only clean worktrees already merged into the
+  configured base branch and retains the existing confirmation safeguard.
+
+Errors and empty states remain visible inside the cockpit. The direct `W`, `g`,
+and `X` bindings remain available as faster expert paths.
+
+### Install the Rust v2 binary
+
+TPM checks out the plugin but does not compile Rust. After installing or
+updating the plugin, run its checksum-verifying installer once:
+
+```sh
+~/.tmux/plugins/tmux-agent-watch/install.sh
+```
+
+The installer selects the published Linux/macOS x86_64 or ARM64 archive,
+verifies it against the release's `SHA256SUMS`, and installs
+`tmux-agent-watch` into `~/.local/bin`. Override the destination with
+`TMUX_AGENT_WATCH_INSTALL_DIR`, or pin a tag such as `v2.0.0-alpha.1` with
+`TMUX_AGENT_WATCH_VERSION`.
+
+To build from source instead:
+
+```sh
+cargo install --locked --path .
+```
+
+```tmux
+set -g @agent-watch-theme moon # rose-pine, moon, or dawn
+```
+
+Reload the plugin and press `prefix + P`. Rust v2 is the default. Set
+`@agent-watch-v2 off` only when you need the legacy Bash fallback. V2 process
+scanning and lifecycle hooks use the content-blind path: hook payloads are
+ignored, terminal scrollback is never read, and any legacy content-bearing
+tmux message is erased. The
+cockpit, sidebar, and HUD all project the same Rust workspace model. The direct
+`W` and `X` worktree bindings and the cockpit's guided `n`/`f` flows use the
+same guarded Rust start and finish operations.
+
+Maintainers publish a release by pushing a tag that exactly matches the Cargo
+package version, such as `v2.0.0-alpha.1`. GitHub Actions builds native archives
+for Linux and macOS on x86_64 and ARM64, verifies their checksums, and attaches
+the four archives plus `SHA256SUMS` to the release.
+
+Before tagging, run the same workflow manually. Manual runs build and verify
+the complete matrix and retain a combined `release-bundle` for 14 days, but the
+publish job is tag-guarded and cannot run. Complete the
+[internal preflight checklist](docs/preflight-checklist.md) against that bundle
+before approving publication.
+
+The v2 cockpit reads and validates its configuration as typed values. Existing
+`@agent-watch-agent` and `@agent-watch-base-branch` options set the initial agent
+and finish target. `@agent-watch-branch-prefix` defaults to `work/`. In the start
+form, press Tab or Right to cycle between Codex, Claude Code, and OpenCode before
+creating the workspace.
+
+```tmux
+set -g @agent-watch-agent claude
+set -g @agent-watch-base-branch trunk
+set -g @agent-watch-branch-prefix quick-win/
+set -g @agent-watch-redact-labels on # hide workspace labels while screen sharing
+```
+
+See [Privacy and local data flow](docs/privacy.md) for the exact v2 data
+boundary and the responsibilities of separately installed agents.
+
 ### Parallel worktrees
 
 Press `prefix + W`, enter a new branch name such as `feature/auth`, and the
@@ -68,10 +146,6 @@ plugin creates a linked worktree next to the repository under
 worktree and starts Codex. The observer also recognizes agents started inside
 worktrees created manually or through another tool. The expanded sidebar labels
 them with their branch, clean or dirty state, and worktree path.
-
-Press `prefix + g` to open lazygit in the selected agent's worktree. This is an
-optional integration: the plugin reports a clear error when `lazygit` is not
-installed.
 
 Set `@agent-watch-agent` to use another installed agent:
 
@@ -183,11 +257,15 @@ set -g @agent-watch-next-key a
 set -g @agent-watch-sidebar-key Space
 set -g @agent-watch-restart-key A
 set -g @agent-watch-worktree-key W
+set -g @agent-watch-cockpit-key P
+set -g @agent-watch-v2 on
+set -g @agent-watch-theme moon
 set -g @agent-watch-finish-key X
-set -g @agent-watch-lazygit-key g
 set -g @agent-watch-help-key H
 set -g @agent-watch-agent codex
 set -g @agent-watch-base-branch main
+set -g @agent-watch-branch-prefix work/
+set -g @agent-watch-redact-labels off
 set -g @agent-watch-git-interval 10
 set -g @agent-watch-hud on
 set -g @agent-watch-status off

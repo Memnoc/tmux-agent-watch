@@ -14,6 +14,7 @@ trap cleanup EXIT
 
 ln -s "$(command -v sleep)" "$TMP_DIR/codex"
 tmux -L "$SOCKET" -f /dev/null new-session -d -s agents "$TMP_DIR/codex 30"
+tmux -L "$SOCKET" set-option -g @agent-watch-v2 off
 socket_path="$(tmux -L "$SOCKET" display-message -p '#{socket_path}')"
 server_pid="$(tmux -L "$SOCKET" display-message -p '#{pid}')"
 tmux -L "$SOCKET" set-environment -g TMUX "$socket_path,$server_pid,0"
@@ -60,9 +61,10 @@ finish_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep ' X .*scripts/wor
 [ -n "$finish_binding" ] || { printf 'not ok: guided worktree finish binding missing\n'; exit 1; }
 printf 'ok: guided worktree finish binding installed\n'
 
-lazygit_binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep ' g .*scripts/worktree-lazygit.sh' || true)"
-[ -n "$lazygit_binding" ] || { printf 'not ok: lazygit popup binding missing\n'; exit 1; }
-printf 'ok: lazygit popup binding installed\n'
+if tmux -L "$SOCKET" list-keys -T prefix | grep -q 'scripts/worktree-lazygit.sh'; then
+  printf 'not ok: removed lazygit binding is still installed\n'; exit 1
+fi
+printf 'ok: no external Git UI binding is installed\n'
 
 sidebar_wheel_binding="$(tmux -L "$SOCKET" list-keys -T root | grep 'WheelUpPane.*@agent_watch_sidebar' || true)"
 [ -n "$sidebar_wheel_binding" ] || { printf 'not ok: sidebar wheel guard missing\n'; exit 1; }

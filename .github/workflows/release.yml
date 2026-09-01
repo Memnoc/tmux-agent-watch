@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Verify tag matches Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          test "${GITHUB_REF_NAME#v}" = "$version"
+      - name: Build locked release binary
+        run: cargo build --locked --release --target '${{ matrix.target }}'
+      - name: Package release archive
+        run: scripts/package-release.sh '${{ matrix.target }}' 'target/${{ matrix.target }}/release/tmux-agent-watch' dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tmux-agent-watch-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  verify:
+    name: Verify release bundle
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: tmux-agent-watch-*
+          path: dist
+          merge-multiple: true
+      - name: Verify artifact matrix and archive contents
+        working-directory: dist
+        run: |
+          for target in \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin
+          do
+            archive="tmux-agent-watch-${target}.tar.gz"
+            test -f "$archive"
+            tar -tzf "$archive" | grep -Fxq 'tmux-agent-watch/tmux-agent-watch'
+            tar -tzf "$archive" | grep -Fxq 'tmux-agent-watch/PRIVACY.md'
+          done
+          test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
+          sha256sum ./*.tar.gz | sed 's# \./#  #' | sort -k2 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-bundle
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-bundle
+          path: dist
+      - name: Re-verify release checksums
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
+      - name: Publish immutable tag assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "$GITHUB_REF_NAME"

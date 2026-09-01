@@ -54,8 +54,13 @@ if [ -n "$sidebar" ]; then
   exit 0
 fi
 
+if [ "$(tmux_option @agent-watch-v2 on)" = on ]; then
+  renderer="$PLUGIN_DIR/scripts/sidebar-v2.sh '$session'"
+else
+  renderer="$PLUGIN_DIR/scripts/sidebar-render.sh '$session'"
+fi
 sidebar="$(tmux split-window -d -b -h -l "$width" -t "$target_pane" -P -F '#{pane_id}' \
-  "$PLUGIN_DIR/scripts/sidebar-render.sh '$session'")" || exit 0
+  "$renderer")" || exit 0
 tmux set-option -pq -t "$sidebar" @agent_watch_sidebar 1
 tmux set-option -q -t "$session" @agent_watch_sidebar_pane "$sidebar"
 tmux select-pane -t "$target_pane"

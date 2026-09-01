@@ -24,6 +24,7 @@ git -C "$REPO" branch -M main
 
 ln -s "$(command -v sleep)" "$TMP_DIR/codex"
 tmux -L "$SOCKET" -f /dev/null new-session -d -s agents -c "$REPO"
+tmux -L "$SOCKET" set-option -g @agent-watch-v2 off
 socket_path="$(tmux -L "$SOCKET" display-message -p '#{socket_path}')"
 server_pid="$(tmux -L "$SOCKET" display-message -p '#{pid}')"
 
@@ -94,18 +95,6 @@ printf '%s\n' "$sidebar_frame" | grep -Fq '◆ WT feature/auth · DIRTY' || {
 TMUX="$socket_path,$server_pid,0" TMUX_PANE="$created_pane" "$ROOT/scripts/sidebar-resize.sh"
 git -C "$created" restore README.md
 printf 'ok: observer discovers external worktree metadata and dirty state\n'
-
-tmux -L "$SOCKET" select-window -t agents:0
-lazygit_path="$(
-  cd "$created"
-  TMUX="$socket_path,$server_pid,0" AGENT_WATCH_LAZYGIT="$(command -v pwd)" \
-    "$ROOT/scripts/worktree-lazygit.sh"
-)"
-[ "$lazygit_path" = "$created" ] || {
-  printf 'not ok: lazygit action opened in %s instead of %s\n' "$lazygit_path" "$created"
-  exit 1
-}
-printf 'ok: lazygit action opens in the selected worktree\n'
 
 if {
   cd "$REPO"

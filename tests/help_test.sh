@@ -47,8 +47,8 @@ for expected in \
   'a      jump' \
   'Space  expand' \
   'A      restart' \
+  'P      open the workspace cockpit' \
   'W      create' \
-  'g      open lazygit' \
   'X      finish' \
   'm      zoom' \
   'w      open the tmux window chooser' \

@@ -2,6 +2,12 @@
 
 set -eu
 
+PLUGIN_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+v2="$(tmux show-option -gqv @agent-watch-v2 2>/dev/null || true)"
+if [ "${v2:-on}" = on ]; then
+  exec "$PLUGIN_DIR/scripts/v2.sh" workspace start "$@"
+fi
+
 usage() {
   printf 'usage: %s [--repo PATH] BRANCH [AGENT [ARG ...]]\n' "$0" >&2
   exit 2

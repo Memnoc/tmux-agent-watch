@@ -2,6 +2,13 @@
 
 set -u
 
+PLUGIN_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+v2="$(tmux show-option -gqv @agent-watch-v2 2>/dev/null || true)"
+if [ "${v2:-on}" = on ]; then
+  theme="$(tmux show-option -gqv @agent-watch-theme 2>/dev/null || true)"
+  exec "$PLUGIN_DIR/scripts/v2.sh" hud "$1" "${2:-}" "${3:-}" "${theme:-moon}"
+fi
+
 mode="$1"
 session="${2:-}"
 window_id="${3:-}"
