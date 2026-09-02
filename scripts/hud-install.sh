@@ -4,6 +4,15 @@ set -eu
 
 PLUGIN_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 
-tmux set-option -g status on
+bar="#($PLUGIN_DIR/scripts/status-bar.sh '#{session_name}' '#{window_id}' '#{client_width}')"
+separator="#($PLUGIN_DIR/scripts/status-separator.sh '#{client_width}')"
+
+tmux set-option -g status 2
 tmux set-option -g status-style 'bg=default,fg=default'
-tmux set-option -g status-format[0] "#[align=left]#($PLUGIN_DIR/scripts/hud.sh fleet '#{session_name}' '#{window_id}')#[align=right]#($PLUGIN_DIR/scripts/hud.sh selected '#{session_name}' '#{window_id}') "
+if [ "$(tmux show-option -gqv status-position)" = bottom ]; then
+  tmux set-option -g status-format[0] "$separator"
+  tmux set-option -g status-format[1] "$bar"
+else
+  tmux set-option -g status-format[0] "$bar"
+  tmux set-option -g status-format[1] "$separator"
+fi

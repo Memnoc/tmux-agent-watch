@@ -1,4 +1,10 @@
-use std::{io, process::Command, time::Duration};
+use std::{
+    collections::HashMap,
+    io,
+    path::PathBuf,
+    process::Command,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -41,13 +47,24 @@ pub struct App {
     task: Option<String>,
     start_agent: usize,
     finishing: bool,
+    git_diffs: HashMap<PathBuf, GitDiff>,
+    nerd_icons: bool,
     config: Config,
     theme: Theme,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct GitDiff {
+    added: u64,
+    deleted: u64,
+    files: usize,
+    untracked: usize,
 }
 
 impl App {
     pub fn new(workspaces: Vec<Workspace>, variant: Variant, config: Config) -> Self {
         let visible = (0..workspaces.len()).collect();
+        let git_diffs = collect_git_diffs(&workspaces);
         Self {
             workspaces,
             visible,
@@ -61,6 +78,8 @@ impl App {
                 .position(|agent| *agent == config.default_agent)
                 .unwrap_or(0),
             finishing: false,
+            git_diffs,
+            nerd_icons: false,
             config,
             theme: Theme::rose_pine(variant),
         }
@@ -138,6 +157,12 @@ impl App {
 pub fn run(variant: Variant) -> Result<(), CockpitError> {
     let config = Config::load_tmux().map_err(|error| io::Error::other(error.to_string()))?;
     let mut app = App::new(discovery::discover()?, variant, config);
+    app.nerd_icons = Command::new("tmux")
+        .args(["show-option", "-gqv", "@agent-watch-icon-mode"])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "nerd"
+        });
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -249,14 +274,15 @@ fn event_loop(
                 app.begin_start();
             }
             KeyCode::Char('f')
-                if app
-                    .selected_workspace()
-                    .is_some_and(|item| item.checkout.is_linked_worktree) =>
+                if app.selected_workspace().is_some_and(|item| {
+                    item.checkout.is_linked_worktree && item.checkout.git_state == GitState::Clean
+                }) =>
             {
                 app.finishing = true
             }
             KeyCode::Char('r') => {
                 app.workspaces = discovery::discover()?;
+                app.git_diffs = collect_git_diffs(&app.workspaces);
                 app.refresh_filter();
             }
             KeyCode::Enter => {
@@ -291,7 +317,12 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         ])
         .split(area);
     render_header(frame, app, layout[0]);
-    render_list(frame, app, layout[1]);
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(43), Constraint::Percentage(57)])
+        .split(layout[1]);
+    render_list(frame, app, body[0]);
+    render_detail(frame, app, body[1]);
     render_footer(frame, app, layout[2]);
     if let Some(task) = &app.task {
         let branch = slug(task);
@@ -452,36 +483,213 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(branch.to_owned(), Style::default().fg(app.theme.text)),
-            Span::styled(
-                format!(
-                    "  {} · {}:{} · {}",
-                    workspace.agent.label(),
-                    if app.config.redact_labels {
-                        "tmux"
-                    } else {
-                        &workspace.identity.session
-                    },
-                    if app.config.redact_labels {
-                        "workspace"
-                    } else {
-                        &workspace.identity.window_name
-                    },
-                    git
-                ),
-                Style::default().fg(app.theme.muted),
-            ),
+            Span::styled(format!("  {git}"), Style::default().fg(app.theme.muted)),
         ]))
     });
     let list = List::new(items)
-        .highlight_style(
-            Style::default()
-                .bg(app.theme.pine)
-                .fg(app.theme.base)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("›");
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol("▶ ");
     let mut state = ListState::default().with_selected(Some(app.selected));
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let Some(workspace) = app.selected_workspace() else {
+        frame.render_widget(
+            Paragraph::new("Select a workspace to inspect it.")
+                .style(Style::default().fg(app.theme.muted))
+                .block(Block::default().title(" SELECTED ").borders(Borders::LEFT)),
+            area,
+        );
+        return;
+    };
+    let color = match workspace.lifecycle {
+        Lifecycle::Waiting => app.theme.gold,
+        Lifecycle::Review => app.theme.pine,
+        Lifecycle::Failed => app.theme.love,
+        Lifecycle::Working | Lifecycle::Starting => app.theme.rose,
+        Lifecycle::Unknown => app.theme.muted,
+    };
+    let private = app.config.redact_labels;
+    let session = if private {
+        "tmux"
+    } else {
+        &workspace.identity.session
+    };
+    let window = if private {
+        "workspace"
+    } else {
+        &workspace.identity.window_name
+    };
+    let branch = if private {
+        "Workspace"
+    } else {
+        workspace.checkout.branch.as_deref().unwrap_or("detached")
+    };
+    let checkout = if workspace.checkout.is_linked_worktree {
+        "linked worktree"
+    } else {
+        "primary checkout"
+    };
+    let git = match workspace.checkout.git_state {
+        GitState::Clean => "clean",
+        GitState::Dirty => "dirty",
+        GitState::Unknown => "no Git metadata",
+    };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!(
+                    " {} {} ",
+                    if app.nerd_icons { "󰚩" } else { "A" },
+                    workspace.agent.label()
+                ),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(workspace.lifecycle.label(), Style::default().fg(color)),
+            Span::styled(
+                format!(" · {}", age(workspace.state_since)),
+                Style::default().fg(app.theme.muted),
+            ),
+        ]),
+        Line::from(""),
+        detail_line("TMUX", format!("{session} · {window}"), app.theme.muted),
+        detail_line("BRANCH", branch.to_owned(), app.theme.muted),
+        detail_line("CHECKOUT", format!("{checkout} · {git}"), app.theme.muted),
+    ];
+    if let Some(diff) = app.git_diffs.get(&workspace.checkout.working_directory) {
+        if diff.files == 0 {
+            lines.push(Line::from(vec![
+                Span::styled(" CHANGES   ", Style::default().fg(app.theme.muted)),
+                Span::styled("✓ clean", Style::default().fg(app.theme.pine)),
+            ]));
+        } else {
+            let mut changes = vec![
+                Span::styled(" CHANGES   ", Style::default().fg(app.theme.muted)),
+                Span::styled(
+                    format!("+{}", diff.added),
+                    Style::default().fg(app.theme.pine),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    format!("−{}", diff.deleted),
+                    Style::default().fg(app.theme.love),
+                ),
+                Span::styled(
+                    format!(" · {} files", diff.files),
+                    Style::default().fg(app.theme.muted),
+                ),
+            ];
+            if diff.untracked > 0 {
+                changes.push(Span::styled(
+                    format!(" · ?{}", diff.untracked),
+                    Style::default().fg(app.theme.gold),
+                ));
+            }
+            lines.push(Line::from(changes));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::styled(
+        " NEXT",
+        Style::default()
+            .fg(app.theme.rose)
+            .add_modifier(Modifier::BOLD),
+    ));
+    let next = match workspace.lifecycle {
+        Lifecycle::Waiting => " Enter  open · input required",
+        Lifecycle::Review => " Enter  open · review changes",
+        Lifecycle::Failed => " Enter  open · inspect failure",
+        Lifecycle::Working | Lifecycle::Starting => " Enter  open · agent active",
+        Lifecycle::Unknown => " Enter  open workspace",
+    };
+    lines.push(Line::styled(next, Style::default().fg(app.theme.text)));
+    let finish = if !workspace.checkout.is_linked_worktree {
+        " f      unavailable · primary checkout"
+    } else if workspace.checkout.git_state != GitState::Clean {
+        " f      unavailable · worktree dirty"
+    } else {
+        " f      finish · verifies merged branch"
+    };
+    lines.push(Line::styled(finish, Style::default().fg(app.theme.muted)));
+    frame.render_widget(
+        Paragraph::new(lines).block(Block::default().title(" SELECTED ").borders(Borders::LEFT)),
+        area,
+    );
+}
+
+fn detail_line(label: &'static str, value: String, muted: ratatui::style::Color) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!(" {label:<9}"), Style::default().fg(muted)),
+        Span::raw(value),
+    ])
+}
+
+fn collect_git_diffs(workspaces: &[Workspace]) -> HashMap<PathBuf, GitDiff> {
+    workspaces
+        .iter()
+        .filter_map(|workspace| {
+            git_diff(&workspace.checkout.working_directory)
+                .map(|diff| (workspace.checkout.working_directory.clone(), diff))
+        })
+        .collect()
+}
+
+fn git_diff(path: &std::path::Path) -> Option<GitDiff> {
+    let diff = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["diff", "--numstat", "HEAD", "--"])
+        .output()
+        .ok()?;
+    if !diff.status.success() {
+        return None;
+    }
+    let mut result = GitDiff::default();
+    for line in String::from_utf8_lossy(&diff.stdout).lines() {
+        let mut fields = line.split_whitespace();
+        result.added += fields
+            .next()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        result.deleted += fields
+            .next()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+    }
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()?;
+    if !status.status.success() {
+        return None;
+    }
+    let status = String::from_utf8_lossy(&status.stdout);
+    result.files = status.lines().count();
+    result.untracked = status.lines().filter(|line| line.starts_with("??")).count();
+    Some(result)
+}
+
+fn age(since: Option<u64>) -> String {
+    let Some(since) = since else {
+        return "now".into();
+    };
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .saturating_sub(since);
+    if elapsed < 60 {
+        format!("{elapsed}s")
+    } else if elapsed < 3600 {
+        format!("{}m", elapsed / 60)
+    } else if elapsed < 86400 {
+        format!("{}h", elapsed / 3600)
+    } else {
+        format!("{}d", elapsed / 86400)
+    }
 }
 
 fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {

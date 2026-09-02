@@ -194,7 +194,11 @@ set_window_state() {
 
   symbol="$(symbol_for_state "$state")"
   color="$(color_for_state "$state")"
-  marker="#[fg=${color}]${symbol}#[default] "
+  if [ "$state" = working ]; then
+    marker=''
+  else
+    marker="#[fg=${color}]${symbol}#[default] "
+  fi
   tmux set-option -wq -t "$window_id" @agent_watch_state "$state"
   tmux set-option -wq -t "$window_id" @agent_watch_marker "$marker"
   tmux set-option -wq -t "$window_id" @agent_watch_window_style "#[fg=${color}]"

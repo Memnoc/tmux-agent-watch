@@ -5,7 +5,7 @@ use tmux_agent_watch::{
     config::Config,
     discovery,
     domain::AgentKind,
-    lifecycle,
+    lifecycle, navigator,
     theme::{Theme, Variant},
     workspace::{self, Start},
 };
@@ -44,6 +44,11 @@ enum Command {
     },
     /// Open the interactive fleet cockpit.
     Cockpit {
+        #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
+        theme: ThemeArg,
+    },
+    /// Open the grouped tmux window navigator.
+    Navigator {
         #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
         theme: ThemeArg,
     },
@@ -186,6 +191,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             print!("{}\x1c{}", frame.text, frame.click_map);
         }
         Command::Cockpit { theme } => cockpit::run(theme.into())?,
+        Command::Navigator { theme } => navigator::run(theme.into())?,
         Command::Workspace { command } => match command {
             WorkspaceCommand::Start {
                 repo,

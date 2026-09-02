@@ -15,31 +15,24 @@ trap cleanup EXIT
 ln -s "$(command -v sleep)" "$TMP_DIR/codex"
 tmux -L "$SOCKET" -f /dev/null new-session -d -s agents "$TMP_DIR/codex 30"
 tmux -L "$SOCKET" set-option -g @agent-watch-v2 off
+tmux -L "$SOCKET" set-option -g @agent-watch-sidebar on
 socket_path="$(tmux -L "$SOCKET" display-message -p '#{socket_path}')"
 server_pid="$(tmux -L "$SOCKET" display-message -p '#{pid}')"
 tmux -L "$SOCKET" set-environment -g TMUX "$socket_path,$server_pid,0"
 tmux -L "$SOCKET" run-shell "$ROOT/tmux-agent-watch.tmux"
 sleep 1
 
-format="$(tmux -L "$SOCKET" show-option -gqv window-status-format)"
-case "$format" in
-  *'#{@agent_watch_marker}'*) printf 'not ok: horizontal marker enabled by default\n'; exit 1 ;;
-  *) printf 'ok: horizontal marker disabled by default\n' ;;
-esac
-case "$format" in
-  *'#{@agent_watch_window_style}'*) printf 'ok: horizontal names share state color\n' ;;
-  *) printf 'not ok: horizontal names are not state-colored\n'; exit 1 ;;
-esac
+hud_fleet="$(tmux -L "$SOCKET" show-option -gqv 'status-format[0]')$(tmux -L "$SOCKET" show-option -gqv 'status-format[1]')"
+case "$hud_fleet" in *'scripts/status-bar.sh'*) ;; *) printf 'not ok: clustered status bar is missing\n'; exit 1 ;; esac
+case "$hud_fleet" in *'scripts/status-separator.sh'*) ;; *) printf 'not ok: terminal separator is missing\n'; exit 1 ;; esac
+printf 'ok: clustered bar and terminal separator are installed\n'
 
-hud_fleet="$(tmux -L "$SOCKET" show-option -gqv status-format[0])"
-case "$hud_fleet" in
-  *'scripts/hud.sh fleet'*'scripts/hud.sh selected'*) printf 'ok: one-row HUD is installed\n' ;;
-  *) printf 'not ok: one-row HUD is not installed\n'; exit 1 ;;
-esac
-case "$hud_fleet" in
-  *'#{W:'*) printf 'not ok: horizontal window list remains in HUD\n'; exit 1 ;;
-  *) printf 'ok: HUD replaces horizontal window list\n' ;;
-esac
+navigator_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "w" && /scripts\/v2.sh navigator/')"
+native_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "C-w" && /choose-tree -Zw/')"
+[ -n "$navigator_binding" ] && [ -n "$native_binding" ] || {
+  printf 'not ok: grouped and native navigator bindings are not both available\n'; exit 1;
+}
+printf 'ok: grouped navigation preserves the native chooser fallback\n'
 
 binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep 'scripts/next-attention.sh' || true)"
 [ -n "$binding" ] || { printf 'not ok: attention binding missing\n'; exit 1; }

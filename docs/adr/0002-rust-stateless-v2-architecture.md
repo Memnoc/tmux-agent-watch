@@ -19,7 +19,11 @@ Rebuild v2 around one small Rust binary. A thin tmux entrypoint installs options
 
 The binary is short-lived and local-only. It runs no daemon, database, telemetry, analytics, crash uploader, update ping, remote API, history, or content cache. It never reads terminal scrollback or stores prompts, responses, permission details, or derived summaries. A task entered during workspace creation may be routed directly to the chosen third-party agent and is then discarded. Tmux may hold only live non-content operational metadata for the current session.
 
-The cockpit becomes the primary interaction surface: a fleet overview ordered by attention, with selection-based actions, filtering, scrolling, inline errors, and Rose Pine themes and variants. The sidebar and HUD are ambient projections of the same workspace model. Direct shortcuts remain expert paths.
+The cockpit becomes the primary action surface: a fleet overview ordered by
+attention, with selection-based actions, filtering, scrolling, inline errors,
+and Rose Pine themes and variants. The status bar is the default ambient
+projection; the sidebar is opt-in compatibility. Direct shortcuts remain expert
+paths. ADR-0004 records the grouped navigator added after the v2 boundary.
 
 The executable exposes explicit subcommands for installation, scanning, the cockpit, sidebar/status rendering, and workspace start/review/jump/finish operations. Codex, Claude Code, OpenCode, and unknown agents map through adapters into a canonical lifecycle state machine. Git cleanliness and merge eligibility remain orthogonal workspace properties.
 

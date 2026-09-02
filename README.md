@@ -5,7 +5,9 @@
 `tmux-agent-watch` shows which agent windows need you, without replacing the
 tmux workflow you already use.
 
-Each recognized agent gets a color-coded state in a session sidebar:
+![Clustered tmux status bar with Git context and agent lifecycle states](docs/images/status-bar-wide.png)
+
+Each recognized agent gets a color-coded state in tmux's native window tabs:
 
 | Marker | Color | State |
 | --- | --- | --- |
@@ -39,16 +41,43 @@ required.
 
 - `prefix + H` opens a quick-reference help popup. Press `q` or Escape to close it.
 - `prefix + P` opens the Workspace Cockpit for guided start, review, jump, and finish actions.
+- `prefix + w` opens the grouped workspace and agent navigator.
+- `prefix + C-w` opens tmux's untouched native window tree.
 - `prefix + a` jumps to the oldest agent requiring attention.
-- `prefix + Space` expands or collapses the left sidebar.
-- `prefix + A` kills and recreates the sidebar if it becomes stuck.
+- `prefix + Space` expands or collapses the optional legacy sidebar.
+- `prefix + A` kills and recreates the optional sidebar if it becomes stuck.
 - `prefix + W` creates a branch worktree and starts an agent in a new window.
 - `prefix + X` safely finishes the selected clean, merged worktree.
-- `prefix + m` uses normal tmux pane zoom to temporarily hide the sidebar.
-- Click an agent row in the sidebar to select its window.
+- `prefix + m` uses normal tmux pane zoom.
 - Existing window navigation and naming continue to work normally.
-- The generated sidebar rejects keyboard focus and keeps its reserved left
-  position if a pane-layout command attempts to move it.
+
+![Workspace navigator grouping ordinary windows and active agents](docs/images/workspace-navigator.png)
+
+*The grouped navigator keeps every tmux window reachable while bringing agents
+that need attention into a dedicated section.*
+
+The two-line status area clusters ordinary workspaces on the left and managed
+agents on the right. The centre reports content-blind Git context: branch,
+tracked lines added/deleted, changed files, and untracked files. Lifecycle
+colour identifies working, waiting, review, and failed agents; a pointer marks
+the selected agent. Overflow is explicit and `prefix + w` opens the complete
+grouped inventory across tmux sessions.
+
+![Compact status bar in a narrow split terminal](docs/images/status-bar-narrow.png)
+
+*At narrower widths, labels collapse before lifecycle, Git, and navigation
+signals are removed.*
+
+The default icon mode requires no patched font. Nerd Font users can enable the
+opt-in icon vocabulary:
+
+```tmux
+set -g @agent-watch-icon-mode nerd
+```
+
+The former sidebar is retained as an opt-in compatibility surface. Enable it
+with `set -g @agent-watch-sidebar on`. Its generated pane rejects keyboard
+focus and keeps its reserved left position if a layout command moves it.
 
 The three-column collapsed sidebar shows one dot per agent in stable tmux order.
 `●` identifies a normal agent, while `◆` identifies an agent running in a linked
@@ -61,6 +90,8 @@ A single sidebar pane follows the selected agent window within each session.
 Fresh shell windows remain full-width until an agent starts in them.
 
 ### Workspace Cockpit
+
+![Workspace Cockpit with fleet list and selected workspace details](docs/images/workspace-cockpit.png)
 
 Press `prefix + P` for the primary worktree workflow. The action-first cockpit
 shows live repository and fleet context, then guides four operations without
@@ -172,10 +203,9 @@ branches that are not merged into the configured base branch. Confirming removes
 the linked directory and closes its window while retaining the branch. Projects
 that do not use `main` can set `@agent-watch-base-branch`.
 
-The normal horizontal window list is replaced by a single-row agent HUD. It
-shows aggregate working/waiting/review counts on the left and the selected
-agent's state and age on the right. Detailed summaries live in the expanded
-sidebar, keeping the terminal workspace clear.
+The clustered status bar answers where you are, what changed in Git, and which
+agents need you. Detailed lifecycle actions live in the cockpit, while
+`prefix + w` navigates every tmux window.
 
 The observer checks panes every two seconds. Automatic terminal classification
 is conservative by design. Exact lifecycle hooks take precedence over the
@@ -258,8 +288,11 @@ set -g @agent-watch-sidebar-key Space
 set -g @agent-watch-restart-key A
 set -g @agent-watch-worktree-key W
 set -g @agent-watch-cockpit-key P
+set -g @agent-watch-navigator-key w
+set -g @agent-watch-native-navigator-key C-w
 set -g @agent-watch-v2 on
 set -g @agent-watch-theme moon
+set -g @agent-watch-icon-mode safe
 set -g @agent-watch-finish-key X
 set -g @agent-watch-help-key H
 set -g @agent-watch-agent codex
@@ -269,7 +302,7 @@ set -g @agent-watch-redact-labels off
 set -g @agent-watch-git-interval 10
 set -g @agent-watch-hud on
 set -g @agent-watch-status off
-set -g @agent-watch-sidebar on
+set -g @agent-watch-sidebar off
 set -g @agent-watch-sidebar-width 3
 set -g @agent-watch-sidebar-expanded-width 38
 set -g @agent-watch-working-color '#9ccfd8'
@@ -281,15 +314,6 @@ set -g @agent-watch-failed-color '#ed8796'
 The symbols are configurable with `@agent-watch-working-symbol`,
 `@agent-watch-needs-input-symbol`, `@agent-watch-done-symbol`, and
 `@agent-watch-failed-symbol`.
-
-The sidebar and HUD are the default surfaces. The earlier tmux window list can
-be retained instead of the HUD, with optional state-colored names:
-
-```tmux
-set -g @agent-watch-hud off
-set -g @agent-watch-status on
-set -g @agent-watch-color-window-names on
-```
 
 ## Session persistence
 

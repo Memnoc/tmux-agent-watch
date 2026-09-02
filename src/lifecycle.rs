@@ -102,21 +102,32 @@ fn set_state(window_id: &str, lifecycle: Lifecycle, source: &str) -> Result<(), 
             set_option(window_id, "@agent_watch_attention_since", "")?;
         }
     }
-    let (symbol, color) = match lifecycle {
-        Lifecycle::Working | Lifecycle::Starting => ("●", "#9ccfd8"),
-        Lifecycle::Waiting => ("●", "#f6c177"),
-        Lifecycle::Review => ("●", "#a6da95"),
-        Lifecycle::Failed => ("●", "#ed8796"),
-        Lifecycle::Unknown => ("", "default"),
+    let (symbol, color_option, fallback) = match lifecycle {
+        Lifecycle::Working | Lifecycle::Starting => ("", "@agent-watch-working-color", "#9ccfd8"),
+        Lifecycle::Waiting => ("●", "@agent-watch-needs-input-color", "#f6c177"),
+        Lifecycle::Review => ("●", "@agent-watch-done-color", "#31748f"),
+        Lifecycle::Failed => ("●", "@agent-watch-failed-color", "#eb6f92"),
+        Lifecycle::Unknown => ("", "", "default"),
+    };
+    let configured_color = if color_option.is_empty() {
+        String::new()
+    } else {
+        tmux_output(&["show-option", "-gqv", color_option])?
+    };
+    let color = if configured_color.is_empty() {
+        fallback
+    } else {
+        &configured_color
     };
     set_option(window_id, "@agent_watch_state", state)?;
     set_option(window_id, "@agent_watch_source", source)?;
     set_option(window_id, "@agent_watch_message", "")?;
-    set_option(
-        window_id,
-        "@agent_watch_marker",
-        &format!("#[fg={color}]{symbol}#[default] "),
-    )?;
+    let marker = if symbol.is_empty() {
+        String::new()
+    } else {
+        format!("#[fg={color}]{symbol}#[default] ")
+    };
+    set_option(window_id, "@agent_watch_marker", &marker)?;
     set_option(
         window_id,
         "@agent_watch_window_style",

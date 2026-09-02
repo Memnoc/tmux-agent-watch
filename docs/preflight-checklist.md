@@ -27,7 +27,12 @@ cannot publish a GitHub Release.
 
 - Start a clean tmux server with no `@agent-watch-v2` option and reload the
   plugin. Confirm the Rust cockpit opens with `prefix + P`.
-- Confirm HUD and sidebar appear without creating project-controlled state.
+- Confirm the clustered status bar separates workspaces and agents, renders Git
+  context, and shows overflow without creating project-controlled state.
+  Confirm no sidebar pane is created by default.
+- Open the grouped navigator with `prefix + w`; exercise both sections,
+  filtering, jumping across sessions, and the native `prefix + C-w` fallback.
+- Exercise both safe and Nerd Font icon modes and all three Rose Pine variants.
 - Start one workspace with each locally installed agent: Codex, Claude Code,
   and OpenCode. Confirm the selected agent receives its initial task once.
 - Exercise working, waiting, review, failed, refresh, filter, jump, and close.
@@ -39,7 +44,7 @@ cannot publish a GitHub Release.
 - Upgrade an existing v1 tmux configuration without adding
   `@agent-watch-v2`; confirm v2 becomes active after reload.
 - Set `@agent-watch-v2 off`, reload, and confirm the legacy cockpit, scanner,
-  hooks, HUD/sidebar, and workspace commands remain usable.
+  hooks, HUD, optional sidebar, and workspace commands remain usable.
 - Test a missing binary, invalid agent option, invalid branch prefix, stale
   sidebar pane, killed agent pane, tmux client reconnect, and plugin reload.
   Each failure must remain bounded and explain the recovery action.
@@ -49,9 +54,9 @@ cannot publish a GitHub Release.
 - Enter a distinctive private task and confirm it is absent from tmux options,
   buffers, server environment, process arguments, and project files after
   delivery.
-- Enable `@agent-watch-redact-labels on`; confirm cockpit, start/finish forms,
-  HUD, and expanded sidebar hide task, repository, branch, session, and window
-  labels while navigation still works.
+- Enable `@agent-watch-redact-labels on`; confirm cockpit and start/finish forms
+  hide task, repository, branch, session, and window labels while navigation
+  and content-blind status signals still work.
 - Confirm no unexpected network connection, telemetry, log, database, history,
   or crash artifact is created by the supervisor.
 
