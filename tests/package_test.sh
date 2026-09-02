@@ -47,8 +47,13 @@ do
     "$TMP_DIR/release/tmux-agent-watch-$target.tar.gz"
 done
 "$ROOT/scripts/verify-release-bundle.sh" "$TMP_DIR/release" >/dev/null
-grep -Eq '^[0-9a-f]{64}  \./tmux-agent-watch-' "$TMP_DIR/release/SHA256SUMS" || {
+grep -Eq '^[0-9a-f]{64}  tmux-agent-watch-' "$TMP_DIR/release/SHA256SUMS" || {
   printf 'not ok: bundle checksums do not use parseable filenames\n'
   exit 1
 }
+if ! TMUX_AGENT_WATCH_BASE_URL="file://$TMP_DIR/release" \
+  TMUX_AGENT_WATCH_INSTALL_DIR="$TMP_DIR/bundle-install" "$ROOT/install.sh" >/dev/null; then
+  printf 'not ok: installer rejected checksums generated for the release bundle\n'
+  exit 1
+fi
 printf 'ok: four-platform release bundle verifies without pipeline truncation\n'

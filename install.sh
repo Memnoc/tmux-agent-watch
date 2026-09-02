@@ -29,7 +29,14 @@ trap 'rm -rf "$temporary"' EXIT
 
 curl --fail --location --silent --show-error "$base_url/$archive" -o "$temporary/$archive"
 curl --fail --location --silent --show-error "$base_url/SHA256SUMS" -o "$temporary/SHA256SUMS"
-expected="$(awk -v file="$archive" '$2 == file { print $1; exit }' "$temporary/SHA256SUMS")"
+expected="$(awk -v file="$archive" '
+  {
+    name = $2
+    sub(/^\*/, "", name)
+    sub(/^\.\//, "", name)
+    if (name == file) { print $1; exit }
+  }
+' "$temporary/SHA256SUMS")"
 [ -n "$expected" ] || {
   printf 'tmux-agent-watch: checksum is missing for %s\n' "$archive" >&2
   exit 1
