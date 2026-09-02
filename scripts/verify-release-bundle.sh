@@ -39,6 +39,6 @@ done
 }
 (
   cd "$directory"
-  sha256sum ./*.tar.gz | sort -k2 > SHA256SUMS
+  sha256sum *.tar.gz | sort -k2 > SHA256SUMS
   sha256sum --check SHA256SUMS
 )
