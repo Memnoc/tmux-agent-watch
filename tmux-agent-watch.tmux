@@ -38,8 +38,25 @@ cleanup_plugin_hooks() {
   done
 }
 
+cleanup_sidebars() {
+  local session sidebar
+  while IFS= read -r session; do
+    [ -n "$session" ] || continue
+    sidebar="$(tmux show-option -qv -t "$session" @agent_watch_sidebar_pane 2>/dev/null || true)"
+    if [ -n "$sidebar" ] &&
+      [ "$(tmux show-option -pqv -t "$sidebar" @agent_watch_sidebar 2>/dev/null || true)" = 1 ]; then
+      tmux kill-pane -t "$sidebar" 2>/dev/null || true
+    fi
+    tmux set-option -q -t "$session" @agent_watch_sidebar_pane ''
+    tmux set-option -q -t "$session" @agent_watch_sidebar_expanded off
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+}
+
 cleanup_plugin_hooks
 install_window_formats
+if [ "$(option @agent-watch-sidebar off)" != on ]; then
+  cleanup_sidebars
+fi
 if [ "$(option @agent-watch-hud on)" = on ]; then
   "$PLUGIN_DIR/scripts/hud-install.sh"
 fi
@@ -54,12 +71,15 @@ tmux bind-key "$(option @agent-watch-finish-key X)" display-popup -EE -w 70% -h 
 tmux bind-key "$(option @agent-watch-help-key H)" display-popup -E -w 72 -h 24 \
   "$PLUGIN_DIR/scripts/help.sh"
 if [ "$(option @agent-watch-v2 on)" = on ]; then
-  tmux bind-key "$(option @agent-watch-cockpit-key P)" display-popup -EE -w 90% -h 80% \
+  tmux bind-key "$(option @agent-watch-cockpit-key P)" display-popup -EE -w 96 -h 20 \
     -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/v2.sh cockpit"
 else
   tmux bind-key "$(option @agent-watch-cockpit-key P)" display-popup -EE -w 78 -h 26 \
     -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/cockpit.sh"
 fi
+tmux bind-key "$(option @agent-watch-navigator-key w)" display-popup -EE -w 84 -h 24 \
+  -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/v2.sh navigator"
+tmux bind-key "$(option @agent-watch-native-navigator-key C-w)" choose-tree -Zw
 tmux bind-key '{' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -U"
 tmux bind-key '}' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -D"
 tmux bind-key -n MouseDown1Pane if-shell -F '#{==:#{@agent_watch_sidebar},1}' \

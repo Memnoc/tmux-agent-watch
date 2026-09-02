@@ -23,6 +23,10 @@ case "${1:-}" in
     theme="${theme:-moon}"
     exec "$binary" cockpit --theme "$theme"
     ;;
+  navigator)
+    theme="$(tmux show-option -gqv @agent-watch-theme 2>/dev/null || true)"
+    exec "$binary" navigator --theme "${theme:-moon}"
+    ;;
   status) exec "$binary" status ;;
   scan) exec "$binary" scan ;;
   hud) exec "$binary" hud "$2" "$3" "$4" --theme "${5:-moon}" ;;
@@ -33,7 +37,7 @@ case "${1:-}" in
     exec "$binary" hook "$2" "$3"
     ;;
   *)
-    printf 'usage: %s cockpit|status|scan|hook AGENT EVENT\n' "$0" >&2
+    printf 'usage: %s cockpit|navigator|status|scan|hook AGENT EVENT\n' "$0" >&2
     exit 2
     ;;
 esac

@@ -16,7 +16,11 @@ The tmux-native, action-first popup used to start, review, jump to, and finish w
 
 ### Ambient status
 
-The always-visible sidebar and HUD that show which workspaces need attention. Ambient status reports state; the Workspace Cockpit performs lifecycle actions.
+The always-visible clustered tmux bar: ordinary workspaces left, content-blind
+Git context in the centre, and managed agents right. Ambient status says where
+the user is, what changed, and whether an agent needs attention; the grouped
+navigator moves between all windows and the Workspace Cockpit performs
+lifecycle actions. The former sidebar is an opt-in compatibility surface.
 
 ### Content-blind supervision
 

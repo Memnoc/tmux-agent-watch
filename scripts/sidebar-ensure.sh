@@ -3,7 +3,7 @@
 set -u
 source "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
-[ "$(tmux_option @agent-watch-sidebar on)" = on ] || exit 0
+[ "$(tmux_option @agent-watch-sidebar off)" = on ] || exit 0
 
 target="${1:-${TMUX_PANE:-}}"
 [ -n "$target" ] || target="$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)"

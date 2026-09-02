@@ -45,13 +45,15 @@ for expected in \
   '●  normal agent' \
   '◆  agent in a linked Git worktree' \
   'a      jump' \
-  'Space  expand' \
-  'A      restart' \
   'P      open the workspace cockpit' \
   'W      create' \
   'X      finish' \
   'm      zoom' \
-  'w      open the tmux window chooser' \
+  'w      open the grouped workspace navigator' \
+  'C-w    open the native tmux window tree' \
+  'left   ordinary workspaces' \
+  'centre current Git changes' \
+  'right  managed agents' \
   'CLEAN  no uncommitted changes' \
   'DIRTY  has uncommitted changes' \
   'Press q or Escape to close.'

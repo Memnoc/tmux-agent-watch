@@ -24,4 +24,8 @@ tmux remains the process, navigation, and persistence host, while a Bash Workspa
 
 ## Consequences
 
-The sidebar remains the ambient status surface, and direct `W`, `g`, and `X` bindings remain available. Repository-owned setup commands and development-server orchestration require later decisions; the first cockpit release performs no implicit project commands.
+The status bar is the ambient surface, while the sidebar remains an opt-in
+compatibility feature. Direct `W` and `X` bindings remain available.
+Repository-owned setup commands and development-server orchestration require
+later decisions; the first cockpit release performs no implicit project
+commands. ADR-0004 records the later navigation and ambient-status redesign.

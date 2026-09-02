@@ -31,7 +31,7 @@ while IFS= read -r window_id; do
   [ -n "${agent_windows[$window_id]:-}" ] || set_window_state "$window_id" unmanaged
 done < <(tmux list-windows -a -F '#{window_id}' 2>/dev/null)
 
-if [ "$(tmux_option @agent-watch-sidebar on)" = on ]; then
+if [ "$(tmux_option @agent-watch-sidebar off)" = on ]; then
   while IFS= read -r session; do
     [ -n "$session" ] && "$PLUGIN_DIR/scripts/sidebar-ensure.sh" "$session:"
   done < <(tmux list-windows -a -F '#{session_name}|#{@agent_watch_state}' 2>/dev/null |

@@ -10,7 +10,7 @@ pub struct SidebarFrame {
     pub click_map: String,
 }
 
-pub fn hud_fleet(workspaces: &[Workspace], session: &str, theme: Theme, redact: bool) -> String {
+pub fn hud_fleet(workspaces: &[Workspace], session: &str, theme: Theme, _redact: bool) -> String {
     let scoped = workspaces
         .iter()
         .filter(|workspace| workspace.identity.session == session);
@@ -25,28 +25,26 @@ pub fn hud_fleet(workspaces: &[Workspace], session: &str, theme: Theme, redact: 
             Lifecycle::Unknown => {}
         }
     }
-    let mut output = format!(
-        "#[fg={},bold] {} #[default]  {} agents",
-        hex(theme.rose),
-        if redact { "tmux" } else { session },
-        total
-    );
-    for (count, label, color) in [
-        (working, "working", theme.rose),
-        (waiting, "waiting", theme.gold),
-        (review, "review", theme.pine),
-        (failed, "failed", theme.love),
-    ] {
-        if count > 0 {
-            output.push_str(&format!(
-                "  #[fg={}]● {} {}#[default]",
-                hex(color),
-                count,
-                label
-            ));
-        }
-    }
-    output
+    let attention = waiting + review + failed;
+    let (color, label, count) = if failed > 0 {
+        (theme.love, "FAILED", failed)
+    } else if waiting > 0 {
+        (theme.gold, "WAITING", waiting)
+    } else if review > 0 {
+        (theme.pine, "REVIEW", review)
+    } else if working > 0 {
+        (theme.rose, "WORKING", working)
+    } else {
+        (theme.muted, "COCKPIT", total)
+    };
+    let badge_count = if attention > 0 { attention } else { count };
+    format!(
+        "#[fg={},bg={},bold] {} {} #[default]",
+        hex(theme.base),
+        hex(color),
+        label,
+        badge_count
+    )
 }
 
 pub fn hud_selected(
@@ -254,7 +252,7 @@ mod tests {
     fn ambient_surfaces_use_fixed_metadata_only() {
         let theme = Theme::rose_pine(Variant::Moon);
         let workspaces = vec![item(Lifecycle::Waiting)];
-        assert!(hud_fleet(&workspaces, "dev", theme, false).contains("1 waiting"));
+        assert!(hud_fleet(&workspaces, "dev", theme, false).contains("WAITING 1"));
         let frame = sidebar(&workspaces, "dev", "@1", true, theme, false);
         assert!(frame.text.contains("WAITING"));
         assert!(frame.click_map.contains("@1"));

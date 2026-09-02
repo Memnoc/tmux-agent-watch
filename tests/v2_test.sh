@@ -16,7 +16,6 @@ trap cleanup EXIT
 
 tmux -L "$SOCKET" -f /dev/null new-session -d -s v2
 tmux -L "$SOCKET" set-option -g @agent-watch-hud off
-tmux -L "$SOCKET" set-option -g @agent-watch-sidebar off
 tmux -L "$SOCKET" run-shell "$ROOT/tmux-agent-watch.tmux"
 
 binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "P" && /scripts\/v2.sh cockpit/')"
@@ -106,15 +105,25 @@ tmux -L "$SOCKET" set-option -wq -t "$agent_window" @agent_watch_state needs_inp
 
 fleet="$(TMUX="$socket_path,$server_pid,0" AGENT_WATCH_V2_BIN="$real_binary" \
   "$ROOT/scripts/v2.sh" hud fleet v2 "$agent_window" moon)"
-printf '%s' "$fleet" | grep -Fq '1 agents' || {
+printf '%s' "$fleet" | grep -Fq 'WAITING 1' || {
   printf 'not ok: v2 HUD did not project the live fleet\n'
   exit 1
 }
-printf '%s' "$fleet" | grep -Fq '1 waiting' || {
-  printf 'not ok: v2 HUD did not project the waiting state\n'
+if tmux -L "$SOCKET" show-option -qv -t v2 @agent_watch_sidebar_pane | grep -q .; then
+  printf 'not ok: v2 created a sidebar without an explicit opt-in\n'
   exit 1
-}
-printf 'ok: v2 HUD projects the unified workspace model\n'
+fi
+printf 'ok: v2 HUD projects attention without creating a sidebar\n'
+
+legacy_sidebar="$(tmux -L "$SOCKET" split-window -d -P -F '#{pane_id}' -t v2:)"
+tmux -L "$SOCKET" set-option -pq -t "$legacy_sidebar" @agent_watch_sidebar 1
+tmux -L "$SOCKET" set-option -q -t v2 @agent_watch_sidebar_pane "$legacy_sidebar"
+tmux -L "$SOCKET" run-shell "$ROOT/tmux-agent-watch.tmux"
+if tmux -L "$SOCKET" list-panes -a -F '#{pane_id}' | grep -Fxq "$legacy_sidebar"; then
+  printf 'not ok: disabling the sidebar left a generated pane behind\n'
+  exit 1
+fi
+printf 'ok: disabling the sidebar removes only its generated pane\n'
 
 sidebar="$(TMUX="$socket_path,$server_pid,0" AGENT_WATCH_V2_BIN="$real_binary" \
   "$ROOT/scripts/v2.sh" sidebar v2 "$agent_window" --expanded --theme moon)"

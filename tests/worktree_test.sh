@@ -25,6 +25,7 @@ git -C "$REPO" branch -M main
 ln -s "$(command -v sleep)" "$TMP_DIR/codex"
 tmux -L "$SOCKET" -f /dev/null new-session -d -s agents -c "$REPO"
 tmux -L "$SOCKET" set-option -g @agent-watch-v2 off
+tmux -L "$SOCKET" set-option -g @agent-watch-sidebar on
 socket_path="$(tmux -L "$SOCKET" display-message -p '#{socket_path}')"
 server_pid="$(tmux -L "$SOCKET" display-message -p '#{pid}')"
 

@@ -4,5 +4,6 @@ pub mod config;
 pub mod discovery;
 pub mod domain;
 pub mod lifecycle;
+pub mod navigator;
 pub mod theme;
 pub mod workspace;
