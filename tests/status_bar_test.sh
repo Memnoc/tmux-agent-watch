@@ -46,6 +46,9 @@ nerd="$($ROOT/scripts/status-bar.sh bar "$codex_window" 120)"
 printf '%s' "$nerd" | grep -Fq '▶'
 printf '%s' "$nerd" | grep -Fq '󰚩'
 printf '%s' "$nerd" | grep -Fq '󰁔'
+if printf '%s' "$nerd" | grep -Eq '|'; then
+  printf 'not ok: selected workspace retained rounded powerline endcaps\n'; exit 1
+fi
 printf 'ok: Nerd mode renders the selected-agent and overflow vocabulary\n'
 
 narrow="$($ROOT/scripts/status-bar.sh bar "$codex_window" 72)"

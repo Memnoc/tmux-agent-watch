@@ -28,22 +28,41 @@ remain unchanged.
     </td>
   </tr>
   <tr>
-    <td width="50%">
-      <img src="docs/images/workspace-navigator.png" alt="The workspace navigator grouping ordinary tmux windows and active coding agents">
+    <td colspan="2">
+      <img src="docs/images/status-bar-active-workspace.png" alt="A wide tmux status bar with the active app workspace highlighted between square-ended rails">
       <br>
-      <sub><strong>Workspace navigator:</strong> browse every window and jump directly to an agent.</sub>
+      <sub><strong>Active workspace:</strong> slim rails and a restrained text highlight mark the current ordinary workspace.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/workspace-cockpit.png" alt="The Workspace Cockpit showing project, path, branch, checkout, and lifecycle details for the selected workspace">
+      <br>
+      <sub><strong>Workspace Cockpit:</strong> review, jump to, and finish worktrees with their project identity and full path visible.</sub>
     </td>
     <td width="50%">
-      <img src="docs/images/workspace-cockpit.png" alt="The Workspace Cockpit showing the agent fleet and selected workspace details">
+      <img src="docs/images/workspace-start.png" alt="The Start Workspace form with task, generated branch, and agent selection fields">
       <br>
-      <sub><strong>Workspace Cockpit:</strong> start, review, jump to, and finish worktrees from one place.</sub>
+      <sub><strong>Start Workspace:</strong> describe the task, preview its branch, and choose the agent without leaving tmux.</sub>
     </td>
   </tr>
   <tr>
     <td colspan="2">
-      <img src="docs/images/status-bar-narrow.png" alt="A compact tmux status bar adapted to a narrow split terminal">
+      <img src="docs/images/workspace-navigator.png" alt="The workspace navigator grouping ordinary tmux windows and active coding agents across projects">
       <br>
-      <sub><strong>Responsive by design:</strong> labels collapse before lifecycle, Git, and navigation signals disappear.</sub>
+      <sub><strong>Workspace Navigator:</strong> browse every ordinary window and active agent across tmux sessions.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/status-bar-narrow.png" alt="The intermediate-width tmux status bar retaining lifecycle, Git, and selected-agent context">
+      <br>
+      <sub><strong>Narrow:</strong> inactive labels collapse while the selected workspace and Git context remain visible.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/images/status-bar-compact.png" alt="The sub-80-column tmux status bar showing project, compact Git state, agent lifecycle, and navigator cue in one flow">
+      <br>
+      <sub><strong>Compact:</strong> project, Git, lifecycle, and navigation share one collision-free flow.</sub>
     </td>
   </tr>
 </table>

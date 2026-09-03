@@ -235,11 +235,7 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
     left_count=$((left_count + 1))
     if [ "$left_count" -le "$left_limit" ] || [ "$window_id" = "$current" ]; then
       if [ "$window_id" = "$current" ]; then
-        if [ "$icon_mode" = nerd ]; then
-          item="#[range=window|${index}]#[fg=${rose}]#[bg=${surface},fg=${text},bold] ${index} ${short_name} #[bg=default,fg=${rose}]#[norange]"
-        else
-          item="#[range=window|${index}]#[fg=${rose},bold][ #[fg=${text}]${index} ${short_name} #[fg=${rose}] ]#[norange]"
-        fi
+        item="#[range=window|${index}]#[fg=${rose}]│#[bg=${surface},fg=${text},bold] ${index} ${short_name} #[bg=default,fg=${rose}]│#[norange]"
       else
         if [ "$inactive_name_limit" -eq 0 ]; then
           item="#[range=window|${index}]#[fg=${muted}]${index}#[norange]"
