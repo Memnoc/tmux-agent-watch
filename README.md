@@ -2,8 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-See every coding agent that needs you—across tmux sessions, projects, and Git
-worktrees—without reading transcripts or replacing your tmux workflow.
+Interact with every coding agent that needs you across tmux sessions, projects, and Git
+worktrees without leaving your terminal or replacing your tmux workflow.
 
 `tmux-agent-watch` recognizes Codex, Claude Code, and OpenCode. It adds
 content-blind lifecycle state, Git context, navigation, and guarded worktree
@@ -47,22 +47,22 @@ still be started normally; no special launcher is required.
 
 <img src="docs/images/design/hero-workflow.png" alt="Diagram: many projects and agents feed a content-blind status bar, which feeds the Workspace Navigator and Cockpit, which finish work safely back to a clean, merged worktree">
 
-| Surface | What it answers | Open it |
-| --- | --- | --- |
-| Status bar | Where am I, what changed, and who needs me? | Always visible |
-| Workspace Navigator | What is running across all tmux sessions? | `prefix + w` |
-| Workspace Cockpit | What should I review, open, start, or finish? | `prefix + P` |
+| Surface             | What it answers                               | Open it        |
+| ------------------- | --------------------------------------------- | -------------- |
+| Status bar          | Where am I, what changed, and who needs me?   | Always visible |
+| Workspace Navigator | What is running across all tmux sessions?     | `prefix + w`   |
+| Workspace Cockpit   | What should I review, open, start, or finish? | `prefix + P`   |
 
 ### Status at a glance
 
 <img src="docs/images/design/status-bar-anatomy.png" alt="Annotated tmux status bar split into three zones: ordinary workspaces on the left, content-blind Git context in the centre, and lifecycle-colored agents on the right, with a variant showing the active-workspace highlight">
 
-| Color | State | Meaning |
-| --- | --- | --- |
-| Blue | Working | The agent is active |
-| Gold | Waiting | The agent needs input |
-| Green | Review | Work is ready to inspect |
-| Red | Failed | The agent or task failed |
+| Color | State   | Meaning                  |
+| ----- | ------- | ------------------------ |
+| Blue  | Working | The agent is active      |
+| Gold  | Waiting | The agent needs input    |
+| Green | Review  | Work is ready to inspect |
+| Red   | Failed  | The agent or task failed |
 
 Only lifecycle state, branch, and Git counts are shown. The default Rust
 implementation never reads prompts, responses, or terminal scrollback.
@@ -71,12 +71,12 @@ implementation never reads prompts, responses, or terminal scrollback.
 
 <img src="docs/images/design/navigator-cockpit-surfaces.png" alt="Side-by-side comparison of the Workspace Navigator, which lists every window and agent across tmux sessions, and the Workspace Cockpit, which shows full detail and start, review, jump, and finish actions for the selected one">
 
-| Cockpit action | Result | Direct key |
-| --- | --- | --- |
-| Start | Create a linked worktree, choose an agent, and begin the task | `prefix + W` |
-| Review | Show agents waiting, failed, or ready for review | — |
-| Jump | Open a live agent workspace | `prefix + w` |
-| Finish | Remove a clean, integrated worktree while retaining its branch | `prefix + X` |
+| Cockpit action | Result                                                         | Direct key   |
+| -------------- | -------------------------------------------------------------- | ------------ |
+| Start          | Create a linked worktree, choose an agent, and begin the task  | `prefix + W` |
+| Review         | Show agents waiting, failed, or ready for review               | —            |
+| Jump           | Open a live agent workspace                                    | `prefix + w` |
+| Finish         | Remove a clean, integrated worktree while retaining its branch | `prefix + X` |
 
 <img src="docs/images/design/lifecycle-flow.png" alt="Lifecycle flow diagram: start task creates a worktree, the agent moves to working, then needs attention when waiting or failed, then review when idle and ready, then finish safely once clean and merged">
 
@@ -92,17 +92,17 @@ terminal narrows; labels collapse before information collides.
 
 ## Use
 
-| Key | Action |
-| --- | --- |
-| `prefix + H` | Open help (`q` or Escape closes it) |
-| `prefix + P` | Open the Workspace Cockpit |
-| `prefix + w` | Open the grouped workspace navigator |
-| `prefix + C-w` | Open tmux's native window tree |
-| `prefix + a` | Jump to the oldest agent needing attention |
-| `prefix + W` | Create a worktree and start an agent |
-| `prefix + X` | Finish the selected clean, integrated worktree |
-| `prefix + Space` | Toggle the optional legacy sidebar |
-| `prefix + A` | Recreate a stuck legacy sidebar |
+| Key              | Action                                         |
+| ---------------- | ---------------------------------------------- |
+| `prefix + H`     | Open help (`q` or Escape closes it)            |
+| `prefix + P`     | Open the Workspace Cockpit                     |
+| `prefix + w`     | Open the grouped workspace navigator           |
+| `prefix + C-w`   | Open tmux's native window tree                 |
+| `prefix + a`     | Jump to the oldest agent needing attention     |
+| `prefix + W`     | Create a worktree and start an agent           |
+| `prefix + X`     | Finish the selected clean, integrated worktree |
+| `prefix + Space` | Toggle the optional legacy sidebar             |
+| `prefix + A`     | Recreate a stuck legacy sidebar                |
 
 Existing tmux window navigation, naming, and pane zoom continue to work.
 
@@ -111,11 +111,11 @@ Existing tmux window navigation, naming, and pane zoom continue to work.
 Automatic terminal classification works without setup. Optional hooks provide
 exact lifecycle transitions and take precedence over observation.
 
-| Agent | Integration | Without it |
-| --- | --- | --- |
-| Codex CLI 0.151.0+ | Lifecycle hooks in `~/.codex/config.toml` | Terminal observation |
-| Claude Code | Lifecycle hooks in `~/.claude/settings.json` | Terminal observation |
-| OpenCode | Local event plugin | Terminal observation |
+| Agent              | Integration                                  | Without it           |
+| ------------------ | -------------------------------------------- | -------------------- |
+| Codex CLI 0.151.0+ | Lifecycle hooks in `~/.codex/config.toml`    | Terminal observation |
+| Claude Code        | Lifecycle hooks in `~/.claude/settings.json` | Terminal observation |
+| OpenCode           | Local event plugin                           | Terminal observation |
 
 <details>
 <summary>Codex CLI hooks</summary>
@@ -137,15 +137,53 @@ Review and trust the commands when Codex prompts you.
 <details>
 <summary>Claude Code hooks</summary>
 
+Hooks keep the display current by refreshing it after relevant tmux events.
+
 Add this inside the `hooks` object in `~/.claude/settings.json`, replacing
 `/path/to` with the plugin checkout:
 
 ```json
 {
-  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh UserPromptSubmit" }] }],
-  "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh PermissionRequest" }] }],
-  "Stop": [{ "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh Stop" }] }],
-  "StopFailure": [{ "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh StopFailure" }] }]
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh UserPromptSubmit"
+        }
+      ]
+    }
+  ],
+  "PermissionRequest": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh PermissionRequest"
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh Stop"
+        }
+      ]
+    }
+  ],
+  "StopFailure": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh StopFailure"
+        }
+      ]
+    }
+  ]
 }
 ```
 
@@ -153,6 +191,7 @@ Add this inside the `hooks` object in `~/.claude/settings.json`, replacing
 
 <details>
 <summary>OpenCode plugin</summary>
+Optional. Relays OpenCode lifecycle events for immediate, exact status updates. Without it, terminal observation still works.
 
 ```sh
 mkdir -p ~/.config/opencode/plugins
@@ -170,19 +209,19 @@ full data boundary.
 
 ## Configure
 
-Defaults work without configuration. Set overrides before loading the plugin.
+Defaults work without configuration. You can set overrides before loading the plugin.
 
 ### Common options
 
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `@agent-watch-agent` | `codex` | Agent started for new worktrees |
-| `@agent-watch-base-branch` | `main` | Branch used to validate finished work |
-| `@agent-watch-branch-prefix` | `work/` | Prefix for generated branches |
-| `@agent-watch-theme` | `moon` | `rose-pine`, `moon`, or `dawn` |
-| `@agent-watch-icon-mode` | `safe` | Use `nerd` for Nerd Font icons |
-| `@agent-watch-redact-labels` | `off` | Hide workspace labels while screen sharing |
-| `@agent-watch-sidebar` | `off` | Enable the legacy sidebar |
+| Option                       | Default | Purpose                                    |
+| ---------------------------- | ------- | ------------------------------------------ |
+| `@agent-watch-agent`         | `codex` | Agent started for new worktrees            |
+| `@agent-watch-base-branch`   | `main`  | Branch used to validate finished work      |
+| `@agent-watch-branch-prefix` | `work/` | Prefix for generated branches              |
+| `@agent-watch-theme`         | `moon`  | `rose-pine`, `moon`, or `dawn`             |
+| `@agent-watch-icon-mode`     | `safe`  | Use `nerd` for Nerd Font icons             |
+| `@agent-watch-redact-labels` | `off`   | Hide workspace labels while screen sharing |
+| `@agent-watch-sidebar`       | `off`   | Enable the legacy sidebar                  |
 
 Example:
 
@@ -196,24 +235,24 @@ set -g @agent-watch-theme rose-pine
 <details>
 <summary>Keys, refresh intervals, and advanced options</summary>
 
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `@agent-watch-interval` | `2` | Agent scan interval in seconds |
-| `@agent-watch-git-interval` | `10` | Git refresh interval in seconds |
-| `@agent-watch-next-key` | `a` | Jump-to-attention key |
-| `@agent-watch-sidebar-key` | `Space` | Sidebar toggle key |
-| `@agent-watch-restart-key` | `A` | Sidebar restart key |
-| `@agent-watch-worktree-key` | `W` | Worktree creation key |
-| `@agent-watch-finish-key` | `X` | Worktree finish key |
-| `@agent-watch-cockpit-key` | `P` | Cockpit key |
-| `@agent-watch-navigator-key` | `w` | Navigator key |
-| `@agent-watch-native-navigator-key` | `C-w` | Native tmux tree key |
-| `@agent-watch-help-key` | `H` | Help key |
-| `@agent-watch-v2` | `on` | Rust implementation; `off` selects the content-reading legacy fallback |
-| `@agent-watch-hud` | `on` | Lifecycle HUD |
-| `@agent-watch-status` | `off` | Legacy status display |
-| `@agent-watch-sidebar-width` | `3` | Collapsed sidebar width |
-| `@agent-watch-sidebar-expanded-width` | `38` | Expanded sidebar width |
+| Option                                | Default | Purpose                                                                |
+| ------------------------------------- | ------- | ---------------------------------------------------------------------- |
+| `@agent-watch-interval`               | `2`     | Agent scan interval in seconds                                         |
+| `@agent-watch-git-interval`           | `10`    | Git refresh interval in seconds                                        |
+| `@agent-watch-next-key`               | `a`     | Jump-to-attention key                                                  |
+| `@agent-watch-sidebar-key`            | `Space` | Sidebar toggle key                                                     |
+| `@agent-watch-restart-key`            | `A`     | Sidebar restart key                                                    |
+| `@agent-watch-worktree-key`           | `W`     | Worktree creation key                                                  |
+| `@agent-watch-finish-key`             | `X`     | Worktree finish key                                                    |
+| `@agent-watch-cockpit-key`            | `P`     | Cockpit key                                                            |
+| `@agent-watch-navigator-key`          | `w`     | Navigator key                                                          |
+| `@agent-watch-native-navigator-key`   | `C-w`   | Native tmux tree key                                                   |
+| `@agent-watch-help-key`               | `H`     | Help key                                                               |
+| `@agent-watch-v2`                     | `on`    | Rust implementation; `off` selects the content-reading legacy fallback |
+| `@agent-watch-hud`                    | `on`    | Lifecycle HUD                                                          |
+| `@agent-watch-status`                 | `off`   | Legacy status display                                                  |
+| `@agent-watch-sidebar-width`          | `3`     | Collapsed sidebar width                                                |
+| `@agent-watch-sidebar-expanded-width` | `38`    | Expanded sidebar width                                                 |
 
 Lifecycle colors and symbols use `@agent-watch-{working,needs-input,done,failed}-color`
 and `@agent-watch-{working,needs-input,done,failed}-symbol`.
@@ -222,7 +261,7 @@ and `@agent-watch-{working,needs-input,done,failed}-symbol`.
 
 ## Worktrees from the command line
 
-The cockpit is the normal interface, but the underlying scripts are available:
+Use the cockpit for everyday work. For automation, the same workspace actions are also available as command-line scripts:
 
 ```sh
 scripts/worktree-new.sh feature/auth opencode
