@@ -7,55 +7,65 @@ tmux workflow you already use.
 
 Each recognized agent gets a color-coded state in tmux's native window tabs:
 
-| Marker | Color | State            |
-| ------ | ----- | ---------------- |
-| `●`    | blue  | working          |
-| `●`    | gold  | needs input      |
-| `●`    | green | ready for review |
-| `●`    | red   | failed           |
+| Marker | Color | State |
+| --- | --- | --- |
+| `●` | blue | working |
+| `●` | gold | needs input |
+| `●` | green | ready for review |
+| `●` | red | failed |
 
 The plugin currently recognizes Codex, Claude Code, and OpenCode. Other windows
 remain unchanged.
 
-## How it works
+## Screenshot gallery
 
-<img src="docs/images/design/hero-workflow.png" alt="Diagram: many projects and agents feed a content-blind status bar, which feeds the Workspace Navigator and Cockpit, which finish work safely back to a clean, merged worktree">
-
-You run several coding agents across several projects, each in its own tmux
-window or Git worktree. `tmux-agent-watch` watches all of them, surfaces
-lifecycle state — `working`, `needs input`, `ready for review`, `failed` — in
-the status bar and two dedicated screens, and lets you act without ever
-reading a transcript. tmux still runs every pane and process; this is the
-supervision layer on top of it.
-
-### Ambient awareness: the status bar
-
-<img src="docs/images/design/status-bar-anatomy.png" alt="Annotated tmux status bar split into three zones: ordinary workspaces on the left, content-blind Git context in the centre, and lifecycle-colored agents on the right, with a variant showing the active-workspace highlight">
-
-The status bar is content-blind by design: it reports lifecycle state,
-branch, and tracked-line/file counts for the selected agent — never a prompt
-or a response. One line answers "what's my Git state" and "who needs me"
-without switching windows.
-
-### Two surfaces: find agents, then act
-
-<img src="docs/images/design/navigator-cockpit-surfaces.png" alt="Side-by-side comparison of the Workspace Navigator, which lists every window and agent across tmux sessions, and the Workspace Cockpit, which shows full detail and start, review, jump, and finish actions for the selected one">
-
-`prefix + w` opens the **Workspace Navigator** — every ordinary window and
-every active agent, grouped by project, across all tmux sessions. `prefix + P`
-opens the **Workspace Cockpit** — repository identity, branch, checkout, and
-Git cleanliness for the selected worktree, plus the guided start, review,
-jump, and finish actions.
-
-### Lifecycle: from a task to a merged worktree
-
-<img src="docs/images/design/lifecycle-flow.png" alt="Lifecycle flow diagram: start task creates a worktree, the agent moves to working, then needs attention when waiting or failed, then review when idle and ready, then finish safely once clean and merged">
-
-### Adapts to the terminal width
-
-<img src="docs/images/design/responsive-layouts.png" alt="The status bar at three widths: wide showing every workspace and agent, narrow collapsing inactive workspace labels to an arrow, and compact under 80 columns sharing project, Git, lifecycle, and navigator cues in one flow">
-
-At every width the same three zones survive — only their density changes.
+<table>
+  <tr>
+    <td colspan="2">
+      <img src="docs/images/status-bar-wide.png" alt="A wide tmux status bar with workspace tabs, Git context, and color-coded agent states">
+      <br>
+      <sub><strong>At a glance:</strong> workspaces stay on the left, repository context stays in the centre, and agents that need attention stay visible on the right.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="docs/images/status-bar-active-workspace.png" alt="A wide tmux status bar with the active app workspace highlighted between square-ended rails">
+      <br>
+      <sub><strong>Active workspace:</strong> slim rails and a restrained text highlight mark the current ordinary workspace.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/workspace-cockpit.png" alt="The Workspace Cockpit showing project, path, branch, checkout, and lifecycle details for the selected workspace">
+      <br>
+      <sub><strong>Workspace Cockpit:</strong> review, jump to, and finish worktrees with their project identity and full path visible.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/images/workspace-start.png" alt="The Start Workspace form with task, generated branch, and agent selection fields">
+      <br>
+      <sub><strong>Start Workspace:</strong> describe the task, preview its branch, and choose the agent without leaving tmux.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="docs/images/workspace-navigator.png" alt="The workspace navigator grouping ordinary tmux windows and active coding agents across projects">
+      <br>
+      <sub><strong>Workspace Navigator:</strong> browse every ordinary window and active agent across tmux sessions.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/status-bar-narrow.png" alt="The intermediate-width tmux status bar retaining lifecycle, Git, and selected-agent context">
+      <br>
+      <sub><strong>Narrow:</strong> inactive labels collapse while the selected workspace and Git context remain visible.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/images/status-bar-compact.png" alt="The sub-80-column tmux status bar showing project, compact Git state, agent lifecycle, and navigator cue in one flow">
+      <br>
+      <sub><strong>Compact:</strong> project, Git, lifecycle, and navigation share one collision-free flow.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Install
 
@@ -254,46 +264,18 @@ plugin's location:
 
 ```json
 {
-  "UserPromptSubmit": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh UserPromptSubmit"
-        }
-      ]
-    }
-  ],
-  "PermissionRequest": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh PermissionRequest"
-        }
-      ]
-    }
-  ],
-  "Stop": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh Stop"
-        }
-      ]
-    }
-  ],
-  "StopFailure": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh StopFailure"
-        }
-      ]
-    }
-  ]
+  "UserPromptSubmit": [{
+    "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh UserPromptSubmit" }]
+  }],
+  "PermissionRequest": [{
+    "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh PermissionRequest" }]
+  }],
+  "Stop": [{
+    "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh Stop" }]
+  }],
+  "StopFailure": [{
+    "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh StopFailure" }]
+  }]
 }
 ```
 
