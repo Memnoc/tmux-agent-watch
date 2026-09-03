@@ -2,309 +2,125 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`tmux-agent-watch` shows which agent windows need you, without replacing the
-tmux workflow you already use.
+See every coding agent that needs you—across tmux sessions, projects, and Git
+worktrees—without reading transcripts or replacing your tmux workflow.
 
-Each recognized agent gets a color-coded state in tmux's native window tabs:
-
-| Marker | Color | State            |
-| ------ | ----- | ---------------- |
-| `●`    | blue  | working          |
-| `●`    | gold  | needs input      |
-| `●`    | green | ready for review |
-| `●`    | red   | failed           |
-
-The plugin currently recognizes Codex, Claude Code, and OpenCode. Other windows
-remain unchanged.
-
-## How it works
-
-<img src="docs/images/design/hero-workflow.png" alt="Diagram: many projects and agents feed a content-blind status bar, which feeds the Workspace Navigator and Cockpit, which finish work safely back to a clean, merged worktree">
-
-You run several coding agents across several projects, each in its own tmux
-window or Git worktree. `tmux-agent-watch` watches all of them, surfaces
-lifecycle state — `working`, `needs input`, `ready for review`, `failed` — in
-the status bar and two dedicated screens, and lets you act without ever
-reading a transcript. tmux still runs every pane and process; this is the
-supervision layer on top of it.
-
-### Ambient awareness: the status bar
-
-<img src="docs/images/design/status-bar-anatomy.png" alt="Annotated tmux status bar split into three zones: ordinary workspaces on the left, content-blind Git context in the centre, and lifecycle-colored agents on the right, with a variant showing the active-workspace highlight">
-
-The status bar is content-blind by design: it reports lifecycle state,
-branch, and tracked-line/file counts for the selected agent — never a prompt
-or a response. One line answers "what's my Git state" and "who needs me"
-without switching windows.
-
-### Two surfaces: find agents, then act
-
-<img src="docs/images/design/navigator-cockpit-surfaces.png" alt="Side-by-side comparison of the Workspace Navigator, which lists every window and agent across tmux sessions, and the Workspace Cockpit, which shows full detail and start, review, jump, and finish actions for the selected one">
-
-`prefix + w` opens the **Workspace Navigator** — every ordinary window and
-every active agent, grouped by project, across all tmux sessions. `prefix + P`
-opens the **Workspace Cockpit** — repository identity, branch, checkout, and
-Git cleanliness for the selected worktree, plus the guided start, review,
-jump, and finish actions.
-
-### Lifecycle: from a task to a merged worktree
-
-<img src="docs/images/design/lifecycle-flow.png" alt="Lifecycle flow diagram: start task creates a worktree, the agent moves to working, then needs attention when waiting or failed, then review when idle and ready, then finish safely once clean and merged">
-
-### Adapts to the terminal width
-
-<img src="docs/images/design/responsive-layouts.png" alt="The status bar at three widths: wide showing every workspace and agent, narrow collapsing inactive workspace labels to an arrow, and compact under 80 columns sharing project, Git, lifecycle, and navigator cues in one flow">
-
-At every width the same three zones survive — only their density changes.
+`tmux-agent-watch` recognizes Codex, Claude Code, and OpenCode. It adds
+content-blind lifecycle state, Git context, navigation, and guarded worktree
+actions to tmux.
 
 ## Install
 
-With [TPM](https://github.com/tmux-plugins/tpm), add this repository to
-`.tmux.conf`:
+### 1. Add the plugin
+
+With [TPM](https://github.com/tmux-plugins/tpm), add this to `.tmux.conf`:
 
 ```tmux
 set -g @plugin 'memnoc/tmux-agent-watch'
 ```
 
-While developing locally, use the absolute checkout path instead:
+Install plugins with `prefix + I`, or reload tmux if the plugin is already
+checked out.
 
-```tmux
-run-shell /home/memnoc/tmux-agent-watch/tmux-agent-watch.tmux
-```
+### 2. Install the binary
 
-Reload tmux, then start agents exactly as you do today. No special launcher is
-required.
-
-## Use
-
-- `prefix + H` opens a quick-reference help popup. Press `q` or Escape to close it.
-- `prefix + P` opens the Workspace Cockpit for guided start, review, jump, and finish actions.
-- `prefix + w` opens the grouped workspace and agent navigator.
-- `prefix + C-w` opens tmux's untouched native window tree.
-- `prefix + a` jumps to the oldest agent requiring attention.
-- `prefix + Space` expands or collapses the optional legacy sidebar.
-- `prefix + A` kills and recreates the optional sidebar if it becomes stuck.
-- `prefix + W` creates a branch worktree and starts an agent in a new window.
-- `prefix + X` safely finishes the selected clean, merged worktree.
-- `prefix + m` uses normal tmux pane zoom.
-- Existing window navigation and naming continue to work normally.
-
-The two-line status area clusters ordinary workspaces on the left and managed
-agents on the right. The centre reports content-blind Git context: branch,
-tracked lines added/deleted, changed files, and untracked files. Lifecycle
-colour identifies working, waiting, review, and failed agents; a pointer marks
-the selected agent. Overflow is explicit and `prefix + w` opens the complete
-grouped inventory across tmux sessions. At narrower widths, the selected
-project, compact Git state, agent lifecycle, and navigator cue share one
-left-to-right flow so independently aligned regions cannot collide.
-
-The default icon mode requires no patched font. Nerd Font users can enable the
-opt-in icon vocabulary:
-
-```tmux
-set -g @agent-watch-icon-mode nerd
-```
-
-The former sidebar is retained as an opt-in compatibility surface. Enable it
-with `set -g @agent-watch-sidebar on`. Its generated pane rejects keyboard
-focus and keeps its reserved left position if a layout command moves it.
-
-The three-column collapsed sidebar shows one dot per agent in stable tmux order.
-`●` identifies a normal agent, while `◆` identifies an agent running in a linked
-Git worktree. In worktree details, `CLEAN` means there are no uncommitted
-changes; `DIRTY` means changes need to be reviewed, committed, or discarded.
-The expanded view groups agents that need attention above working agents, and
-adds a repository path when it clarifies the window name, semantic state, age,
-plus a complete, word-wrapped summary of what the agent is doing, did, or needs.
-A single sidebar pane follows the selected agent window within each session.
-Fresh shell windows remain full-width until an agent starts in them.
-
-### Workspace Cockpit
-
-Press `prefix + P` for the primary worktree workflow. The action-first cockpit
-shows live repository and fleet context, then guides four operations without
-requiring the individual shortcut sequence:
-
-- **Start a quick win** asks for a short task, generates and confirms a branch,
-  lets you choose an agent, creates the linked worktree, and jumps to it.
-- **Review ready work** shows only waiting, failed, and review-ready workspaces
-  and jumps directly to the authoritative agent pane.
-- **Jump to a workspace** lists live agents across tmux sessions.
-- **Finish merged work** lists only clean worktrees already merged into the
-  configured base branch and retains the existing confirmation safeguard.
-
-Errors and empty states remain visible inside the cockpit. The direct `W`, `g`,
-and `X` bindings remain available as faster expert paths.
-
-### Install the Rust v2 binary
-
-TPM checks out the plugin but does not compile Rust. After installing or
-updating the plugin, run its checksum-verifying installer once:
+TPM does not compile Rust. Run the bundled installer once after installing or
+updating the plugin:
 
 ```sh
 ~/.tmux/plugins/tmux-agent-watch/install.sh
 ```
 
-The installer selects the published Linux/macOS x86_64 or ARM64 archive,
-verifies it against the release's `SHA256SUMS`, and installs
-`tmux-agent-watch` into `~/.local/bin`. Override the destination with
-`TMUX_AGENT_WATCH_INSTALL_DIR`, or pin a tag such as `v2.0.0-alpha.1` with
-`TMUX_AGENT_WATCH_VERSION`.
+It downloads the correct Linux or macOS build, verifies its checksum, and
+installs it to `~/.local/bin`.
 
 To build from source instead:
 
 ```sh
-cargo install --locked --path .
+cargo install --locked --path ~/.tmux/plugins/tmux-agent-watch
 ```
 
-```tmux
-set -g @agent-watch-theme moon # rose-pine, moon, or dawn
-```
+Reload tmux, then press `prefix + P` to open the Workspace Cockpit. Agents can
+still be started normally; no special launcher is required.
 
-Reload the plugin and press `prefix + P`. Rust v2 is the default. Set
-`@agent-watch-v2 off` only when you need the legacy Bash fallback. V2 process
-scanning and lifecycle hooks use the content-blind path: hook payloads are
-ignored, terminal scrollback is never read, and any legacy content-bearing
-tmux message is erased. The
-cockpit, sidebar, and HUD all project the same Rust workspace model. The direct
-`W` and `X` worktree bindings and the cockpit's guided `n`/`f` flows use the
-same guarded Rust start and finish operations.
+## How it works
 
-Maintainers publish a release by pushing a tag that exactly matches the Cargo
-package version, such as `v2.0.0-alpha.1`. GitHub Actions builds native archives
-for Linux and macOS on x86_64 and ARM64, verifies their checksums, and attaches
-the four archives plus `SHA256SUMS` to the release.
+<img src="docs/images/design/hero-workflow.png" alt="Diagram: many projects and agents feed a content-blind status bar, which feeds the Workspace Navigator and Cockpit, which finish work safely back to a clean, merged worktree">
 
-Before tagging, run the same workflow manually. Manual runs build and verify
-the complete matrix and retain a combined `release-bundle` for 14 days, but the
-publish job is tag-guarded and cannot run. Complete the
-[internal preflight checklist](docs/preflight-checklist.md) against that bundle
-before approving publication.
+| Surface | What it answers | Open it |
+| --- | --- | --- |
+| Status bar | Where am I, what changed, and who needs me? | Always visible |
+| Workspace Navigator | What is running across all tmux sessions? | `prefix + w` |
+| Workspace Cockpit | What should I review, open, start, or finish? | `prefix + P` |
 
-The v2 cockpit reads and validates its configuration as typed values. Existing
-`@agent-watch-agent` and `@agent-watch-base-branch` options set the initial agent
-and finish target. `@agent-watch-branch-prefix` defaults to `work/`. In the start
-form, press Tab or Right to cycle between Codex, Claude Code, and OpenCode before
-creating the workspace.
+### Status at a glance
 
-```tmux
-set -g @agent-watch-agent claude
-set -g @agent-watch-base-branch trunk
-set -g @agent-watch-branch-prefix quick-win/
-set -g @agent-watch-redact-labels on # hide workspace labels while screen sharing
-```
+<img src="docs/images/design/status-bar-anatomy.png" alt="Annotated tmux status bar split into three zones: ordinary workspaces on the left, content-blind Git context in the centre, and lifecycle-colored agents on the right, with a variant showing the active-workspace highlight">
 
-See [Privacy and local data flow](docs/privacy.md) for the exact v2 data
-boundary and the responsibilities of separately installed agents.
+| Color | State | Meaning |
+| --- | --- | --- |
+| Blue | Working | The agent is active |
+| Gold | Waiting | The agent needs input |
+| Green | Review | Work is ready to inspect |
+| Red | Failed | The agent or task failed |
 
-### Parallel worktrees
+Only lifecycle state, branch, and Git counts are shown. Prompts, responses, and
+terminal scrollback are never read.
 
-Press `prefix + W`, enter a new branch name such as `feature/auth`, and the
-plugin creates a linked worktree next to the repository under
-`<repository>-worktrees/feature-auth`. It then opens a tmux window in that
-worktree and starts Codex. The observer also recognizes agents started inside
-worktrees created manually or through another tool. The expanded sidebar labels
-them with their branch, clean or dirty state, and worktree path.
+### Find work, then act
 
-Set `@agent-watch-agent` to use another installed agent:
+<img src="docs/images/design/navigator-cockpit-surfaces.png" alt="Side-by-side comparison of the Workspace Navigator, which lists every window and agent across tmux sessions, and the Workspace Cockpit, which shows full detail and start, review, jump, and finish actions for the selected one">
 
-```tmux
-set -g @agent-watch-agent claude
-```
+| Cockpit action | Result | Direct key |
+| --- | --- | --- |
+| Start | Create a linked worktree, choose an agent, and begin the task | `prefix + W` |
+| Review | Show agents waiting, failed, or ready for review | — |
+| Jump | Open a live agent workspace | `prefix + w` |
+| Finish | Remove a clean, integrated worktree while retaining its branch | `prefix + X` |
 
-The scripts can also be used directly. Extra arguments after the branch are
-treated as the exact agent command and arguments:
+<img src="docs/images/design/lifecycle-flow.png" alt="Lifecycle flow diagram: start task creates a worktree, the agent moves to working, then needs attention when waiting or failed, then review when idle and ready, then finish safely once clean and merged">
 
-```sh
-scripts/worktree-new.sh feature/auth opencode
-scripts/worktree-new.sh --repo /path/to/repository feature/auth opencode
-scripts/worktree-remove.sh feature/auth
-```
+Finish refuses primary checkouts, dirty worktrees, and branches not integrated
+into the configured base branch.
 
-Removal refuses dirty worktrees, closes the matching tmux window only after Git
-successfully removes the worktree, and retains the branch for review or merge.
-Set `AGENT_WATCH_WORKTREE_ROOT` when a different worktree parent is required.
+### Responsive layout
 
-After merging a worktree branch into `main`, press `prefix + X` from its agent
-window. The guarded finish popup refuses primary checkouts, dirty worktrees, and
-branches that are not merged into the configured base branch. Confirming removes
-the linked directory and closes its window while retaining the branch. Projects
-that do not use `main` can set `@agent-watch-base-branch`.
+<img src="docs/images/design/responsive-layouts.png" alt="The status bar at three widths: wide showing every workspace and agent, narrow collapsing inactive workspace labels to an arrow, and compact under 80 columns sharing project, Git, lifecycle, and navigator cues in one flow">
 
-The clustered status bar answers where you are, what changed in Git, and which
-agents need you. Detailed lifecycle actions live in the cockpit, while
-`prefix + w` navigates every tmux window.
+Workspace, Git, lifecycle, and navigation context remain visible as the
+terminal narrows; labels collapse before information collides.
 
-The observer checks panes every two seconds. Automatic terminal classification
-is conservative by design. Exact lifecycle hooks take precedence over the
-observer. Agent hooks can report an exact state with:
+## Use
 
-```sh
-/path/to/tmux-agent-watch/scripts/status.sh working
-/path/to/tmux-agent-watch/scripts/status.sh needs_input "Approve deployment"
-/path/to/tmux-agent-watch/scripts/status.sh done "Ready for review"
-/path/to/tmux-agent-watch/scripts/status.sh failed "Tests failed"
-```
+| Key | Action |
+| --- | --- |
+| `prefix + H` | Open help (`q` or Escape closes it) |
+| `prefix + P` | Open the Workspace Cockpit |
+| `prefix + w` | Open the grouped workspace navigator |
+| `prefix + C-w` | Open tmux's native window tree |
+| `prefix + a` | Jump to the oldest agent needing attention |
+| `prefix + W` | Create a worktree and start an agent |
+| `prefix + X` | Finish the selected clean, integrated worktree |
+| `prefix + Space` | Toggle the optional legacy sidebar |
+| `prefix + A` | Recreate a stuck legacy sidebar |
 
-### Claude Code lifecycle hooks
+Existing tmux window navigation, naming, and pane zoom continue to work.
 
-Claude Code can publish deterministic state changes. Add these entries to the
-`hooks` object in `~/.claude/settings.json`, replacing `/path/to` with the
-plugin's location:
+## Agent integrations
 
-```json
-{
-  "UserPromptSubmit": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh UserPromptSubmit"
-        }
-      ]
-    }
-  ],
-  "PermissionRequest": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh PermissionRequest"
-        }
-      ]
-    }
-  ],
-  "Stop": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh Stop"
-        }
-      ]
-    }
-  ],
-  "StopFailure": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh StopFailure"
-        }
-      ]
-    }
-  ]
-}
-```
+Automatic terminal classification works without setup. Optional hooks provide
+exact lifecycle transitions and take precedence over observation.
 
-These commands receive Claude's event JSON on standard input and use the
-inherited `TMUX_PANE` to update the correct window. Outside tmux they do
-nothing. Terminal parsing remains the fallback when hooks are not configured.
+| Agent | Integration | Without it |
+| --- | --- | --- |
+| Codex CLI 0.151.0+ | Lifecycle hooks in `~/.codex/config.toml` | Terminal observation |
+| Claude Code | Lifecycle hooks in `~/.claude/settings.json` | Terminal observation |
+| OpenCode | Local event plugin | Terminal observation |
 
-### Codex CLI lifecycle hooks
+<details>
+<summary>Codex CLI hooks</summary>
 
-Codex CLI 0.151.0 and newer exposes stable lifecycle hooks. Add these entries
-to `~/.codex/config.toml`, replacing `/path/to` with the plugin's location:
+Replace `/path/to` with the plugin checkout:
 
 ```toml
 [hooks]
@@ -314,14 +130,29 @@ stop = [{ type = "command", command = "/path/to/tmux-agent-watch/scripts/codex-h
 interrupt = [{ type = "command", command = "/path/to/tmux-agent-watch/scripts/codex-hook.sh interrupt" }]
 ```
 
-Review and trust the hooks when Codex prompts you. The plugin never bypasses
-Codex hook trust. Older Codex versions continue to use terminal observation.
+Review and trust the commands when Codex prompts you.
 
-### OpenCode lifecycle plugin
+</details>
 
-OpenCode publishes session and permission events through local plugins. Copy
-the provided integration into OpenCode's global plugin directory and replace
-`/path/to` inside the copied file with this repository's location:
+<details>
+<summary>Claude Code hooks</summary>
+
+Add this inside the `hooks` object in `~/.claude/settings.json`, replacing
+`/path/to` with the plugin checkout:
+
+```json
+{
+  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh UserPromptSubmit" }] }],
+  "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh PermissionRequest" }] }],
+  "Stop": [{ "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh Stop" }] }],
+  "StopFailure": [{ "hooks": [{ "type": "command", "command": "/path/to/tmux-agent-watch/scripts/claude-hook.sh StopFailure" }] }]
+}
+```
+
+</details>
+
+<details>
+<summary>OpenCode plugin</summary>
 
 ```sh
 mkdir -p ~/.config/opencode/plugins
@@ -329,68 +160,97 @@ cp /path/to/tmux-agent-watch/integrations/opencode-agent-watch.js \
   ~/.config/opencode/plugins/tmux-agent-watch.js
 ```
 
-The adapter maps busy/retry status to `WORKING`, permission requests to
-`WAITING`, idle sessions to `REVIEW`, and session errors to `FAILED`. OpenCode
-continues to use terminal observation when the integration is not installed.
+Replace `/path/to` inside the copied file with the plugin checkout.
 
-## Options
+</details>
 
-Set options before loading the plugin:
+Hooks ignore event payload content and use the inherited `TMUX_PANE` to update
+the correct window. See [Privacy and local data flow](docs/privacy.md) for the
+full data boundary.
+
+## Configure
+
+Defaults work without configuration. Set overrides before loading the plugin.
+
+### Common options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `@agent-watch-agent` | `codex` | Agent started for new worktrees |
+| `@agent-watch-base-branch` | `main` | Branch used to validate finished work |
+| `@agent-watch-branch-prefix` | `work/` | Prefix for generated branches |
+| `@agent-watch-theme` | `moon` | `rose-pine`, `moon`, or `dawn` |
+| `@agent-watch-icon-mode` | `safe` | Use `nerd` for Nerd Font icons |
+| `@agent-watch-redact-labels` | `off` | Hide workspace labels while screen sharing |
+| `@agent-watch-sidebar` | `off` | Enable the legacy sidebar |
+
+Example:
 
 ```tmux
-set -g @agent-watch-interval 2
-set -g @agent-watch-next-key a
-set -g @agent-watch-sidebar-key Space
-set -g @agent-watch-restart-key A
-set -g @agent-watch-worktree-key W
-set -g @agent-watch-cockpit-key P
-set -g @agent-watch-navigator-key w
-set -g @agent-watch-native-navigator-key C-w
-set -g @agent-watch-v2 on
-set -g @agent-watch-theme moon
-set -g @agent-watch-icon-mode safe
-set -g @agent-watch-finish-key X
-set -g @agent-watch-help-key H
-set -g @agent-watch-agent codex
-set -g @agent-watch-base-branch main
-set -g @agent-watch-branch-prefix work/
-set -g @agent-watch-redact-labels off
-set -g @agent-watch-git-interval 10
-set -g @agent-watch-hud on
-set -g @agent-watch-status off
-set -g @agent-watch-sidebar off
-set -g @agent-watch-sidebar-width 3
-set -g @agent-watch-sidebar-expanded-width 38
-set -g @agent-watch-working-color '#9ccfd8'
-set -g @agent-watch-needs-input-color '#f6c177'
-set -g @agent-watch-done-color '#a6da95'
-set -g @agent-watch-failed-color '#ed8796'
+set -g @agent-watch-agent claude
+set -g @agent-watch-base-branch trunk
+set -g @agent-watch-branch-prefix quick-win/
+set -g @agent-watch-theme rose-pine
 ```
 
-The symbols are configurable with `@agent-watch-working-symbol`,
-`@agent-watch-needs-input-symbol`, `@agent-watch-done-symbol`, and
-`@agent-watch-failed-symbol`.
+<details>
+<summary>Keys, refresh intervals, and advanced options</summary>
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `@agent-watch-interval` | `2` | Agent scan interval in seconds |
+| `@agent-watch-git-interval` | `10` | Git refresh interval in seconds |
+| `@agent-watch-next-key` | `a` | Jump-to-attention key |
+| `@agent-watch-sidebar-key` | `Space` | Sidebar toggle key |
+| `@agent-watch-restart-key` | `A` | Sidebar restart key |
+| `@agent-watch-worktree-key` | `W` | Worktree creation key |
+| `@agent-watch-finish-key` | `X` | Worktree finish key |
+| `@agent-watch-cockpit-key` | `P` | Cockpit key |
+| `@agent-watch-navigator-key` | `w` | Navigator key |
+| `@agent-watch-native-navigator-key` | `C-w` | Native tmux tree key |
+| `@agent-watch-help-key` | `H` | Help key |
+| `@agent-watch-v2` | `on` | Rust implementation; `off` selects legacy Bash |
+| `@agent-watch-hud` | `on` | Lifecycle HUD |
+| `@agent-watch-status` | `off` | Legacy status display |
+| `@agent-watch-sidebar-width` | `3` | Collapsed sidebar width |
+| `@agent-watch-sidebar-expanded-width` | `38` | Expanded sidebar width |
+
+Lifecycle colors and symbols use `@agent-watch-{working,needs-input,done,failed}-color`
+and `@agent-watch-{working,needs-input,done,failed}-symbol`.
+
+</details>
+
+## Worktrees from the command line
+
+The cockpit is the normal interface, but the underlying scripts are available:
+
+```sh
+scripts/worktree-new.sh feature/auth opencode
+scripts/worktree-new.sh --repo /path/to/repository feature/auth opencode
+scripts/worktree-remove.sh feature/auth
+```
+
+Extra arguments after the branch are used as the exact agent command. Set
+`AGENT_WATCH_WORKTREE_ROOT` to change the worktree parent directory. Removal
+refuses dirty worktrees and retains the branch.
 
 ## Session persistence
 
-This plugin stores live status as tmux window options. Use
-`tmux-resurrect` and `tmux-continuum` for session, window, layout, and working
-directory restoration.
+Live state is stored in tmux window options. Use `tmux-resurrect` and
+`tmux-continuum` to restore sessions, windows, layouts, and working directories.
+Load Continuum after themes that replace `status-right`.
 
-Continuum must load after themes that replace `status-right`, or its periodic
-save hook can be lost. Put it last in the TPM plugin list:
+## Maintainers
 
-```tmux
-set -g @plugin '2kabhishek/tmux2k'
-set -g @plugin 'tmux-plugins/tmux-resurrect'
-set -g @plugin 'tmux-plugins/tmux-continuum'
-```
+Release tags must match the Cargo package version. GitHub Actions builds and
+checksums Linux and macOS archives for x86_64 and ARM64. Before tagging, run the
+release workflow manually and complete the
+[preflight checklist](docs/preflight-checklist.md) against its `release-bundle`.
 
 ## Scope
 
-The plugin does not retain task history, track tokens, or introduce its own
-project model. Its optional worktree launcher handles only branch isolation and
-process startup; tmux remains the interface.
+The plugin does not retain task history, track tokens, or create a separate
+project model. tmux remains the interface and process supervisor.
 
 ## License
 
