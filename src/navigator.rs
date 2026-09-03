@@ -51,6 +51,13 @@ struct App {
     theme: Theme,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NavigationAction {
+    Continue,
+    Close,
+    Jump,
+}
+
 impl App {
     fn refresh_visible(&mut self) {
         let query = self.filter.to_lowercase();
@@ -81,6 +88,45 @@ impl App {
                 .saturating_add_signed(delta)
                 .min(self.visible.len() - 1);
         }
+    }
+}
+
+fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
+    if app.filtering {
+        match code {
+            KeyCode::Esc => app.filtering = false,
+            KeyCode::Enter => {
+                app.filtering = false;
+                return NavigationAction::Jump;
+            }
+            KeyCode::Backspace => {
+                app.filter.pop();
+                app.refresh_visible();
+            }
+            KeyCode::Char(character) => {
+                app.filter.push(character);
+                app.refresh_visible();
+            }
+            _ => {}
+        }
+        return NavigationAction::Continue;
+    }
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => NavigationAction::Close,
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.move_selection(1);
+            NavigationAction::Continue
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.move_selection(-1);
+            NavigationAction::Continue
+        }
+        KeyCode::Char('/') => {
+            app.filtering = true;
+            NavigationAction::Continue
+        }
+        KeyCode::Enter => NavigationAction::Jump,
+        _ => NavigationAction::Continue,
     }
 }
 
@@ -143,27 +189,9 @@ fn event_loop(
         if key.kind != KeyEventKind::Press {
             continue;
         }
-        if app.filtering {
-            match key.code {
-                KeyCode::Esc | KeyCode::Enter => app.filtering = false,
-                KeyCode::Backspace => {
-                    app.filter.pop();
-                    app.refresh_visible();
-                }
-                KeyCode::Char(character) => {
-                    app.filter.push(character);
-                    app.refresh_visible();
-                }
-                _ => {}
-            }
-            continue;
-        }
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => return Ok(()),
-            KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
-            KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
-            KeyCode::Char('/') => app.filtering = true,
-            KeyCode::Enter => {
+        match handle_key(app, key.code) {
+            NavigationAction::Close => return Ok(()),
+            NavigationAction::Jump => {
                 if let Some(item) = app
                     .visible
                     .get(app.selected)
@@ -180,7 +208,7 @@ fn event_loop(
                     }
                 }
             }
-            _ => {}
+            NavigationAction::Continue => {}
         }
     }
 }
@@ -397,5 +425,21 @@ mod tests {
         for forbidden in ["@agent_watch_message", "capture-pane", "pane_title"] {
             assert!(!FORMAT.contains(forbidden));
         }
+    }
+
+    #[test]
+    fn enter_activates_the_selected_filtered_result_in_one_action() {
+        let mut app = App {
+            windows: Vec::new(),
+            visible: Vec::new(),
+            selected: 0,
+            filter: "star".into(),
+            filtering: true,
+            nerd_icons: true,
+            theme: Theme::rose_pine(Variant::Moon),
+        };
+
+        assert_eq!(handle_key(&mut app, KeyCode::Enter), NavigationAction::Jump);
+        assert!(!app.filtering);
     }
 }

@@ -60,7 +60,7 @@ EOF
     failed) state_context="#[fg=${love}]FAILED #[fg=${muted}]· " ;;
   esac
   branch_label="${branch:-detached}"
-  if [ "$available" -lt 80 ]; then
+  if [ "$available" -lt 105 ]; then
     branch_label="$(printf '%s' "$branch_label" | cut -c1-8)"
   elif [ "$available" -lt 120 ]; then
     branch_label="$(printf '%s' "$branch_label" | cut -c1-14)"
@@ -70,9 +70,9 @@ EOF
       "$state_context" "$iris" "$branch_icon" "$text" "$branch_label" "$pine"
     return
   fi
-  if [ "$available" -lt 80 ]; then
-    printf '%s#[fg=%s]+%s #[fg=%s]−%s#[default]' \
-      "$state_context" "$pine" "$added" "$love" "$deleted"
+  if [ "$available" -lt 105 ]; then
+    printf '%s#[fg=%s]%s  #[fg=%s]+%s #[fg=%s]−%s#[default]' \
+      "$state_context" "$text" "$branch_label" "$pine" "$added" "$love" "$deleted"
     return
   fi
   printf '%s#[fg=%s]%s #[fg=%s]%s  #[fg=%s]+%s #[fg=%s]−%s  #[fg=%s]%s files' \
@@ -84,14 +84,65 @@ EOF
   printf '#[default]'
 }
 
+compact_bar() {
+  local repo="$1" branch="$2" state="$3" name="$4" available="$5"
+  local project project_limit branch_limit status stats added deleted agent_label agent_color
+
+  project="${repo##*/}"
+  [ -n "$project" ] || project="$name"
+  if [ "$available" -lt 50 ]; then
+    project_limit=6; branch_limit=7
+  elif [ "$available" -lt 65 ]; then
+    project_limit=10; branch_limit=10
+  else
+    project_limit=14; branch_limit=14
+  fi
+  project="$(printf '%s' "$project" | cut -c1-"$project_limit")"
+
+  printf '#[align=left,fg=%s,bold]%s' "$text" "$project"
+  if [ -n "$repo" ] && git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    [ -n "$branch" ] || branch="$(git -C "$repo" branch --show-current 2>/dev/null || true)"
+    branch="$(printf '%s' "${branch:-detached}" | cut -c1-"$branch_limit")"
+    status="$(git -C "$repo" status --porcelain 2>/dev/null || true)"
+    printf ' #[fg=%s]· %s #[fg=%s]%s' "$muted" "$branch_icon" "$text" "$branch"
+    if [ -n "$status" ]; then
+      if [ "$available" -lt 50 ]; then
+        printf ' #[fg=%s]●' "$gold"
+      else
+        stats="$(git -C "$repo" diff --numstat HEAD -- 2>/dev/null |
+          awk '$1 ~ /^[0-9]+$/ { add += $1 } $2 ~ /^[0-9]+$/ { del += $2 } END { print add+0, del+0 }')"
+        read -r added deleted <<EOF
+$stats
+EOF
+        printf ' #[fg=%s]+%s #[fg=%s]−%s' "$pine" "$added" "$love" "$deleted"
+      fi
+    else
+      printf ' #[fg=%s]✓' "$pine"
+    fi
+  fi
+
+  case "$state" in
+    working) agent_label='WORK'; agent_color="$foam" ;;
+    needs_input) agent_label='WAIT'; agent_color="$gold" ;;
+    done) agent_label='REVIEW'; agent_color="$pine" ;;
+    failed) agent_label='FAIL'; agent_color="$love" ;;
+    *) agent_label=''; agent_color="$iris" ;;
+  esac
+  if [ -n "$agent_label" ]; then
+    printf ' #[fg=%s]· #[fg=%s]%s %s' "$muted" "$agent_color" "$agent_icon" "$agent_label"
+  fi
+  printf '  #[fg=%s]%s#[default]' "$iris" "$more_icon"
+}
+
 rows="$(tmux list-windows -t "$session" \
   -F '#{window_index}|#{window_id}|#{window_name}|#{window_active}|#{@agent_watch_state}|#{@agent_watch_branch}|#{@agent_watch_repo}|#{@agent_watch_git_status}|#{pane_current_path}|#{@agent_watch_since}|#{@agent_watch_context_repo}' \
   2>/dev/null || true)"
+current_is_agent="$(printf '%s\n' "$rows" | awk -F'|' -v id="$current" '$2 == id && $5 != "" { print 1; exit }')"
 
 # Keep each cluster bounded so context remains readable; terminal-width tiers
 # avoid compressing labels into noise on smaller clients.
-if [ "$width" -lt 80 ]; then
-  left_limit=1; right_limit=1; inactive_name_limit=0; agent_name_limit=7
+if [ "$width" -lt 105 ]; then
+  left_limit=0; right_limit=1; inactive_name_limit=0; agent_name_limit=7
 elif [ "$width" -lt 120 ]; then
   left_limit=2; right_limit=2; inactive_name_limit=4; agent_name_limit=8
 elif [ "$width" -lt 140 ]; then
@@ -107,6 +158,10 @@ right_count=0
 left_hidden=0
 right_hidden=0
 context=''
+current_name=''
+current_state=''
+current_branch=''
+current_repo=''
 
 while IFS='|' read -r index window_id name _active state branch repo git_status path since context_repo; do
   [ -n "$window_id" ] || continue
@@ -115,7 +170,11 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
   [ -n "$state" ] && agent=1
 
   if [ "$window_id" = "$current" ]; then
-    repo="${context_repo:-$repo}"
+    repo="${context_repo:-${repo:-$path}}"
+    current_name="$name"
+    current_state="$state"
+    current_branch="$branch"
+    current_repo="$repo"
     if [ -n "$repo" ]; then
       context="$(git_context "$repo" "$branch" "$state" "$width")"
     elif [ -n "$state" ]; then
@@ -150,7 +209,13 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
 
   if [ "$agent" = 1 ]; then
     right_count=$((right_count + 1))
-    if [ "$right_count" -le "$right_limit" ] || [ "$window_id" = "$current" ]; then
+    show_agent=0
+    if [ "$width" -lt 105 ] && [ "$current_is_agent" = 1 ]; then
+      [ "$window_id" = "$current" ] && show_agent=1
+    elif [ "$right_count" -le "$right_limit" ] || [ "$window_id" = "$current" ]; then
+      show_agent=1
+    fi
+    if [ "$show_agent" = 1 ]; then
       case "$state" in
         failed) color="$love" ;;
         needs_input) color="$gold" ;;
@@ -170,11 +235,7 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
     left_count=$((left_count + 1))
     if [ "$left_count" -le "$left_limit" ] || [ "$window_id" = "$current" ]; then
       if [ "$window_id" = "$current" ]; then
-        if [ "$icon_mode" = nerd ]; then
-          item="#[range=window|${index}]#[fg=${rose}]#[bg=${surface},fg=${text},bold] ${index} ${short_name} #[bg=default,fg=${rose}]#[norange]"
-        else
-          item="#[range=window|${index}]#[fg=${rose},bold][ #[fg=${text}]${index} ${short_name} #[fg=${rose}] ]#[norange]"
-        fi
+        item="#[range=window|${index}]#[fg=${rose}]│#[bg=${surface},fg=${text},bold] ${index} ${short_name} #[bg=default,fg=${rose}]│#[norange]"
       else
         if [ "$inactive_name_limit" -eq 0 ]; then
           item="#[range=window|${index}]#[fg=${muted}]${index}#[norange]"
@@ -191,6 +252,11 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
 done <<EOF
 $rows
 EOF
+
+if [ "$width" -lt 80 ]; then
+  compact_bar "$current_repo" "$current_branch" "$current_state" "$current_name" "$width"
+  exit 0
+fi
 
 if [ "$left_hidden" -gt 0 ]; then
   left="${left}  #[fg=${iris}]${more_icon}#[default]"

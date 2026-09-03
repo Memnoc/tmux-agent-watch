@@ -5,8 +5,6 @@
 `tmux-agent-watch` shows which agent windows need you, without replacing the
 tmux workflow you already use.
 
-![Clustered tmux status bar with Git context and agent lifecycle states](docs/images/status-bar-wide.png)
-
 Each recognized agent gets a color-coded state in tmux's native window tabs:
 
 | Marker | Color | State |
@@ -18,6 +16,56 @@ Each recognized agent gets a color-coded state in tmux's native window tabs:
 
 The plugin currently recognizes Codex, Claude Code, and OpenCode. Other windows
 remain unchanged.
+
+## Screenshot gallery
+
+<table>
+  <tr>
+    <td colspan="2">
+      <img src="docs/images/status-bar-wide.png" alt="A wide tmux status bar with workspace tabs, Git context, and color-coded agent states">
+      <br>
+      <sub><strong>At a glance:</strong> workspaces stay on the left, repository context stays in the centre, and agents that need attention stay visible on the right.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="docs/images/status-bar-active-workspace.png" alt="A wide tmux status bar with the active app workspace highlighted between square-ended rails">
+      <br>
+      <sub><strong>Active workspace:</strong> slim rails and a restrained text highlight mark the current ordinary workspace.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/workspace-cockpit.png" alt="The Workspace Cockpit showing project, path, branch, checkout, and lifecycle details for the selected workspace">
+      <br>
+      <sub><strong>Workspace Cockpit:</strong> review, jump to, and finish worktrees with their project identity and full path visible.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/images/workspace-start.png" alt="The Start Workspace form with task, generated branch, and agent selection fields">
+      <br>
+      <sub><strong>Start Workspace:</strong> describe the task, preview its branch, and choose the agent without leaving tmux.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="docs/images/workspace-navigator.png" alt="The workspace navigator grouping ordinary tmux windows and active coding agents across projects">
+      <br>
+      <sub><strong>Workspace Navigator:</strong> browse every ordinary window and active agent across tmux sessions.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/status-bar-narrow.png" alt="The intermediate-width tmux status bar retaining lifecycle, Git, and selected-agent context">
+      <br>
+      <sub><strong>Narrow:</strong> inactive labels collapse while the selected workspace and Git context remain visible.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/images/status-bar-compact.png" alt="The sub-80-column tmux status bar showing project, compact Git state, agent lifecycle, and navigator cue in one flow">
+      <br>
+      <sub><strong>Compact:</strong> project, Git, lifecycle, and navigation share one collision-free flow.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Install
 
@@ -51,22 +99,14 @@ required.
 - `prefix + m` uses normal tmux pane zoom.
 - Existing window navigation and naming continue to work normally.
 
-![Workspace navigator grouping ordinary windows and active agents](docs/images/workspace-navigator.png)
-
-*The grouped navigator keeps every tmux window reachable while bringing agents
-that need attention into a dedicated section.*
-
 The two-line status area clusters ordinary workspaces on the left and managed
 agents on the right. The centre reports content-blind Git context: branch,
 tracked lines added/deleted, changed files, and untracked files. Lifecycle
 colour identifies working, waiting, review, and failed agents; a pointer marks
 the selected agent. Overflow is explicit and `prefix + w` opens the complete
-grouped inventory across tmux sessions.
-
-![Compact status bar in a narrow split terminal](docs/images/status-bar-narrow.png)
-
-*At narrower widths, labels collapse before lifecycle, Git, and navigation
-signals are removed.*
+grouped inventory across tmux sessions. At narrower widths, the selected
+project, compact Git state, agent lifecycle, and navigator cue share one
+left-to-right flow so independently aligned regions cannot collide.
 
 The default icon mode requires no patched font. Nerd Font users can enable the
 opt-in icon vocabulary:
@@ -90,8 +130,6 @@ A single sidebar pane follows the selected agent window within each session.
 Fresh shell windows remain full-width until an agent starts in them.
 
 ### Workspace Cockpit
-
-![Workspace Cockpit with fleet list and selected workspace details](docs/images/workspace-cockpit.png)
 
 Press `prefix + P` for the primary worktree workflow. The action-first cockpit
 shows live repository and fleet context, then guides four operations without

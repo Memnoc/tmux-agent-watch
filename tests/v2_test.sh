@@ -165,6 +165,51 @@ touch "$repo/README.md"
 git -C "$repo" add README.md
 git -C "$repo" commit -qm initial
 git -C "$repo" branch -M main
+
+metadata_failure_bin="$TMP_DIR/metadata-failure-bin"
+mkdir "$metadata_failure_bin"
+cp "$ROOT/tests/fixtures/tmux_metadata_failure.sh" "$metadata_failure_bin/tmux"
+chmod +x "$metadata_failure_bin/tmux"
+if PATH="$metadata_failure_bin:$PATH" "$real_binary" workspace start \
+  --repo "$repo" --worktree-root "$worktree_root" metadata/failure /bin/true \
+  >/dev/null 2>&1; then
+  printf 'not ok: v2 start unexpectedly succeeded after metadata attachment failed\n'
+  exit 1
+fi
+[ ! -e "$worktree_root/metadata-failure" ] &&
+  ! git -C "$repo" show-ref --verify --quiet refs/heads/metadata/failure || {
+  printf 'not ok: failed v2 start leaked its worktree or branch\n'
+  exit 1
+}
+printf 'ok: failed metadata attachment rolls back its worktree and branch\n'
+
+TMUX="$socket_path,$server_pid,0" AGENT_WATCH_V2_BIN="$real_binary" \
+  AGENT_WATCH_WORKTREE_ROOT="$worktree_root" "$ROOT/scripts/worktree-new.sh" \
+  --repo "$repo" work/exits-immediately false >/dev/null 2>&1 || true
+sleep 0.2
+if git -C "$repo" show-ref --verify --quiet refs/heads/work/exits-immediately ||
+  [ -e "$worktree_root/work-exits-immediately" ] ||
+  tmux -L "$SOCKET" list-windows -a -F '#{window_name}' | grep -Fxq work-exits-immediately; then
+  printf 'not ok: failed v2 start left a window, branch, or linked worktree behind\n'
+  exit 1
+fi
+printf 'ok: failed v2 start rolls back its branch and linked worktree\n'
+
+git -C "$repo" switch -qc ux/pilot
+printf 'pilot\n' > "$repo/PILOT.md"
+git -C "$repo" add PILOT.md
+git -C "$repo" commit -qm pilot
+no_change="$(TMUX="$socket_path,$server_pid,0" AGENT_WATCH_V2_BIN="$real_binary" \
+  AGENT_WATCH_WORKTREE_ROOT="$worktree_root" "$ROOT/scripts/worktree-new.sh" \
+  --repo "$repo" work/no-change "$TMP_DIR/codex" 30)"
+TMUX="$socket_path,$server_pid,0" "$real_binary" workspace finish \
+  --path "$no_change" --base main --yes >/dev/null
+[ ! -e "$no_change" ] || {
+  printf 'not ok: finish rejected a clean child of the primary checkout branch\n'
+  exit 1
+}
+printf 'ok: finish accepts work already contained by the primary checkout\n'
+
 created="$(TMUX="$socket_path,$server_pid,0" AGENT_WATCH_V2_BIN="$real_binary" \
   AGENT_WATCH_WORKTREE_ROOT="$worktree_root" "$ROOT/scripts/worktree-new.sh" \
   --repo "$repo" work/privacy "$TMP_DIR/codex" 30)"
@@ -180,14 +225,44 @@ created_window="$(tmux -L "$SOCKET" display-message -p -t v2:work-privacy '#{win
 }
 printf 'ok: v2 start creates an isolated workspace without content state\n'
 
+if TMUX="$socket_path,$server_pid,0" "$real_binary" workspace finish \
+  --path "$repo" --base main --yes >/dev/null 2>&1; then
+  printf 'not ok: v2 finish removed the primary checkout\n'
+  exit 1
+fi
+[ -d "$repo/.git" ] || { printf 'not ok: primary checkout was lost\n'; exit 1; }
+printf 'ok: v2 finish refuses the primary checkout\n'
+
+detached="$worktree_root/detached"
+git -C "$repo" worktree add -q --detach "$detached"
+if TMUX="$socket_path,$server_pid,0" "$real_binary" workspace finish \
+  --path "$detached" --base main --yes >/dev/null 2>&1; then
+  printf 'not ok: v2 finish removed a detached worktree\n'
+  exit 1
+fi
+[ -d "$detached" ] || { printf 'not ok: detached worktree was lost\n'; exit 1; }
+git -C "$repo" worktree remove "$detached"
+printf 'ok: v2 finish refuses a detached worktree\n'
+
+linked_created="$(TMUX="$socket_path,$server_pid,0" AGENT_WATCH_V2_BIN="$real_binary" \
+  "$ROOT/scripts/worktree-new.sh" --repo "$created" work/from-linked "$TMP_DIR/codex" 30)"
+[ "$linked_created" = "$TMP_DIR/repo-worktrees/work-from-linked" ] || {
+  printf 'not ok: start from a linked worktree nested its worktree root: %s\n' "$linked_created"
+  exit 1
+}
+printf 'ok: start from a linked worktree uses the canonical repository root\n'
+
 privacy_task='rotate private customer token 9f47c2'
-privacy_pane="$(tmux -L "$SOCKET" new-window -d -P -F '#{pane_id}' -t v2: -n privacy cat)"
+receiver="$TMP_DIR/task-receiver"
+printf '%s\n' '#!/bin/sh' 'IFS= read -r task' 'printf "accepted\n"' 'sleep 2' > "$receiver"
+chmod +x "$receiver"
+privacy_pane="$(tmux -L "$SOCKET" new-window -d -P -F '#{pane_id}' -t v2: -n privacy "$receiver")"
 printf '%s' "$privacy_task" | TMUX="$socket_path,$server_pid,0" \
   "$real_binary" workspace deliver-task "$privacy_pane"
 sleep 0.2
 captured="$(tmux -L "$SOCKET" capture-pane -p -t "$privacy_pane")"
-printf '%s' "$captured" | grep -Fq "$privacy_task" || {
-  printf 'not ok: transient task did not reach the selected agent pane\n'
+printf '%s' "$captured" | grep -Fq 'accepted' || {
+  printf 'not ok: transient task reached the pane but was not submitted\n'
   exit 1
 }
 if tmux -L "$SOCKET" show-options -g -w -v 2>/dev/null | grep -Fq "$privacy_task" ||
@@ -207,6 +282,12 @@ if (cd "$created" && printf 'y\n' | TMUX="$socket_path,$server_pid,0" \
 fi
 [ -d "$created" ] || { printf 'not ok: dirty worktree was lost\n'; exit 1; }
 git -C "$created" restore README.md
+mkdir "$created/nested"
+tmux -L "$SOCKET" respawn-pane -k -t "$created_window" -c "$created/nested" \
+  "$TMP_DIR/codex 30"
+empty_tree="$(printf '' | git -C "$repo" mktree)"
+unrelated_commit="$(printf 'unrelated history\n' | git -C "$repo" commit-tree "$empty_tree")"
+git -C "$repo" tag work/privacy "$unrelated_commit"
 removed="$(cd "$created" && printf 'y\n' | TMUX="$socket_path,$server_pid,0" \
   AGENT_WATCH_V2_BIN="$real_binary" "$ROOT/scripts/worktree-finish.sh")"
 [ "$removed" = "$created" ] && [ ! -e "$created" ] || {
@@ -221,4 +302,4 @@ if tmux -L "$SOCKET" list-windows -a -F '#{window_id}' | grep -Fqx "$created_win
   printf 'not ok: v2 finish left the removed workspace window open\n'
   exit 1
 fi
-printf 'ok: v2 finish enforces safety, retains the branch, and closes the window\n'
+printf 'ok: v2 finish uses branch refs, retains the branch, and closes nested-path windows\n'
