@@ -5,7 +5,17 @@ backend and receives no workspace data. It has no accounts, telemetry,
 analytics, crash uploader, update ping, remote feature flags, database, task
 history, or content cache.
 
-## Data used by v2
+## Version boundary
+
+The default Rust implementation (`@agent-watch-v2 on`) is the privacy boundary
+described below. The public `v1.0.0` release and the explicit
+`@agent-watch-v2 off` compatibility mode classify agents by reading up to 200
+lines of pane scrollback with `tmux capture-pane`; they may keep a derived
+summary in tmux window options for the current session. They do not send that
+content to this project, but they are not content-blind and should not be used
+for sensitive or organisational workflows without a separate assessment.
+
+## Data used by the default Rust implementation
 
 | Local datum | Immediate purpose | Lifetime | Surface |
 |-------------|-------------------|----------|---------|
@@ -16,7 +26,8 @@ history, or content cache.
 | lifecycle state and timestamps | show working, waiting, review, or failed state | current tmux session | cockpit, HUD, and sidebar |
 | task entered in the start form | deliver the initial instruction to the selected agent | input event and delete-on-paste tmux buffer | selected third-party agent pane |
 
-V2 does not read terminal scrollback, prompts, responses, permission text,
+The default Rust implementation does not read terminal scrollback, prompts,
+responses, permission text,
 clipboard content, file content, diffs, commit bodies, or environment-variable
 values. Task text is sent through stdin to a uniquely named tmux buffer, pasted
 with delete-on-paste, and is never placed in arguments, options, logs, or files.

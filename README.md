@@ -64,8 +64,8 @@ still be started normally; no special launcher is required.
 | Green | Review | Work is ready to inspect |
 | Red | Failed | The agent or task failed |
 
-Only lifecycle state, branch, and Git counts are shown. Prompts, responses, and
-terminal scrollback are never read.
+Only lifecycle state, branch, and Git counts are shown. The default Rust
+implementation never reads prompts, responses, or terminal scrollback.
 
 ### Find work, then act
 
@@ -209,7 +209,7 @@ set -g @agent-watch-theme rose-pine
 | `@agent-watch-navigator-key` | `w` | Navigator key |
 | `@agent-watch-native-navigator-key` | `C-w` | Native tmux tree key |
 | `@agent-watch-help-key` | `H` | Help key |
-| `@agent-watch-v2` | `on` | Rust implementation; `off` selects legacy Bash |
+| `@agent-watch-v2` | `on` | Rust implementation; `off` selects the content-reading legacy fallback |
 | `@agent-watch-hud` | `on` | Lifecycle HUD |
 | `@agent-watch-status` | `off` | Legacy status display |
 | `@agent-watch-sidebar-width` | `3` | Collapsed sidebar width |
@@ -250,7 +250,10 @@ release workflow manually and complete the
 ## Scope
 
 The plugin does not retain task history, track tokens, or create a separate
-project model. tmux remains the interface and process supervisor.
+project model. tmux remains the interface and process supervisor. Employee
+monitoring, productivity scoring, and decisions about people are outside its
+intended purpose. See [Privacy and local data flow](docs/privacy.md) before
+organisational deployment.
 
 ## License
 
