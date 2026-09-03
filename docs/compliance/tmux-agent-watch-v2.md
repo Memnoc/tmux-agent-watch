@@ -1,8 +1,8 @@
 ---
 system: tmux-agent-watch v2
 owner: Memnoc
-last-reviewed: 2026-09-01
-phase: shipping
+last-reviewed: 2026-09-03
+phase: audit
 verdict: ready
 ---
 
@@ -19,7 +19,7 @@ verdict: ready
 - Data categories, sources, destinations, retention, deletion: v2 may transiently route a user-entered task to the chosen local agent and may inspect non-content tmux, process, and Git metadata. It must not read or retain prompts, messages, generated content, permission text, terminal scrollback, task history, telemetry, analytics, or crash reports. No project backend receives data. Runtime state is discarded with the process or tmux session. User-confirmed 2026-09-01.
 - Outputs and decisions influenced: fixed operational labels and user-requested tmux/Git actions. No decisions about people. User-confirmed 2026-09-01.
 - Behaviour configuration: typed local configuration derived from documented tmux options; deterministic rules only. No model, remote feature flags, or content inference. Confirmed architecture interview 2026-09-01.
-- Release state and relevant dates: v2.0.0-alpha.1 is assembled locally on 2026-09-01 and is the default implementation in the working tree; `@agent-watch-v2 off` retains the legacy fallback. Shipping verification covers source based on `b7ef00fe2c09ac9df382f5ea02a8edec6fb43929` plus the documented uncommitted v2 implementation, and the locally built Linux x86_64 release binary. The public v1.0.0 Bash tag remains a separate legacy release.
+- Release state and relevant dates: `v1.0.0` remains the only public tag. Rust `2.0.0-alpha.1` is the default implementation on the reviewed `ux/statusline-tabs` source tree rooted at `77cf87d9aa7944bb820459f3f3a813f094650823`; it is not yet a tagged release. `@agent-watch-v2 off` retains the content-reading legacy Bash compatibility path. Repository inspection and tests performed 2026-09-03 cover that revision plus the disclosure and CI hardening recorded in the current audit change set.
 
 ## Trigger triage
 
@@ -38,8 +38,8 @@ verdict: ready
 
 | Artifact or service | Revision/version | Public/deployed/supported | Evidence | Coverage |
 |---------------------|------------------|---------------------------|----------|----------|
-| GitHub source and TPM plugin | public `v1.0.0` and current `main` | public and supported legacy release | remote `git@github.com:Memnoc/tmux-agent-watch.git`, tag and README | legacy v1 recorded separately; not treated as v2 privacy evidence |
-| v2 Rust source | `2.0.0-alpha.1`, working tree based on `b7ef00f` | local release candidate, opt-in | `Cargo.toml`, `Cargo.lock`, `src/`, full test suite | verified on Linux x86_64 |
+| GitHub source and TPM plugin | public `v1.0.0`; `main` at `ff13e33` | public legacy release and source | repository tag/tree inspection, `v1.0.0:scripts/scan.sh` | v1 reads up to 200 lines of pane scrollback and keeps derived summaries in session-scoped tmux options; no project backend or telemetry observed; current privacy notice discloses this separate boundary |
+| v2 Rust source | `2.0.0-alpha.1`, reviewed branch rooted at `77cf87d` | public source branch, not tagged | `Cargo.toml`, `Cargo.lock`, `src/`, `tests/`, full test suite | verified on Linux x86_64; content-blind claims apply only to this default path |
 | Linux x86_64 binary | `2.0.0-alpha.1` | locally built, not yet published | stripped ELF; SHA-256 `b99922702a4182ab237ca748b00121a0a162f4686c05b8e16dbca1f2feef7e3f` | build and runtime tests verified 2026-09-01 |
 | Linux/macOS x86_64 and ARM64 release archives | workflow defined for `2.0.0-alpha.1` | not yet published | `.github/workflows/release.yml`, `scripts/package-release.sh`, `tests/package_test.sh` | local package/install seam verified; each hosted artifact remains subject to its tag workflow result |
 | Hosted service/API | none | none | architecture, dependencies, source scan | verified absent |
@@ -52,6 +52,7 @@ verdict: ready
 | Developer during screen sharing | repository, branch, task, or workspace labels exposed | audience of the share; disclosure may be irreversible | `@agent-watch-redact-labels`, unit tests, and rendered tmux integration test | ready |
 | Employee or contractor | activity state repurposed for performance monitoring | potentially organisational and rights-affecting | unsupported intended purpose, no history/backend/identity, privacy notice requires deployer assessment | ready within stated purpose; new review required for monitoring support |
 | Operator repository | unsafe worktree deletion | local code loss, partly reversible through Git | clean, linked, merged, and confirmation guards in v2 integration suite | ready |
+| Legacy-mode user | prompts, responses, or permission details exposed through scrollback classification and session summaries | local and session-scoped, but content may be sensitive | legacy mode is opt-in on current source; `docs/privacy.md` and README identify the distinct boundary; no remote destination exists | ready with disclosure; not evidence for v2 content-blind claims |
 
 ## Legal obligations
 
@@ -70,6 +71,7 @@ verdict: ready
 | P-4 | Diagnostics can accidentally disclose metadata | Default to transient errors only; any future debug export requires a separate review, explicit preview, redaction, and user-chosen destination | Memnoc | no diagnostic/export command, logging framework, or crash uploader in source or dependencies; errors remain transient stderr/TUI state | ready |
 | P-5 | Screen sharing can expose local metadata | Provide a display-redaction mode for repository, path, branch, task, session, and window labels | Memnoc | typed `@agent-watch-redact-labels`; cockpit/ambient unit tests and outer-seam sidebar test | ready |
 | P-6 | Privacy boundary can regress | CI checks dependencies and source for network, analytics, crash, and database paths; document the local data-flow manifest | Memnoc | `tests/privacy_test.sh` is included by `tests/run.sh`; `docs/privacy.md` | ready |
+| P-7 | Legacy compatibility mode falls outside the v2 privacy boundary | Scope every content-blind claim to the default Rust implementation and disclose legacy pane/payload inspection | Memnoc | `README.md`, `docs/privacy.md`, and the version-boundary assertion in `tests/privacy_test.sh` | ready |
 
 ## Uncertainty and decisions
 
@@ -81,8 +83,18 @@ verdict: ready
 ## Research
 
 - [EU AI Act and GDPR considerations for a stateless agent supervisor](../research/2026-09-01-eu-ai-privacy-stateless-agent-supervisor.md)
+- [2026 EU AI Act and GDPR applicability refresh](../research/2026-09-03-eu-ai-act-gdpr-applicability.md)
 
 ## Review history
+
+### 2026-09-03 — repository audit
+
+- Boundary changes: no model, hosted service, inference, telemetry, persistent history, or decisions about people were added. The audit explicitly separates the default Rust v2 path from the public `v1.0.0` and opt-in legacy Bash path, which inspect pane/payload content locally.
+- Distribution reviewed: public `v1.0.0`, current `main` at `ff13e33`, Rust `2.0.0-alpha.1` source on `ux/statusline-tabs` rooted at `77cf87d`, release workflow, installer, documentation, integrations, and generated visual assets. No v2 release artifact is currently published.
+- Evidence exercised: repository/source and dependency scans; `bash tests/privacy_test.sh`; complete `bash tests/run.sh`; tag and release-workflow inspection; current primary-source EU AI Act and GDPR research. The full suite passed on Linux x86_64.
+- Remediation completed: scoped README claims to Rust v2, documented legacy scrollback processing and its session summary, excluded employee monitoring/productivity scoring/decisions about people from intended purpose, and added a regression assertion for the public version boundary.
+- Accepted unverifiable evidence, approver, and rationale: no macOS/ARM64 v2 artifacts or tagged v2 release exist to verify; no claim is made for them. Legal classification is a documented, fact-sensitive interpretation rather than counsel certification.
+- Verdict and reason: `ready` for public feedback and continued development within the recorded boundary. The default v2 implementation is likely not an AI system under Article 3(1); no release-blocking legal or engineering-policy gap was identified in the reviewed source. “Ready” is not a legal opinion or a guarantee that all deployments comply; organisational operators remain responsible for their own GDPR and underlying-agent obligations.
 
 ### 2026-09-01 — shipping
 
