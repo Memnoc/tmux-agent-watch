@@ -4,7 +4,8 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
@@ -45,8 +46,14 @@ pub fn start(request: Start) -> Result<Started, Error> {
             request.branch
         )));
     }
-    let repo = git(&request.repo, &["rev-parse", "--show-toplevel"])?;
-    let repo = PathBuf::from(repo);
+    let source = PathBuf::from(git(&request.repo, &["rev-parse", "--show-toplevel"])?);
+    let worktrees = git(&source, &["worktree", "list", "--porcelain"])?;
+    let repo = PathBuf::from(
+        worktrees
+            .lines()
+            .find_map(|line| line.strip_prefix("worktree "))
+            .ok_or_else(|| Error::Git("primary worktree not found".into()))?,
+    );
     if Command::new("git")
         .arg("-C")
         .arg(&repo)
@@ -81,7 +88,7 @@ pub fn start(request: Start) -> Result<Started, Error> {
     git_ok(
         Command::new("git")
             .arg("-C")
-            .arg(&repo)
+            .arg(&source)
             .args(["worktree", "add", "-q", "-b", &request.branch])
             .arg(&target),
     )?;
@@ -109,33 +116,63 @@ pub fn start(request: Start) -> Result<Started, Error> {
     let window = match window {
         Ok(value) => value,
         Err(error) => {
-            let _ = Command::new("git")
-                .arg("-C")
-                .arg(&repo)
-                .args(["worktree", "remove", "--force"])
-                .arg(&target)
-                .status();
-            let _ = Command::new("git")
-                .arg("-C")
-                .arg(&repo)
-                .args(["branch", "-D", &request.branch])
-                .status();
+            rollback_start(&repo, &target, &request.branch, None);
             return Err(error);
         }
     };
-    for (name, value) in [
-        ("@agent_watch_branch", request.branch.as_str()),
-        ("@agent_watch_worktree", target.to_str().unwrap_or("")),
-        ("@agent_watch_repo", repo.to_str().unwrap_or("")),
-        ("@agent_watch_git_status", "clean"),
-        ("@agent_watch_message", ""),
-    ] {
-        tmux_ok(Command::new("tmux").args(["set-option", "-wq", "-t", &window, name, value]))?;
+    let initialize = || -> Result<(), Error> {
+        for (name, value) in [
+            ("@agent_watch_branch", request.branch.as_str()),
+            ("@agent_watch_worktree", target.to_str().unwrap_or("")),
+            ("@agent_watch_repo", repo.to_str().unwrap_or("")),
+            ("@agent_watch_git_status", "clean"),
+            ("@agent_watch_message", ""),
+        ] {
+            tmux_ok(Command::new("tmux").args(["set-option", "-wq", "-t", &window, name, value]))?;
+        }
+        // tmux can report a new window before its command has had a chance to
+        // exit. Do not publish a workspace until the initial process survives
+        // a short startup frame and the target is still addressable.
+        thread::sleep(Duration::from_millis(150));
+        let live = tmux(Command::new("tmux").args([
+            "display-message",
+            "-p",
+            "-t",
+            &window,
+            "#{window_id}",
+        ]))?;
+        if live != window {
+            return Err(Error::Tmux("agent window exited during startup".into()));
+        }
+        Ok(())
+    };
+    if let Err(error) = initialize() {
+        rollback_start(&repo, &target, &request.branch, Some(&window));
+        return Err(error);
     }
     Ok(Started {
         path: target,
         window_id: window,
     })
+}
+
+fn rollback_start(repo: &Path, target: &Path, branch: &str, window: Option<&str>) {
+    if let Some(window) = window {
+        let _ = Command::new("tmux")
+            .args(["kill-window", "-t", window])
+            .status();
+    }
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "remove", "--force"])
+        .arg(target)
+        .status();
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["branch", "-D", branch])
+        .status();
 }
 
 pub fn deliver_task(window_id: &str, task: &str) -> Result<(), Error> {
@@ -166,6 +203,10 @@ pub fn deliver_task(window_id: &str, task: &str) -> Result<(), Error> {
             .status();
         return result;
     }
+    // Interactive TUIs may process a bracketed paste asynchronously. Give the
+    // editor one frame to settle before submitting, otherwise Enter can be
+    // consumed while the pasted text remains in the input field.
+    thread::sleep(Duration::from_millis(750));
     tmux_ok(Command::new("tmux").args(["send-keys", "-t", window_id, "Enter"]))
 }
 
@@ -199,29 +240,32 @@ pub fn finish(path: &Path, base: &str, yes: bool) -> Result<PathBuf, Error> {
             .find_map(|line| line.strip_prefix("worktree "))
             .ok_or_else(|| Error::Invalid("primary worktree not found".into()))?,
     );
+    let branch_ref = format!("refs/heads/{branch}");
+    let base_ref = format!("refs/heads/{base}");
     if !Command::new("git")
         .arg("-C")
         .arg(&primary)
-        .args([
-            "show-ref",
-            "--verify",
-            "--quiet",
-            &format!("refs/heads/{base}"),
-        ])
+        .args(["show-ref", "--verify", "--quiet", &base_ref])
         .status()?
         .success()
     {
         return Err(Error::Invalid(format!("base branch {base} does not exist")));
     }
-    if !Command::new("git")
+    let merged_into_base = Command::new("git")
         .arg("-C")
         .arg(&primary)
-        .args(["merge-base", "--is-ancestor", &branch, base])
+        .args(["merge-base", "--is-ancestor", &branch_ref, &base_ref])
         .status()?
-        .success()
-    {
+        .success();
+    let contained_by_primary = Command::new("git")
+        .arg("-C")
+        .arg(&primary)
+        .args(["merge-base", "--is-ancestor", &branch_ref, "HEAD"])
+        .status()?
+        .success();
+    if !merged_into_base && !contained_by_primary {
         return Err(Error::Invalid(format!(
-            "{branch} is not merged into {base}"
+            "{branch} is not merged into {base} or the primary checkout"
         )));
     }
     if !yes {
@@ -237,13 +281,17 @@ pub fn finish(path: &Path, base: &str, yes: bool) -> Result<PathBuf, Error> {
         "list-panes",
         "-a",
         "-F",
-        "#{window_id}␟#{pane_current_path}",
+        "#{window_id}␟#{pane_current_path}␟#{@agent_watch_worktree}",
     ]))?;
     let windows = panes
         .lines()
         .filter_map(|line| {
-            let (id, candidate) = line.split_once('␟')?;
-            (Path::new(candidate) == worktree).then(|| id.to_owned())
+            let mut fields = line.split('␟');
+            let id = fields.next()?;
+            let current_path = Path::new(fields.next()?);
+            let recorded_worktree = Path::new(fields.next()?);
+            (current_path.starts_with(&worktree) || recorded_worktree == worktree)
+                .then(|| id.to_owned())
         })
         .collect::<BTreeSet<_>>();
     git_ok(

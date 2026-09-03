@@ -17,7 +17,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
 use thiserror::Error;
 
@@ -107,6 +107,20 @@ impl App {
                 .branch
                 .as_deref()
                 .unwrap_or(&workspace.identity.window_name)
+        }
+    }
+
+    fn project_label<'a>(&self, workspace: &'a Workspace) -> &'a str {
+        if self.config.redact_labels {
+            "Project"
+        } else {
+            workspace
+                .checkout
+                .repository
+                .as_deref()
+                .and_then(std::path::Path::file_name)
+                .and_then(|name| name.to_str())
+                .unwrap_or("project")
         }
     }
 
@@ -325,16 +339,21 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     render_detail(frame, app, body[1]);
     render_footer(frame, app, layout[2]);
     if let Some(task) = &app.task {
+        let modal = centered(area, 70, 11);
+        let label_width = usize::from(modal.width.saturating_sub(10));
         let branch = slug(task);
         let task_label = if app.config.redact_labels {
             "[redacted]".to_owned()
         } else {
-            format!("{task}_")
+            format!("{}_", ellipsize(task, label_width.saturating_sub(1)))
         };
         let branch_label = if app.config.redact_labels {
             "[redacted]".to_owned()
         } else {
-            format!("{}{branch}", app.config.branch_prefix)
+            ellipsize(
+                &format!("{}{branch}", app.config.branch_prefix),
+                label_width,
+            )
         };
         let text = vec![
             Line::styled(
@@ -356,11 +375,12 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 Style::default().fg(app.theme.muted),
             ),
         ];
+        frame.render_widget(Clear, modal);
         frame.render_widget(
             Paragraph::new(text)
                 .block(Block::default().borders(Borders::ALL))
                 .style(Style::default().bg(app.theme.base).fg(app.theme.text)),
-            centered(area, 70, 11),
+            modal,
         );
     } else if app.finishing
         && let Some(workspace) = app.selected_workspace()
@@ -375,7 +395,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             ),
             Line::from(""),
             Line::from(branch.to_owned()),
-            Line::from("Requires a clean worktree merged into main."),
+            Line::from("Requires a clean worktree integrated into its base."),
             Line::from("The branch will be retained."),
             Line::from(""),
             Line::styled(
@@ -383,11 +403,13 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 Style::default().fg(app.theme.muted),
             ),
         ];
+        let modal = centered(area, 70, 11);
+        frame.render_widget(Clear, modal);
         frame.render_widget(
             Paragraph::new(text)
                 .block(Block::default().borders(Borders::ALL))
                 .style(Style::default().bg(app.theme.base).fg(app.theme.text)),
-            centered(area, 70, 11),
+            modal,
         );
     }
 }
@@ -469,6 +491,7 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             Lifecycle::Working | Lifecycle::Starting => app.theme.rose,
             Lifecycle::Unknown => app.theme.muted,
         };
+        let project = app.project_label(workspace);
         let branch = app.workspace_label(workspace);
         let git = match workspace.checkout.git_state {
             GitState::Clean => "clean",
@@ -482,6 +505,8 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                     .fg(state_color)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(project.to_owned(), Style::default().fg(app.theme.text)),
+            Span::styled(" · ", Style::default().fg(app.theme.muted)),
             Span::styled(branch.to_owned(), Style::default().fg(app.theme.text)),
             Span::styled(format!("  {git}"), Style::default().fg(app.theme.muted)),
         ]))
@@ -526,6 +551,11 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     } else {
         workspace.checkout.branch.as_deref().unwrap_or("detached")
     };
+    let path = if private {
+        "[redacted]".to_owned()
+    } else {
+        workspace.checkout.working_directory.display().to_string()
+    };
     let checkout = if workspace.checkout.is_linked_worktree {
         "linked worktree"
     } else {
@@ -554,6 +584,7 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         ]),
         Line::from(""),
         detail_line("TMUX", format!("{session} · {window}"), app.theme.muted),
+        detail_line("PATH", path, app.theme.muted),
         detail_line("BRANCH", branch.to_owned(), app.theme.muted),
         detail_line("CHECKOUT", format!("{checkout} · {git}"), app.theme.muted),
     ];
@@ -616,6 +647,17 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         Paragraph::new(lines).block(Block::default().title(" SELECTED ").borders(Borders::LEFT)),
         area,
     );
+}
+
+fn ellipsize(value: &str, width: usize) -> String {
+    let count = value.chars().count();
+    if count <= width {
+        return value.to_owned();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    value.chars().take(width - 1).chain(['…']).collect()
 }
 
 fn detail_line(label: &'static str, value: String, muted: ratatui::style::Color) -> Line<'static> {
@@ -718,6 +760,7 @@ fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
 mod tests {
     use super::*;
     use crate::domain::{AgentKind, Checkout, EvidenceSource, WorkspaceIdentity};
+    use ratatui::backend::TestBackend;
     use std::path::PathBuf;
 
     fn workspace(branch: &str, state: Lifecycle) -> Workspace {
@@ -787,5 +830,52 @@ mod tests {
             config,
         );
         assert_eq!(app.workspace_label(&app.workspaces[0]), "Workspace");
+        assert_eq!(app.project_label(&app.workspaces[0]), "Project");
+    }
+
+    #[test]
+    fn start_form_clears_the_detail_panel_beneath_its_modal() {
+        let mut app = App::new(
+            vec![workspace("main", Lifecycle::Review)],
+            Variant::Moon,
+            Config::default(),
+        );
+        app.task = Some("preflight workspace smoke test".into());
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+
+        let modal = centered(Rect::new(0, 0, 100, 24), 70, 11);
+        let buffer = terminal.backend().buffer();
+        let content = (modal.y..modal.bottom())
+            .flat_map(|y| {
+                (modal.x..modal.right()).map(move |x| buffer.cell((x, y)).unwrap().symbol())
+            })
+            .collect::<String>();
+        assert!(!content.contains("CHECKOUT"));
+    }
+
+    #[test]
+    fn start_form_truncates_long_labels_inside_its_border() {
+        let mut app = App::new(vec![], Variant::Moon, Config::default());
+        app.task = Some(
+            "Audit workspace lifecycle and worktree edge cases; add regression tests and fix any failures"
+                .into(),
+        );
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+
+        let modal = centered(Rect::new(0, 0, 100, 24), 70, 11);
+        let buffer = terminal.backend().buffer();
+        for y in [modal.y + 3, modal.y + 4] {
+            assert_eq!(buffer.cell((modal.right() - 2, y)).unwrap().symbol(), " ");
+        }
+        let content = (modal.y..modal.bottom())
+            .flat_map(|y| {
+                (modal.x..modal.right()).map(move |x| buffer.cell((x, y)).unwrap().symbol())
+            })
+            .collect::<String>();
+        assert!(content.contains('…'));
     }
 }

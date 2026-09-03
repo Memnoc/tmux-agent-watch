@@ -5,8 +5,6 @@
 `tmux-agent-watch` shows which agent windows need you, without replacing the
 tmux workflow you already use.
 
-![Clustered tmux status bar with Git context and agent lifecycle states](docs/images/status-bar-wide.png)
-
 Each recognized agent gets a color-coded state in tmux's native window tabs:
 
 | Marker | Color | State |
@@ -18,6 +16,37 @@ Each recognized agent gets a color-coded state in tmux's native window tabs:
 
 The plugin currently recognizes Codex, Claude Code, and OpenCode. Other windows
 remain unchanged.
+
+## Screenshot gallery
+
+<table>
+  <tr>
+    <td colspan="2">
+      <img src="docs/images/status-bar-wide.png" alt="A wide tmux status bar with workspace tabs, Git context, and color-coded agent states">
+      <br>
+      <sub><strong>At a glance:</strong> workspaces stay on the left, repository context stays in the centre, and agents that need attention stay visible on the right.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/workspace-navigator.png" alt="The workspace navigator grouping ordinary tmux windows and active coding agents">
+      <br>
+      <sub><strong>Workspace navigator:</strong> browse every window and jump directly to an agent.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/images/workspace-cockpit.png" alt="The Workspace Cockpit showing the agent fleet and selected workspace details">
+      <br>
+      <sub><strong>Workspace Cockpit:</strong> start, review, jump to, and finish worktrees from one place.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="docs/images/status-bar-narrow.png" alt="A compact tmux status bar adapted to a narrow split terminal">
+      <br>
+      <sub><strong>Responsive by design:</strong> labels collapse before lifecycle, Git, and navigation signals disappear.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Install
 
@@ -51,22 +80,14 @@ required.
 - `prefix + m` uses normal tmux pane zoom.
 - Existing window navigation and naming continue to work normally.
 
-![Workspace navigator grouping ordinary windows and active agents](docs/images/workspace-navigator.png)
-
-*The grouped navigator keeps every tmux window reachable while bringing agents
-that need attention into a dedicated section.*
-
 The two-line status area clusters ordinary workspaces on the left and managed
 agents on the right. The centre reports content-blind Git context: branch,
 tracked lines added/deleted, changed files, and untracked files. Lifecycle
 colour identifies working, waiting, review, and failed agents; a pointer marks
 the selected agent. Overflow is explicit and `prefix + w` opens the complete
-grouped inventory across tmux sessions.
-
-![Compact status bar in a narrow split terminal](docs/images/status-bar-narrow.png)
-
-*At narrower widths, labels collapse before lifecycle, Git, and navigation
-signals are removed.*
+grouped inventory across tmux sessions. At narrower widths, the selected
+project, compact Git state, agent lifecycle, and navigator cue share one
+left-to-right flow so independently aligned regions cannot collide.
 
 The default icon mode requires no patched font. Nerd Font users can enable the
 opt-in icon vocabulary:
@@ -90,8 +111,6 @@ A single sidebar pane follows the selected agent window within each session.
 Fresh shell windows remain full-width until an agent starts in them.
 
 ### Workspace Cockpit
-
-![Workspace Cockpit with fleet list and selected workspace details](docs/images/workspace-cockpit.png)
 
 Press `prefix + P` for the primary worktree workflow. The action-first cockpit
 shows live repository and fleet context, then guides four operations without

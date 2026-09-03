@@ -112,7 +112,15 @@ fn reconcile_git(workspace: &mut Workspace) {
         return;
     };
 
-    workspace.checkout.repository = Some(PathBuf::from(top.trim()));
+    let top = PathBuf::from(top.trim());
+    let common_dir = PathBuf::from(common_dir.trim());
+    let git_dir = PathBuf::from(git_dir.trim());
+    workspace.checkout.is_linked_worktree = common_dir != git_dir;
+    workspace.checkout.repository = if workspace.checkout.is_linked_worktree {
+        common_dir.parent().map(PathBuf::from)
+    } else {
+        Some(top.clone())
+    };
     workspace.checkout.branch =
         git(path, &["branch", "--show-current"]).and_then(|branch| optional_string(branch.trim()));
     workspace.checkout.git_state =
@@ -121,11 +129,7 @@ fn reconcile_git(workspace: &mut Workspace) {
             Some(_) => GitState::Dirty,
             None => GitState::Unknown,
         };
-    workspace.checkout.is_linked_worktree = common_dir.trim() != git_dir.trim();
-    workspace.checkout.worktree = workspace
-        .checkout
-        .is_linked_worktree
-        .then(|| PathBuf::from(top.trim()));
+    workspace.checkout.worktree = workspace.checkout.is_linked_worktree.then_some(top);
 }
 
 fn git(path: &std::path::Path, args: &[&str]) -> Option<String> {
