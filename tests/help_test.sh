@@ -50,6 +50,7 @@ for expected in \
   'X      finish' \
   'm      zoom' \
   'w      open the grouped workspace navigator' \
+  's      open the compact session navigator' \
   'C-w    open the native tmux window tree' \
   'left   ordinary workspaces' \
   'centre current Git changes' \

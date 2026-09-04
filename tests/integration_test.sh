@@ -34,6 +34,13 @@ native_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "C-w" && /c
 }
 printf 'ok: grouped navigation preserves the native chooser fallback\n'
 
+session_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "s" && /scripts\/v2.sh sessions/')"
+native_session_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "C-s" && /choose-tree -Zs/')"
+[ -n "$session_binding" ] && [ -n "$native_session_binding" ] || {
+  printf 'not ok: compact and native session navigator bindings are not both available\n'; exit 1;
+}
+printf 'ok: session navigation preserves the native chooser fallback\n'
+
 binding="$(tmux -L "$SOCKET" list-keys -T prefix | grep 'scripts/next-attention.sh' || true)"
 [ -n "$binding" ] || { printf 'not ok: attention binding missing\n'; exit 1; }
 printf 'ok: attention binding installed\n'

@@ -69,7 +69,13 @@ implementation never reads prompts, responses, or terminal scrollback.
 
 ### Find work, then act
 
-<img src="docs/images/design/navigator-cockpit-surfaces.png" alt="Side-by-side comparison of the Workspace Navigator, which lists every window and agent across tmux sessions, and the Workspace Cockpit, which shows full detail and start, review, jump, and finish actions for the selected one">
+<img src="docs/images/navigator-cockpit-surfaces.png" alt="Comparison of three complementary tmux-agent-watch surfaces: the Session Navigator for switching tmux sessions, the Workspace Navigator for finding windows and agents across sessions, and the Workspace Cockpit for starting, reviewing, opening, and finishing agent work">
+
+| Surface             | What you can do                                      | Use it when                                      |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------------ |
+| Session Navigator   | Find and switch tmux sessions                        | You know which session you want                  |
+| Workspace Navigator | Find any window or active agent across every session | You need to locate a workspace or agent          |
+| Workspace Cockpit   | Start, review, open, and finish agent work            | You need context or want to act on a workspace   |
 
 | Cockpit action | Result                                                         | Direct key   |
 | -------------- | -------------------------------------------------------------- | ------------ |
@@ -98,6 +104,8 @@ terminal narrows; labels collapse before information collides.
 | `prefix + P`     | Open the Workspace Cockpit                     |
 | `prefix + w`     | Open the grouped workspace navigator           |
 | `prefix + C-w`   | Open tmux's native window tree                 |
+| `prefix + s`     | Open the compact session navigator             |
+| `prefix + C-s`   | Open tmux's native session tree                |
 | `prefix + a`     | Jump to the oldest agent needing attention     |
 | `prefix + W`     | Create a worktree and start an agent           |
 | `prefix + X`     | Finish the selected clean, integrated worktree |
@@ -247,6 +255,8 @@ set -g @agent-watch-theme rose-pine
 | `@agent-watch-cockpit-key`            | `P`     | Cockpit key                                                            |
 | `@agent-watch-navigator-key`          | `w`     | Navigator key                                                          |
 | `@agent-watch-native-navigator-key`   | `C-w`   | Native tmux tree key                                                   |
+| `@agent-watch-session-key`            | `s`     | Session navigator key                                                  |
+| `@agent-watch-native-session-key`     | `C-s`   | Native tmux session tree key                                           |
 | `@agent-watch-help-key`               | `H`     | Help key                                                               |
 | `@agent-watch-v2`                     | `on`    | Rust implementation; `off` selects the content-reading legacy fallback |
 | `@agent-watch-hud`                    | `on`    | Lifecycle HUD                                                          |
@@ -288,6 +298,7 @@ release workflow manually and complete the
 
 ## Scope
 
+Great care was taken to make the project privacy-driven and fully AI-compliant to the best of my abilities.
 The plugin does not retain task history, track tokens, or create a separate
 project model. tmux remains the interface and process supervisor. Employee
 monitoring, productivity scoring, and decisions about people are outside its

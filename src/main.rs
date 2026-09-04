@@ -5,7 +5,7 @@ use tmux_agent_watch::{
     config::Config,
     discovery,
     domain::AgentKind,
-    lifecycle, navigator,
+    lifecycle, navigator, session_navigator,
     theme::{Theme, Variant},
     workspace::{self, Start},
 };
@@ -49,6 +49,11 @@ enum Command {
     },
     /// Open the grouped tmux window navigator.
     Navigator {
+        #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
+        theme: ThemeArg,
+    },
+    /// Open the compact tmux session navigator.
+    Sessions {
         #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
         theme: ThemeArg,
     },
@@ -192,6 +197,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Cockpit { theme } => cockpit::run(theme.into())?,
         Command::Navigator { theme } => navigator::run(theme.into())?,
+        Command::Sessions { theme } => session_navigator::run(theme.into())?,
         Command::Workspace { command } => match command {
             WorkspaceCommand::Start {
                 repo,
