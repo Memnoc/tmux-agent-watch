@@ -45,6 +45,8 @@ still be started normally; no special launcher is required.
 
 ## How it works
 
+The idea is to have a constant overview of what is happening, what actions are needed and where.
+
 <img src="docs/images/design/hero-workflow.png" alt="Diagram: many projects and agents feed a content-blind status bar, which feeds the Workspace Navigator and Cockpit, which finish work safely back to a clean, merged worktree">
 
 | Surface             | What it answers                               | Open it        |
@@ -69,13 +71,15 @@ implementation never reads prompts, responses, or terminal scrollback.
 
 ### Find work, then act
 
+Sessions, Workspaces and Cockpit were all re-designed to be more compact, visible and on point with the rest of the look and feel.
+
 <img src="docs/images/navigator-cockpit-surfaces.png" alt="Comparison of three complementary tmux-agent-watch surfaces: the Session Navigator for switching tmux sessions, the Workspace Navigator for finding windows and agents across sessions, and the Workspace Cockpit for starting, reviewing, opening, and finishing agent work">
 
-| Surface             | What you can do                                      | Use it when                                      |
-| ------------------- | ---------------------------------------------------- | ------------------------------------------------ |
-| Session Navigator   | Find and switch tmux sessions                        | You know which session you want                  |
-| Workspace Navigator | Find any window or active agent across every session | You need to locate a workspace or agent          |
-| Workspace Cockpit   | Start, review, open, and finish agent work            | You need context or want to act on a workspace   |
+| Surface             | What you can do                                      | Use it when                                    |
+| ------------------- | ---------------------------------------------------- | ---------------------------------------------- |
+| Session Navigator   | Find and switch tmux sessions                        | You know which session you want                |
+| Workspace Navigator | Find any window or active agent across every session | You need to locate a workspace or agent        |
+| Workspace Cockpit   | Start, review, open, and finish agent work           | You need context or want to act on a workspace |
 
 | Cockpit action | Result                                                         | Direct key   |
 | -------------- | -------------------------------------------------------------- | ------------ |
@@ -90,6 +94,8 @@ Finish refuses primary checkouts, dirty worktrees, and branches not integrated
 into the configured base branch.
 
 ### Responsive layout
+
+I work on Linux and almost always in a tiling window manager so having a modicum of responsive layout is a must.
 
 <img src="docs/images/design/responsive-layouts.png" alt="The status bar at three widths: wide showing every workspace and agent, narrow collapsing inactive workspace labels to an arrow, and compact under 80 columns sharing project, Git, lifecycle, and navigator cues in one flow">
 
