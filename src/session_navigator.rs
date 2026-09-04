@@ -20,6 +20,7 @@ use crate::theme::{Theme, Variant};
 
 const SEP: char = '\u{241f}';
 const FORMAT: &str = "#{session_name}␟#{session_windows}␟#{session_attached}";
+const FOOTER_CONTROLS: &str = " j/k move   Enter switch   / filter   Esc close ";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Session {
@@ -248,7 +249,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     let footer = if app.filtering {
         format!(" Filter › {}_", app.filter)
     } else {
-        " ↑/↓ or j/k move   Enter switch   / filter   Esc close   prefix+C-s native ".into()
+        FOOTER_CONTROLS.into()
     };
     frame.render_widget(
         Paragraph::new(footer)
@@ -333,5 +334,10 @@ mod tests {
             NavigationAction::Switch
         );
         assert!(!app.filtering);
+    }
+
+    #[test]
+    fn footer_controls_fit_the_session_popup() {
+        assert!(FOOTER_CONTROLS.chars().count() <= 72);
     }
 }
