@@ -35,7 +35,7 @@ native_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "C-w" && /c
 printf 'ok: grouped navigation preserves the native chooser fallback\n'
 
 session_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "s" && /scripts\/v2.sh sessions/')"
-native_session_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "C-s" && /choose-tree -Zs/')"
+native_session_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "S" && /choose-tree -Zs/')"
 [ -n "$session_binding" ] && [ -n "$native_session_binding" ] || {
   printf 'not ok: compact and native session navigator bindings are not both available\n'; exit 1;
 }

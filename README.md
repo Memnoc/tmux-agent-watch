@@ -111,12 +111,38 @@ terminal narrows; labels collapse before information collides.
 | `prefix + w`     | Open the grouped workspace navigator           |
 | `prefix + C-w`   | Open tmux's native window tree                 |
 | `prefix + s`     | Open the compact session navigator             |
-| `prefix + C-s`   | Open tmux's native session tree                |
+| `prefix + S`     | Open tmux's native session tree                |
+| `prefix + C-s`   | Save all sessions (tmux-resurrect)              |
 | `prefix + a`     | Jump to the oldest agent needing attention     |
 | `prefix + W`     | Create a worktree and start an agent           |
 | `prefix + X`     | Finish the selected clean, integrated worktree |
 | `prefix + Space` | Toggle the optional legacy sidebar             |
 | `prefix + A`     | Recreate a stuck legacy sidebar                |
+
+Inside either navigator, these shortcuts act on the selected item:
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` or arrow keys | Move selection |
+| `Enter` | Switch to the selected session or window |
+| `/` | Filter the list |
+| `r` | Rename the selected session (`prefix + s`) or window (`prefix + w`) |
+| `x` | Kill the selected item after confirmation |
+| `s` | Save all sessions with tmux-resurrect |
+| `Esc` / `q` | Close the navigator |
+
+Renaming starts with the current name. Use `Backspace` to delete, `Enter` to
+apply, and `Esc` to cancel. The navigator stays open and reports any error so
+you can correct the name. Press `s` afterward to save the updated layout with
+Resurrect.
+
+Inside either navigator, select an item and press `x`, then `y` to confirm killing
+it (`Esc` or `n` cancels). In `prefix + w`, this kills the selected tmux window
+and all its panes, including any links to that window in other sessions. In
+`prefix + s`, it kills the selected session; windows linked to another session
+survive. Running processes in closed panes stop. Git worktrees and files remain
+on disk. The list refreshes after a kill; killing the session hosting the popup
+may close it and detach its clients.
 
 Existing tmux window navigation, naming, and pane zoom continue to work.
 
@@ -262,7 +288,7 @@ set -g @agent-watch-theme rose-pine
 | `@agent-watch-navigator-key`          | `w`     | Navigator key                                                          |
 | `@agent-watch-native-navigator-key`   | `C-w`   | Native tmux tree key                                                   |
 | `@agent-watch-session-key`            | `s`     | Session navigator key                                                  |
-| `@agent-watch-native-session-key`     | `C-s`   | Native tmux session tree key                                           |
+| `@agent-watch-native-session-key`     | `S`     | Native tmux session tree key                                           |
 | `@agent-watch-help-key`               | `H`     | Help key                                                               |
 | `@agent-watch-v2`                     | `on`    | Rust implementation; `off` selects the content-reading legacy fallback |
 | `@agent-watch-hud`                    | `on`    | Lifecycle HUD                                                          |
@@ -294,6 +320,23 @@ refuses dirty worktrees and retains the branch.
 Live state is stored in tmux window options. Use `tmux-resurrect` and
 `tmux-continuum` to restore sessions, windows, layouts, and working directories.
 Load Continuum after themes that replace `status-right`.
+
+Press `s` inside either navigator to save **all sessions** through the installed
+Resurrect plugin without closing the navigator. The footer reports the result.
+After cleaning up windows or sessions, save before exiting tmux so the next
+restore uses the updated layout. Kills do not automatically save; if killing the
+session hosting the popup closes it, reopen a navigator in a remaining session
+and save there.
+
+Resurrect's default global save shortcut is `prefix + Ctrl+s`. Agent Watch leaves
+that key available and puts the native session tree on `prefix + Shift+s`.
+If upgrading from a version that used `Ctrl+s` for the native tree, reload your
+tmux configuration with Resurrect enabled to restore its save binding. Remove
+any explicit `@agent-watch-native-session-key C-s` override that would reclaim it.
+
+Saving requires `tmux-resurrect` to be loaded. Agent Watch delegates to its
+`@resurrect-save-script-path` and creates no separate snapshot. Resurrect controls
+what is saved, including pane contents if you enabled its capture option.
 
 ## Maintainers
 

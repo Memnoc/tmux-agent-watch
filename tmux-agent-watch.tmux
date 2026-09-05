@@ -82,7 +82,7 @@ tmux bind-key "$(option @agent-watch-navigator-key w)" display-popup -EE -w 84 -
 tmux bind-key "$(option @agent-watch-native-navigator-key C-w)" choose-tree -Zw
 tmux bind-key "$(option @agent-watch-session-key s)" display-popup -EE -w 72 -h 18 \
   -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/v2.sh sessions"
-tmux bind-key "$(option @agent-watch-native-session-key C-s)" choose-tree -Zs
+tmux bind-key "$(option @agent-watch-native-session-key S)" choose-tree -Zs
 tmux bind-key '{' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -U"
 tmux bind-key '}' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -D"
 tmux bind-key -n MouseDown1Pane if-shell -F '#{==:#{@agent_watch_sidebar},1}' \

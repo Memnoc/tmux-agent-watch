@@ -11,6 +11,7 @@ bash -n "$ROOT/tmux-agent-watch.tmux" "$ROOT"/scripts/*.sh "$ROOT"/tests/*.sh
 "$ROOT/tests/worktree_test.sh"
 "$ROOT/tests/cockpit_test.sh"
 "$ROOT/tests/v2_test.sh"
+python3 "$ROOT/tests/navigator_test.py"
 "$ROOT/tests/privacy_test.sh"
 "$ROOT/tests/package_test.sh"
 "$ROOT/tests/release_workflow_test.sh"

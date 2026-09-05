@@ -5,6 +5,7 @@ pub mod discovery;
 pub mod domain;
 pub mod lifecycle;
 pub mod navigator;
+mod persistence;
 pub mod session_navigator;
 pub mod theme;
 pub mod workspace;

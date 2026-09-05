@@ -41,6 +41,13 @@ are separate products with their own data practices. Launching an agent can
 send the task to services configured by that agent; `tmux-agent-watch` neither
 controls nor receives that traffic.
 
+The explicit `s` action in either navigator invokes the locally installed
+`tmux-resurrect` save script. Resurrect owns the saved snapshot and follows its
+existing configuration, including optional terminal-content capture. Agent Watch
+does not read the snapshot or save-script output, and the save action adds no
+separate content store. This external persistence is distinct from the live,
+content-blind supervision described above.
+
 Organisational operators should treat workspace labels and activity state as
 potential personal data and assess access, employee notice or consultation,
 lawful basis, and any DPIA requirements for their own deployment. Employee

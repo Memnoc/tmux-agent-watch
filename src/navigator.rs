@@ -17,7 +17,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 use crate::{
@@ -47,6 +47,9 @@ struct App {
     selected: usize,
     filter: String,
     filtering: bool,
+    pending_kill: Option<Window>,
+    pending_rename: Option<(String, String)>,
+    notice: Option<String>,
     nerd_icons: bool,
     theme: Theme,
 }
@@ -56,6 +59,9 @@ enum NavigationAction {
     Continue,
     Close,
     Jump,
+    Kill,
+    Save,
+    Rename,
 }
 
 impl App {
@@ -92,6 +98,36 @@ impl App {
 }
 
 fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
+    if app.pending_kill.is_some() {
+        return match code {
+            KeyCode::Char('y') => NavigationAction::Kill,
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => {
+                app.pending_kill = None;
+                NavigationAction::Continue
+            }
+            _ => NavigationAction::Continue,
+        };
+    }
+    if let Some((_, name)) = &mut app.pending_rename {
+        match code {
+            KeyCode::Esc => {
+                app.pending_rename = None;
+                app.notice = None;
+            }
+            KeyCode::Enter if !name.trim().is_empty() => return NavigationAction::Rename,
+            KeyCode::Backspace => {
+                name.pop();
+                app.notice = None;
+            }
+            KeyCode::Char(character) => {
+                name.push(character);
+                app.notice = None;
+            }
+            _ => {}
+        }
+        return NavigationAction::Continue;
+    }
+    app.notice = None;
     if app.filtering {
         match code {
             KeyCode::Esc => app.filtering = false,
@@ -125,6 +161,23 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
             app.filtering = true;
             NavigationAction::Continue
         }
+        KeyCode::Char('r') => {
+            app.pending_rename = app
+                .visible
+                .get(app.selected)
+                .and_then(|index| app.windows.get(*index))
+                .map(|item| (item.id.clone(), item.name.clone()));
+            NavigationAction::Continue
+        }
+        KeyCode::Char('s') => NavigationAction::Save,
+        KeyCode::Char('x') => {
+            app.pending_kill = app
+                .visible
+                .get(app.selected)
+                .and_then(|index| app.windows.get(*index))
+                .cloned();
+            NavigationAction::Continue
+        }
         KeyCode::Enter => NavigationAction::Jump,
         _ => NavigationAction::Continue,
     }
@@ -134,22 +187,7 @@ pub fn run(variant: Variant) -> io::Result<()> {
     let current = tmux_output(&["display-message", "-p", "#{window_id}"])?;
     let nerd_icons = tmux_output(&["show-option", "-gqv", "@agent-watch-icon-mode"])
         .is_ok_and(|value| value == "nerd");
-    let mut windows = discover()?;
-    windows.sort_by_key(|item| {
-        let group = if item.managed { 1 } else { 0 };
-        let priority = match item.lifecycle {
-            Lifecycle::Failed => 0,
-            Lifecycle::Waiting => 1,
-            Lifecycle::Review => 2,
-            _ => 3,
-        };
-        (
-            group,
-            priority,
-            item.session.clone(),
-            item.index.parse::<u32>().unwrap_or(u32::MAX),
-        )
-    });
+    let windows = discover()?;
     let selected = windows
         .iter()
         .position(|item| item.id == current)
@@ -160,6 +198,9 @@ pub fn run(variant: Variant) -> io::Result<()> {
         selected,
         filter: String::new(),
         filtering: false,
+        pending_kill: None,
+        pending_rename: None,
+        notice: None,
         nerd_icons,
         theme: Theme::rose_pine(variant),
     };
@@ -205,6 +246,48 @@ fn event_loop(
                         .status()?;
                     if status.success() {
                         return Ok(());
+                    }
+                }
+            }
+            NavigationAction::Rename => {
+                if let Some((id, name)) = app.pending_rename.clone() {
+                    match tmux_output(&["rename-window", "-t", &id, "--", &name]) {
+                        Ok(_) => {
+                            for item in app.windows.iter_mut().filter(|item| item.id == id) {
+                                item.name = name.clone();
+                            }
+                            app.pending_rename = None;
+                            app.refresh_visible();
+                            app.notice = Some("Renamed · press s to save".into());
+                        }
+                        Err(error) => app.notice = Some(format!("Rename failed: {error}")),
+                    }
+                }
+            }
+            NavigationAction::Save => {
+                app.notice = Some("Saving via tmux-resurrect…".into());
+                terminal.draw(|frame| render(frame, app))?;
+                app.notice = Some(crate::persistence::save());
+            }
+            NavigationAction::Kill => {
+                if let Some(target) = app.pending_kill.take() {
+                    match tmux_output(&["kill-window", "-t", &target.id]) {
+                        Ok(_) => {
+                            app.notice = Some("Killed · press s to save cleanup".into());
+                            app.windows.retain(|item| item.id != target.id);
+                            match discover() {
+                                Ok(items) => app.windows = items,
+                                Err(error) if !app.windows.is_empty() => {
+                                    app.notice = Some(format!("Refresh failed: {error}"));
+                                }
+                                Err(_) => {}
+                            }
+                            app.refresh_visible();
+                            if app.windows.is_empty() {
+                                return Ok(());
+                            }
+                        }
+                        Err(error) => app.notice = Some(format!("Kill failed: {error}")),
                     }
                 }
             }
@@ -254,13 +337,28 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
 
     render_group(frame, app, groups[1], false, " WORKSPACES ");
     render_group(frame, app, groups[2], true, " AGENTS ");
-    let footer = if app.filtering {
+    let footer = if let Some(target) = &app.pending_kill {
+        format!(
+            " y confirm · Esc/n cancel · Stops all panes/processes\n Kill workspace {} {}:{} ({})?",
+            target.id, target.session, target.index, target.name
+        )
+    } else if let Some((_, name)) = &app.pending_rename {
+        format!(
+            " Rename window › {name}_\n {}",
+            app.notice
+                .as_deref()
+                .unwrap_or("Enter apply · Esc cancel · Backspace delete")
+        )
+    } else if let Some(notice) = &app.notice {
+        notice.clone()
+    } else if app.filtering {
         format!(" Filter › {}_", app.filter)
     } else {
-        " ↑/↓ or j/k move   Enter jump   / filter   Esc close   prefix+C-w native ".into()
+        " j/k move  Enter jump  r rename  x kill  s save  / filter  Esc close ".into()
     };
     frame.render_widget(
         Paragraph::new(footer)
+            .wrap(Wrap { trim: true })
             .style(Style::default().fg(app.theme.muted))
             .block(Block::default().borders(Borders::TOP)),
         groups[3],
@@ -328,7 +426,23 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
 
 fn discover() -> io::Result<Vec<Window>> {
     let output = tmux_output(&["list-windows", "-a", "-F", FORMAT])?;
-    Ok(parse_windows(&output))
+    let mut windows = parse_windows(&output);
+    windows.sort_by_key(|item| {
+        let group = if item.managed { 1 } else { 0 };
+        let priority = match item.lifecycle {
+            Lifecycle::Failed => 0,
+            Lifecycle::Waiting => 1,
+            Lifecycle::Review => 2,
+            _ => 3,
+        };
+        (
+            group,
+            priority,
+            item.session.clone(),
+            item.index.parse::<u32>().unwrap_or(u32::MAX),
+        )
+    });
+    Ok(windows)
 }
 
 fn parse_windows(output: &str) -> Vec<Window> {
@@ -435,11 +549,84 @@ mod tests {
             selected: 0,
             filter: "star".into(),
             filtering: true,
+            pending_kill: None,
+            pending_rename: None,
+            notice: None,
             nerd_icons: true,
             theme: Theme::rose_pine(Variant::Moon),
         };
 
         assert_eq!(handle_key(&mut app, KeyCode::Enter), NavigationAction::Jump);
         assert!(!app.filtering);
+    }
+    fn populated_app() -> App {
+        App {
+            windows: parse_windows("dev␟@1␟1␟first␟zsh␟␟␟\ndev␟@2␟2␟second␟zsh␟␟␟"),
+            visible: vec![0, 1],
+            selected: 0,
+            filter: String::new(),
+            filtering: false,
+            pending_kill: None,
+            pending_rename: None,
+            notice: None,
+            nerd_icons: false,
+            theme: Theme::rose_pine(Variant::Moon),
+        }
+    }
+
+    #[test]
+    fn kill_requires_explicit_confirmation_and_keeps_the_filtered_target() {
+        let mut app = populated_app();
+        app.filter = "second".into();
+        app.refresh_visible();
+        assert_eq!(
+            handle_key(&mut app, KeyCode::Char('x')),
+            NavigationAction::Continue
+        );
+        let target = app.pending_kill.as_ref().unwrap().id.clone();
+        assert_eq!(target, app.windows[1].id);
+        for key in [
+            KeyCode::Enter,
+            KeyCode::Down,
+            KeyCode::Char('x'),
+            KeyCode::Char('s'),
+        ] {
+            assert_eq!(handle_key(&mut app, key), NavigationAction::Continue);
+            assert_eq!(app.pending_kill.as_ref().unwrap().id, target);
+        }
+        assert_eq!(
+            handle_key(&mut app, KeyCode::Char('y')),
+            NavigationAction::Kill
+        );
+    }
+
+    #[test]
+    fn kill_can_be_cancelled_and_cannot_target_an_empty_result() {
+        for key in [KeyCode::Esc, KeyCode::Char('n'), KeyCode::Char('q')] {
+            let mut app = populated_app();
+            handle_key(&mut app, KeyCode::Char('x'));
+            assert_eq!(handle_key(&mut app, key), NavigationAction::Continue);
+            assert!(app.pending_kill.is_none());
+            assert_eq!(
+                handle_key(&mut app, KeyCode::Char('y')),
+                NavigationAction::Continue
+            );
+        }
+        let mut app = populated_app();
+        app.filter = "no-match".into();
+        app.refresh_visible();
+        handle_key(&mut app, KeyCode::Char('x'));
+        assert!(app.pending_kill.is_none());
+    }
+
+    #[test]
+    fn kill_keys_are_text_while_filtering() {
+        let mut app = populated_app();
+        handle_key(&mut app, KeyCode::Char('/'));
+        handle_key(&mut app, KeyCode::Char('x'));
+        handle_key(&mut app, KeyCode::Char('y'));
+        handle_key(&mut app, KeyCode::Char('s'));
+        assert_eq!(app.filter, "xys");
+        assert!(app.pending_kill.is_none());
     }
 }
