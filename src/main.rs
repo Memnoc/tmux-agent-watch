@@ -64,6 +64,11 @@ enum Command {
     },
     /// Open the interactive fleet cockpit.
     Cockpit {
+        #[command(flatten)]
+        query: tmux_drudwyn::inventory::Query,
+        /// Print the same global inventory without opening the terminal UI.
+        #[arg(long)]
+        list: bool,
         /// Open directly in the new workspace form.
         #[arg(long)]
         start: bool,
@@ -437,7 +442,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             );
             print!("{}\x1c{}", frame.text, frame.click_map);
         }
-        Command::Cockpit { theme, start } => cockpit::run(theme.into(), start)?,
+        Command::Cockpit {
+            theme,
+            start,
+            query,
+            list,
+        } => {
+            if list {
+                let snapshot = tmux_drudwyn::inventory::Snapshot::capture()?;
+                let config = Config::load_tmux()?;
+                print!("{}", snapshot.display(&query, config.redact_labels)?);
+            } else {
+                cockpit::run(theme.into(), start, query)?;
+            }
+        }
         Command::Navigator { theme } => navigator::run(theme.into())?,
         Command::Sessions { theme } => session_navigator::run(theme.into())?,
         Command::Session { command } => match command {

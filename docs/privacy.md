@@ -66,6 +66,16 @@ checkout with an explicit conflict. Recovery takes the checkout guard before
 the socket guard; coordinator setters never acquire checkout guards. No tmux
 wait-for lock or persistent reservation is created.
 
+Global Cockpit refreshes keep a single in-memory snapshot of known tmux windows,
+projects, process evidence, Git checkout identity/status, changed-file names and
+live batch/task-reference metadata. Git status uses NUL-separated names; no diff
+bodies or file contents are read. Each unique checkout and live batch is probed
+once per refresh, then shared by filtering, grouping, counts and details. The
+interactive refresh thread creates no persistent cache; failed snapshots remain
+visibly stale and cannot authorize an action. Exiting the popup discards the
+snapshot. Lifecycle window projections use a single guarded tmux command queue,
+retaining the existing bounded lock and mutation-child lifetime guarantees.
+
 Set `@drudwyn-redact-labels on` before screen sharing to replace repository,
 branch, session, and window labels while preserving lifecycle state and click
 navigation.

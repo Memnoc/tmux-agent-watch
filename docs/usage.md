@@ -68,6 +68,69 @@ Use the session navigator to find a session, the workspace navigator to find a w
 Finish refuses primary checkouts, dirty worktrees, and branches not integrated
 into the configured base branch.
 
+### Global Cockpit (Rust v2)
+
+Cockpit starts with workers across the connected tmux server. Project groups
+include ordinary agents in known project sessions; unassociated agents stay
+reachable. Linked client views count each window once. GLOBAL totals do not
+change with filters. Workers exclude the coordinator role; coordinator shells
+and agents remain reachable with `c`, by name search, or the project-window
+inventory. Search results count coordinators separately from matching workers. Live
+counts require a running process; retained exited workers stay separately
+visible, including unresolved attention. Running and hook-backed Working are
+separate activity labels.
+
+| Key | Action |
+| --- | --- |
+| `j/k`, arrows, `PgUp/PgDn`, `Home/End` | Inspect inventory rows without navigating |
+| `Enter` | Open the selected stable window in the requesting client |
+| `/` | Search window names, refs, sessions, projects and agent kinds |
+| `p` / `s` | Cycle project / state filters |
+| `g` | Toggle project / attention grouping |
+| `w` | Toggle all windows in the selected project, including shells outside Git |
+| `x` | Clear filters and return to global worker inventory |
+| `d` | Full details; arrows or `PgUp/PgDn` scroll, `d` or `Esc` returns |
+| `c` | Open the selected project's coordinator |
+| `r` | Refresh the snapshot |
+
+`*` marks the invoking client's current window; `>` marks the row being
+inspected. Inspection and Open do not clear attention. Rows retain their stable
+ID through refresh and filtering. If a selected window disappears, refresh
+chooses a visible row for inspection and requires an explicit move or inspection
+before another action. A pending Finish keeps its original window/pane/path.
+
+Narrow terminals show a full-width inventory with details available through
+`d`; wider terminals show details alongside or below the list. Full details wrap
+and scroll, including full names/paths, session membership, branch and commit,
+live batch source/destination, a retained task-file reference, activity evidence,
+exit receipts and changed-file names. Unknown integration and check evidence
+remain unknown. These fields do not enable integration or verification actions.
+Label redaction also covers details, search text, task references and file names.
+
+Refreshes reuse Git metadata once per unique checkout and batch metadata once
+per live batch. The header shows snapshot age and refresh duration. `r` runs
+without blocking inspection; REFRESHING identifies retained data and disables
+actions until the new snapshot arrives. Failed refreshes retain the previous
+snapshot as STALE and require a successful retry before actions. There is no
+background polling or claim that an old snapshot is current. Individual Git or
+batch metadata failures remain unknown and are explained in full details.
+
+The command routes use the same inventory and filters:
+
+```sh
+tmux-drudwyn cockpit --state attention
+tmux-drudwyn cockpit --project '$0' --windows
+tmux-drudwyn cockpit --search 'work/api' --group attention
+tmux-drudwyn cockpit --list --state failed
+tmux-drudwyn cockpit --list --project 'project name' --windows
+```
+
+Project selectors accept an exact session name, stable session ID, or
+`unassociated`. State choices are `all`, `attention`, `failed`, `input`, `review`,
+`working`, `running`, `starting`, `unknown`, and `exited`. MATCHING counts apply
+to the chosen worker or all-window view; group counts describe matching rows.
+The `--list` output includes snapshot duration and unique checkout count.
+
 ### Responsive layout
 
 The status bar adapts to narrower terminals and tiled windows.

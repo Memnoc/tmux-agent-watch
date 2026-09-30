@@ -34,6 +34,12 @@ pub fn discover() -> Result<Vec<Workspace>, DiscoveryError> {
 }
 
 pub fn discover_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
+    let mut workspaces = discover_all_tmux()?;
+    workspaces.retain(|w| w.is_agent() || w.project.is_some() || w.checkout.is_linked_worktree);
+    Ok(workspaces)
+}
+
+pub fn discover_all_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
     crate::lifecycle::scan().map_err(|e| DiscoveryError::Tmux(e.to_string()))?;
     let output = Command::new("tmux")
         .args(["list-panes", "-a", "-F", WINDOW_FORMAT])
@@ -77,7 +83,6 @@ pub fn discover_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
                 .any(|row| row[0] == id && Some(row[2]) == workspace.project.as_deref())
         });
     }
-    workspaces.retain(|w| w.is_agent() || w.project.is_some() || w.checkout.is_linked_worktree);
     let aliases = crate::navigation::view_names()?;
     for workspace in &mut workspaces {
         if let Some(name) = aliases.get(&workspace.identity.session) {

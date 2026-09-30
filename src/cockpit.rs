@@ -2,8 +2,7 @@ use std::{
     collections::HashMap,
     io,
     path::PathBuf,
-    process::Command,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use crossterm::{
@@ -30,7 +29,7 @@ use crate::{
     discovery,
     domain::{AgentKind, GitState, Lifecycle, Workspace},
     theme::{Theme, Variant},
-    ui::{self, FooterTone},
+    ui,
     workspace::{self, Start},
 };
 
@@ -41,7 +40,12 @@ const COCKPIT_ACTIONS: &[(&str, &str)] = &[
     ("b", "Batch setup"),
     ("c", "Coordinator"),
     ("f", "Finish"),
-    ("/", "Filter"),
+    ("/", "Search"),
+    ("p/s", "Project/state"),
+    ("g", "Group"),
+    ("w", "Windows"),
+    ("d", "Details"),
+    ("x", "Clear filters"),
     ("r", "Refresh"),
 ];
 const CLOSE_ACTION: &[(&str, &str)] = &[("q/Esc", "Close")];
@@ -78,8 +82,16 @@ pub struct App {
     batch_form: Option<BatchForm>,
     recovery: Option<RecoveryForm>,
     batches: HashMap<String, String>,
-    finishing: bool,
-    git_diffs: HashMap<PathBuf, GitDiff>,
+    finishing: Option<(String, String, PathBuf)>,
+    snapshot: Option<crate::inventory::Snapshot>,
+    query: crate::inventory::Query,
+    current_window: String,
+    refreshed: Instant,
+    stale: bool,
+    refreshing: Option<std::sync::mpsc::Receiver<io::Result<crate::inventory::Snapshot>>>,
+    selection_changed: bool,
+    details_open: bool,
+    detail_scroll: u16,
     agent_icon: String,
     config: Config,
     theme: Theme,
@@ -116,31 +128,9 @@ struct BatchForm {
     error: Option<String>,
 }
 
-fn batch_details(workspaces: &[Workspace], redacted: bool) -> HashMap<String, String> {
-    workspaces
-        .iter()
-        .map(|w| {
-            let detail = match batch::for_window(&w.identity.window_id) {
-                Ok(Some(batch)) => batch.display(redacted),
-                _ => "Batch: unknown; source/destination unknown".into(),
-            };
-            (w.identity.window_id.clone(), detail)
-        })
-        .collect()
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct GitDiff {
-    added: u64,
-    deleted: u64,
-    files: usize,
-    untracked: usize,
-}
-
 impl App {
     pub fn new(workspaces: Vec<Workspace>, variant: Variant, config: Config) -> Self {
         let visible = (0..workspaces.len()).collect();
-        let git_diffs = collect_git_diffs(&workspaces);
         let batches = HashMap::new();
         Self {
             batches,
@@ -162,8 +152,16 @@ impl App {
                 .iter()
                 .position(|agent| *agent == config.default_agent)
                 .unwrap_or(0),
-            finishing: false,
-            git_diffs,
+            finishing: None,
+            snapshot: None,
+            query: crate::inventory::Query::default(),
+            current_window: String::new(),
+            refreshed: Instant::now(),
+            stale: false,
+            refreshing: None,
+            selection_changed: false,
+            details_open: false,
+            detail_scroll: 0,
             agent_icon: "A".into(),
             config,
             theme: Theme::rose_pine(variant),
@@ -412,10 +410,7 @@ impl App {
                         created.path.display()
                     ),
                 });
-                self.workspaces =
-                    discovery::discover().map_err(|error| io::Error::other(error.to_string()))?;
-                self.batches = batch_details(&self.workspaces, self.config.redact_labels);
-                self.refresh_filter();
+                self.refresh();
             }
             Err(error) => {
                 let message = error.to_string();
@@ -492,7 +487,7 @@ impl App {
                         self.start_error = None;
                         self.active_batch = Some(batch);
                         self.batch_form = None;
-                        self.batches = batch_details(&self.workspaces, self.config.redact_labels);
+                        self.refresh();
                     }
                     Ok(None) => form.error = None,
                     Err(error) => {
@@ -564,13 +559,134 @@ impl App {
             self.selected = 0;
             return;
         }
+        self.selection_changed = false;
+        self.detail_scroll = 0;
         self.selected = self
             .selected
             .saturating_add_signed(delta)
             .min(self.visible.len() - 1);
     }
 
+    fn refresh_current(&mut self) {
+        self.current_window.clear();
+        if let Ok(client) = crate::navigation::client() {
+            if let Ok(rows) =
+                crate::navigation::tmux(&["list-clients", "-F", "#{client_name}␟#{window_id}"])
+            {
+                self.current_window = rows
+                    .lines()
+                    .filter_map(|r| r.split_once('␟'))
+                    .find(|(name, _)| *name == client)
+                    .map(|(_, id)| id.to_owned())
+                    .unwrap_or_default();
+            }
+        }
+    }
+
+    fn refresh(&mut self) {
+        self.apply_refresh(crate::inventory::Snapshot::capture());
+    }
+
+    fn begin_refresh(&mut self) {
+        if self.refreshing.is_some() {
+            return;
+        }
+        let (send, receive) = std::sync::mpsc::channel();
+        self.refreshing = Some(receive);
+        std::thread::spawn(move || {
+            let _ = send.send(crate::inventory::Snapshot::capture());
+        });
+    }
+
+    fn complete_refresh(&mut self) {
+        let result = self
+            .refreshing
+            .as_ref()
+            .and_then(|receive| match receive.try_recv() {
+                Ok(result) => Some(result),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                Err(_) => Some(Err(io::Error::other("Refresh interrupted; retry"))),
+            });
+        if let Some(result) = result {
+            self.refreshing = None;
+            self.apply_refresh(result);
+        }
+    }
+
+    fn apply_refresh(&mut self, result: io::Result<crate::inventory::Snapshot>) {
+        let selected = self
+            .selected_workspace()
+            .map(|w| w.identity.window_id.clone());
+        match result {
+            Ok(snapshot) => {
+                self.workspaces = snapshot.workspaces.clone();
+                self.batches = snapshot
+                    .details
+                    .iter()
+                    .map(|(id, d)| {
+                        (
+                            id.clone(),
+                            d.batch
+                                .as_ref()
+                                .map(|b| b.display(self.config.redact_labels))
+                                .unwrap_or_else(|| {
+                                    "Batch: unknown; source/destination unknown".into()
+                                }),
+                        )
+                    })
+                    .collect();
+                self.snapshot = Some(snapshot);
+                self.refresh_current();
+                self.refreshed = Instant::now();
+                self.stale = false;
+                self.refresh_filter();
+                if let Some(id) = selected {
+                    if let Some(index) = self
+                        .visible
+                        .iter()
+                        .position(|i| self.workspaces[*i].identity.window_id == id)
+                    {
+                        self.selected = index;
+                    } else {
+                        self.selection_changed = true;
+                        self.error = Some(format!(
+                            "Selected window {id} unavailable; move or inspect a row before action"
+                        ));
+                    }
+                }
+            }
+            Err(error) => {
+                self.stale = true;
+                self.error = Some(format!(
+                    "Refresh failed; retained snapshot is STALE: {error}"
+                ));
+            }
+        }
+    }
+
     fn refresh_filter(&mut self) {
+        let selected = self
+            .selected_workspace()
+            .map(|w| w.identity.window_id.clone());
+        self.query.search = self.filter.clone();
+        if let Some(snapshot) = &self.snapshot {
+            match snapshot.visible(&self.query) {
+                Ok(visible) => self.visible = visible,
+                Err(error) => {
+                    self.visible.clear();
+                    self.error = Some(error.to_string());
+                }
+            }
+            self.selected = selected
+                .and_then(|id| {
+                    self.visible
+                        .iter()
+                        .position(|i| self.workspaces[*i].identity.window_id == id)
+                })
+                .unwrap_or(0);
+            self.detail_scroll = 0;
+            return;
+        }
         let query = self.filter.to_lowercase();
         self.visible = self
             .workspaces
@@ -597,10 +713,16 @@ impl App {
     }
 }
 
-pub fn run(variant: Variant, start: bool) -> Result<(), CockpitError> {
+pub fn run(
+    variant: Variant,
+    start: bool,
+    query: crate::inventory::Query,
+) -> Result<(), CockpitError> {
     let config = Config::load_tmux().map_err(|error| io::Error::other(error.to_string()))?;
-    let mut app = App::new(discovery::discover()?, variant, config);
-    app.batches = batch_details(&app.workspaces, app.config.redact_labels);
+    let mut app = App::new(Vec::new(), variant, config);
+    app.filter = query.search.clone();
+    app.query = query;
+    app.refresh();
     if start {
         app.begin_start();
     }
@@ -766,6 +888,7 @@ fn event_loop(
     app: &mut App,
 ) -> Result<(), CockpitError> {
     loop {
+        app.complete_refresh();
         terminal.draw(|frame| render(frame, app))?;
         if !event::poll(Duration::from_millis(250))? {
             continue;
@@ -826,24 +949,29 @@ fn event_loop(
             }
             continue;
         }
-        if app.finishing {
+        if app.finishing.is_some() {
             match key.code {
                 KeyCode::Char('y') => {
-                    app.finishing = false;
-                    if let Some(path) = app
-                        .selected_workspace()
-                        .map(|item| item.checkout.working_directory.clone())
-                    {
+                    if let Some((window, pane, path)) = app.finishing.take() {
+                        match crate::recovery::selected_checkout(&window, &pane) {
+                            Ok(current) if current == path => {}
+                            _ => {
+                                app.error = Some(
+                                    "Pending Finish target changed; cancel and inspect again"
+                                        .into(),
+                                );
+                                continue;
+                            }
+                        }
                         match workspace::finish(&path, &app.config.base_branch, true) {
                             Ok(_) => {
-                                app.workspaces = discovery::discover()?;
-                                app.refresh_filter();
+                                app.refresh();
                             }
                             Err(error) => app.error = Some(error.to_string()),
                         }
                     }
                 }
-                KeyCode::Esc | KeyCode::Char('n') => app.finishing = false,
+                KeyCode::Esc | KeyCode::Char('n') => app.finishing = None,
                 _ => {}
             }
             continue;
@@ -863,7 +991,91 @@ fn event_loop(
             }
             continue;
         }
+        if app.details_open {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('d') => {
+                    app.details_open = false;
+                    app.detail_scroll = 0;
+                }
+                KeyCode::PageDown | KeyCode::Down | KeyCode::Char('j') => {
+                    app.detail_scroll = app.detail_scroll.saturating_add(5)
+                }
+                KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
+                    app.detail_scroll = app.detail_scroll.saturating_sub(5)
+                }
+                KeyCode::Home => app.detail_scroll = 0,
+                _ => {}
+            }
+            continue;
+        }
+        if (app.stale || app.refreshing.is_some() || app.selection_changed)
+            && matches!(
+                key.code,
+                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o')
+            )
+        {
+            app.error = Some(
+                if app.refreshing.is_some() {
+                    "REFRESHING; wait before action"
+                } else if app.selection_changed {
+                    "Selected window unavailable; move or inspect a row before action"
+                } else {
+                    "Snapshot is STALE; refresh successfully before action"
+                }
+                .into(),
+            );
+            continue;
+        }
         match key.code {
+            KeyCode::Char('d') => {
+                app.selection_changed = false;
+                app.details_open = true;
+                app.detail_scroll = 0;
+            }
+            KeyCode::Char('g') => {
+                app.query.group = if app.query.group == crate::inventory::Group::Project {
+                    crate::inventory::Group::Attention
+                } else {
+                    crate::inventory::Group::Project
+                };
+                app.refresh_filter();
+            }
+            KeyCode::Char('s') => {
+                app.query.state = app.query.state.next();
+                app.refresh_filter();
+            }
+            KeyCode::Char('p') => {
+                let mut ids: Vec<_> = app
+                    .snapshot
+                    .as_ref()
+                    .map(|s| s.projects.keys().cloned().collect())
+                    .unwrap_or_default();
+                ids.push("unassociated".into());
+                app.query.project = match &app.query.project {
+                    None => ids.first().cloned(),
+                    Some(id) => ids
+                        .iter()
+                        .position(|p| p == id)
+                        .and_then(|i| ids.get(i + 1).cloned()),
+                };
+                app.refresh_filter();
+            }
+            KeyCode::Char('w') => {
+                app.query.windows = !app.query.windows;
+                if app.query.windows {
+                    app.query.project = app.selected_workspace().and_then(|w| w.project.clone());
+                }
+                app.refresh_filter();
+            }
+            KeyCode::Char('x') => {
+                app.query = crate::inventory::Query::default();
+                app.filter.clear();
+                app.refresh_filter();
+            }
+            KeyCode::PageDown => app.move_selection(10),
+            KeyCode::PageUp => app.move_selection(-10),
+            KeyCode::Home => app.move_selection(-(app.selected as isize)),
+            KeyCode::End => app.move_selection(app.visible.len() as isize),
             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
             KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
             KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
@@ -878,21 +1090,33 @@ fn event_loop(
                     item.checkout.is_linked_worktree && item.checkout.git_state == GitState::Clean
                 }) =>
             {
-                app.finishing = true
+                app.finishing = app.selected_workspace().map(|w| {
+                    (
+                        w.identity.window_id.clone(),
+                        w.identity.pane_id.clone(),
+                        w.checkout.working_directory.clone(),
+                    )
+                })
             }
             KeyCode::Char('c') => {
                 if let Some(workspace) = app.selected_workspace() {
-                    match crate::coordinator::open_window(&workspace.identity.window_id) {
+                    let result = if let Some(project) = &workspace.project {
+                        crate::navigation::tmux(&["list-windows","-t",project,"-F","#{window_id}"]).and_then(|windows| {
+                            if !windows.lines().any(|id|id==workspace.identity.window_id) {return Err(io::Error::other("Selected project window has vanished; refresh before coordinator navigation"));}
+                            crate::coordinator::open_project(project)
+                        })
+                    } else {
+                        crate::coordinator::open_window(&workspace.identity.window_id)
+                    };
+                    match result {
                         Ok(()) => return Ok(()),
                         Err(error) => app.error = Some(error.to_string()),
                     }
                 }
             }
             KeyCode::Char('r') => {
-                app.workspaces = discovery::discover()?;
-                app.git_diffs = collect_git_diffs(&app.workspaces);
-                app.batches = batch_details(&app.workspaces, app.config.redact_labels);
-                app.refresh_filter();
+                app.error = None;
+                app.begin_refresh();
             }
             KeyCode::Enter => {
                 if let Some(workspace) = app.selected_workspace() {
@@ -913,6 +1137,10 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         return;
     }
     let area = frame.area();
+    if app.details_open {
+        render_detail(frame, app, area);
+        return;
+    }
     let footer_height = if let Some(error) = &app.error {
         let width = frame.area().width.max(1) as usize;
         // Leave room for word wrapping so retained launch resources are visible.
@@ -927,29 +1155,43 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             .min(frame.area().height.saturating_sub(5))
             .max(3)
     } else if app.filtering || !app.filter.is_empty() {
-        3
+        if area.width < 70 { 4 } else { 3 }
     } else {
-        2
+        (ui::action_line(
+            &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
+            app.theme,
+        )
+        .width()
+        .div_ceil(area.width.max(1) as usize) as u16
+            + 1)
+        .min(7)
     };
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(if area.width >= 70 && area.height >= 24 {
-                9
-            } else {
-                3
-            }),
+            Constraint::Length(if area.width < 70 { 8 } else { 6 }),
             Constraint::Min(5),
             Constraint::Length(footer_height),
         ])
         .split(area);
     render_header(frame, app, layout[0]);
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(43), Constraint::Percentage(57)])
-        .split(layout[1]);
-    render_list(frame, app, body[0]);
-    render_detail(frame, app, body[1]);
+    if area.width < 70 {
+        render_list(frame, app, layout[1]);
+    } else {
+        let body = Layout::default()
+            .direction(if area.width < 100 {
+                Direction::Vertical
+            } else {
+                Direction::Horizontal
+            })
+            .constraints([
+                Constraint::Percentage(if area.width < 100 { 30 } else { 44 }),
+                Constraint::Min(1),
+            ])
+            .split(layout[1]);
+        render_list(frame, app, body[0]);
+        render_detail(frame, app, body[1]);
+    }
     render_footer(frame, app, layout[2]);
     if let Some(form) = &app.batch_form {
         let mut lines = vec![
@@ -1153,7 +1395,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 ),
             );
         }
-    } else if app.finishing
+    } else if app.finishing.is_some()
         && let Some(workspace) = app.selected_workspace()
     {
         let branch = app.workspace_label(workspace);
@@ -1343,113 +1585,149 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 }
 
 fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let attention = app
-        .workspaces
-        .iter()
-        .filter(|workspace| workspace.lifecycle.needs_attention())
-        .count();
-    if area.height >= 9 {
-        frame.render_widget(Block::default().borders(Borders::BOTTOM), area);
-        crate::brand::render(
-            frame,
-            Rect::new(area.x + 1, area.y, 16, 8),
-            // A dark tile keeps the white artwork visible in the Dawn theme too.
-            ratatui::style::Color::Rgb(35, 33, 54),
-        );
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(Span::styled(
-                    "Drudwyn",
-                    Style::default()
-                        .fg(app.theme.rose)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from("WORKSPACE COCKPIT"),
-                Line::from(Span::styled(
-                    format!(
-                        "{} live · {} need attention",
-                        app.workspaces.iter().filter(|w| w.is_agent()).count(),
-                        attention
-                    ),
-                    Style::default().fg(app.theme.muted),
-                )),
-            ]),
-            Rect::new(area.x + 19, area.y + 2, area.width.saturating_sub(19), 4),
-        );
-        return;
-    }
-    let title = Line::from(vec![
-        Span::styled(
-            " WORKSPACE COCKPIT ",
+    let totals = crate::inventory::Totals::from_workspaces(&app.workspaces);
+    let project = app.query.project.as_deref().unwrap_or("all");
+    let project = if app.config.redact_labels && project != "all" && project != "unassociated" {
+        "[redacted]"
+    } else {
+        project
+    };
+    let lines = vec![
+        Line::styled(
+            " WORKSPACE COCKPIT / GLOBAL",
             Style::default()
                 .fg(app.theme.rose)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            format!(
-                "{} live · {} need attention",
-                app.workspaces.iter().filter(|w| w.is_agent()).count(),
-                attention
-            ),
-            Style::default().fg(app.theme.muted),
-        ),
-    ]);
+        Line::from(format!(
+            " GLOBAL {} workers · {} live · {} projects",
+            totals.workers, totals.live, totals.projects
+        )),
+        Line::from(format!(
+            " Attention {}: {} failed / {} input / {} review · {} exited",
+            totals.attention, totals.failed, totals.input, totals.review, totals.exited
+        )),
+        Line::from(format!(
+            " {} · project {} · state {}",
+            crate::inventory::matching_label(&app.workspaces, &app.visible, app.query.windows),
+            project,
+            app.query.state.label()
+        )),
+        Line::from(format!(
+            " {} · {}ms · age {}s · * current / > inspect",
+            if app.refreshing.is_some() {
+                "REFRESHING (retained snapshot)"
+            } else if app.stale {
+                "STALE: r retry"
+            } else {
+                "Snapshot: r refresh"
+            },
+            app.snapshot.as_ref().map(|s| s.elapsed_ms).unwrap_or(0),
+            app.refreshed.elapsed().as_secs()
+        )),
+    ];
     frame.render_widget(
-        Paragraph::new(title).block(Block::default().borders(Borders::BOTTOM)),
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::BOTTOM)),
         area,
     );
 }
 
 fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     if app.visible.is_empty() {
-        let message = if app.workspaces.is_empty() {
-            "No live agent workspaces. Start an agent in tmux, then press r."
-        } else {
-            "No workspaces match this filter."
-        };
         frame.render_widget(
-            Paragraph::new(message).style(Style::default().fg(app.theme.muted)),
+            Paragraph::new(
+                "No workspaces match. x clears filters; n starts a worker; r refreshes.",
+            )
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(app.theme.muted)),
             area,
         );
         return;
     }
+    let group_key = |w: &Workspace| {
+        if app.query.group == crate::inventory::Group::Project {
+            w.project.clone().unwrap_or_else(|| "unassociated".into())
+        } else {
+            w.lifecycle.label().into()
+        }
+    };
+    let mut counts = HashMap::new();
+    for i in &app.visible {
+        *counts.entry(group_key(&app.workspaces[*i])).or_insert(0) += 1;
+    }
+    let mut previous = String::new();
     let items = app.visible.iter().map(|index| {
-        let workspace = &app.workspaces[*index];
-        let state_color = match workspace.lifecycle {
+        let w = &app.workspaces[*index];
+        let key = group_key(w);
+        let mut lines = Vec::new();
+        if previous != key {
+            previous = key.clone();
+            let label = if app.query.group == crate::inventory::Group::Attention {
+                key.as_str()
+            } else if app.config.redact_labels {
+                "Project"
+            } else {
+                app.snapshot
+                    .as_ref()
+                    .and_then(|s| s.projects.get(&key))
+                    .map(String::as_str)
+                    .unwrap_or(&key)
+            };
+            lines.push(Line::styled(
+                format!("{label} [{key}] · {} matching", counts[&key]),
+                Style::default().fg(app.theme.pine),
+            ));
+        }
+        let color = match w.lifecycle {
             Lifecycle::Waiting => app.theme.gold,
-            Lifecycle::Review => app.theme.pine,
             Lifecycle::Failed => app.theme.love,
-            Lifecycle::Running | Lifecycle::Working | Lifecycle::Starting => app.theme.rose,
-            Lifecycle::Unknown => app.theme.muted,
+            Lifecycle::Review => app.theme.pine,
+            _ => app.theme.text,
         };
-        let project = app.project_label(workspace);
-        let branch = app.workspace_label(workspace);
-        let git = match workspace.checkout.git_state {
-            GitState::Clean => "clean",
-            GitState::Dirty => "dirty",
-            GitState::Unknown => "no git",
-        };
-        ListItem::new(Line::from(vec![
+        lines.push(Line::from(vec![
             Span::styled(
-                format!(" {:<9} ", workspace.lifecycle.label()),
-                Style::default()
-                    .fg(state_color)
-                    .add_modifier(Modifier::BOLD),
+                format!(
+                    "{} {} {} ",
+                    if app.visible.get(app.selected) == Some(index) {
+                        ">"
+                    } else {
+                        " "
+                    },
+                    if w.identity.window_id == app.current_window {
+                        "*"
+                    } else {
+                        " "
+                    },
+                    w.identity.window_id
+                ),
+                Style::default().fg(app.theme.rose),
             ),
-            Span::raw(format!(
-                "{} {} · ",
-                workspace.role(),
-                workspace.identity.window_id
-            )),
-            Span::styled(project.to_owned(), Style::default().fg(app.theme.text)),
-            Span::styled(" · ", Style::default().fg(app.theme.muted)),
-            Span::styled(branch.to_owned(), Style::default().fg(app.theme.text)),
-            Span::styled(format!("  {git}"), Style::default().fg(app.theme.muted)),
-        ]))
+            Span::raw(app.workspace_label(w).to_owned()),
+        ]));
+        lines.push(Line::styled(
+            format!(
+                "  {} · {}{}",
+                w.role(),
+                w.lifecycle.label(),
+                if w.process == "exited" {
+                    " · Exited"
+                } else {
+                    ""
+                }
+            ),
+            Style::default().fg(color),
+        ));
+        ListItem::new(lines)
     });
     let list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("▶ ");
+        .highlight_style(
+            Style::default()
+                .bg(app.theme.base)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("");
     let mut state = ListState::default().with_selected(Some(app.selected));
     frame.render_stateful_widget(list, area, &mut state);
 }
@@ -1485,7 +1763,11 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let branch = if private {
         "Workspace"
     } else {
-        workspace.checkout.branch.as_deref().unwrap_or("detached")
+        workspace
+            .checkout
+            .branch
+            .as_deref()
+            .unwrap_or("unknown/detached")
     };
     let path = if private {
         "[redacted]".to_owned()
@@ -1527,8 +1809,9 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         detail_line(
             "IDENTITY",
             format!(
-                "{} · project {}",
+                "{} {} · project {}",
                 workspace.identity.window_id,
+                workspace.identity.pane_id,
                 workspace.project.as_deref().unwrap_or("unknown")
             ),
             app.theme.muted,
@@ -1591,38 +1874,79 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             .lines()
             .map(|line| Line::from(format!(" {line}"))),
     );
-    if let Some(diff) = app.git_diffs.get(&workspace.checkout.working_directory) {
-        if diff.files == 0 {
-            lines.push(Line::from(vec![
-                Span::styled(" CHANGES   ", Style::default().fg(app.theme.muted)),
-                Span::styled("✓ clean", Style::default().fg(app.theme.pine)),
-            ]));
-        } else {
-            let mut changes = vec![
-                Span::styled(" CHANGES   ", Style::default().fg(app.theme.muted)),
-                Span::styled(
-                    format!("+{}", diff.added),
-                    Style::default().fg(app.theme.pine),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    format!("−{}", diff.deleted),
-                    Style::default().fg(app.theme.love),
-                ),
-                Span::styled(
-                    format!(" · {} files", diff.files),
-                    Style::default().fg(app.theme.muted),
-                ),
-            ];
-            if diff.untracked > 0 {
-                changes.push(Span::styled(
-                    format!(" · ?{}", diff.untracked),
-                    Style::default().fg(app.theme.gold),
-                ));
-            }
-            lines.push(Line::from(changes));
+    lines.extend([
+        detail_line(
+            "SESSIONS",
+            if private {
+                "[redacted]".into()
+            } else {
+                workspace.identity.sessions.join(", ")
+            },
+            app.theme.muted,
+        ),
+        detail_line(
+            "PROJECT",
+            app.project_label(workspace).into(),
+            app.theme.muted,
+        ),
+    ]);
+    if let Some(detail) = app
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.details.get(&workspace.identity.window_id))
+    {
+        for (label, value) in [
+            ("COMMIT", detail.commit.as_deref().unwrap_or("unknown")),
+            (
+                "SOURCE",
+                detail.source_commit.as_deref().unwrap_or("unknown"),
+            ),
+            (
+                "TASK REF",
+                detail.task_reference.as_deref().unwrap_or("unknown"),
+            ),
+            (
+                "DELIVERY",
+                if detail.delivery.is_empty() {
+                    "unknown"
+                } else {
+                    &detail.delivery
+                },
+            ),
+        ] {
+            lines.push(detail_line(
+                label,
+                if private && label != "DELIVERY" {
+                    "[redacted]".into()
+                } else {
+                    value.into()
+                },
+                app.theme.muted,
+            ));
+        }
+        lines.push(Line::from(format!(
+            " CHANGES   {} file names",
+            detail.changed_files.len()
+        )));
+        for name in &detail.changed_files {
+            lines.push(Line::from(if private {
+                " [redacted]".into()
+            } else {
+                format!(" {name:?}")
+            }));
+        }
+        if let Some(warning) = &detail.warning {
+            lines.push(Line::from(if private {
+                " Metadata unavailable".into()
+            } else {
+                format!(" UNAVAILABLE {warning}")
+            }));
         }
     }
+    lines.push(Line::from(
+        " Integration: unknown · no integration evidence",
+    ));
+    lines.push(Line::from(" Checks: unknown · not verified"));
     lines.push(Line::from(""));
     lines.push(Line::styled(
         " NEXT",
@@ -1648,8 +1972,25 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         " f      finish · verifies merged branch"
     };
     lines.push(Line::styled(finish, Style::default().fg(app.theme.muted)));
+    // Use the renderer's actual wrapping, including word boundaries and borders,
+    // so every last detail remains reachable at narrow widths.
+    let block = Block::default()
+        .title(if app.details_open {
+            " DETAILS · PgUp/PgDn scroll · Esc back "
+        } else {
+            " SELECTED · d full details "
+        })
+        .borders(Borders::LEFT);
+    let inner = block.inner(area);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let max_scroll = paragraph
+        .line_count(inner.width)
+        .saturating_sub(inner.height as usize)
+        .min(u16::MAX as usize) as u16;
     frame.render_widget(
-        Paragraph::new(lines).block(Block::default().title(" SELECTED ").borders(Borders::LEFT)),
+        paragraph
+            .scroll((app.detail_scroll.min(max_scroll), 0))
+            .block(block),
         area,
     );
 }
@@ -1661,56 +2002,9 @@ fn detail_line(label: &'static str, value: String, muted: ratatui::style::Color)
     ])
 }
 
-fn collect_git_diffs(workspaces: &[Workspace]) -> HashMap<PathBuf, GitDiff> {
-    workspaces
-        .iter()
-        .filter_map(|workspace| {
-            git_diff(&workspace.checkout.working_directory)
-                .map(|diff| (workspace.checkout.working_directory.clone(), diff))
-        })
-        .collect()
-}
-
-fn git_diff(path: &std::path::Path) -> Option<GitDiff> {
-    let diff = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(["diff", "--numstat", "HEAD", "--"])
-        .output()
-        .ok()?;
-    if !diff.status.success() {
-        return None;
-    }
-    let mut result = GitDiff::default();
-    for line in String::from_utf8_lossy(&diff.stdout).lines() {
-        let mut fields = line.split_whitespace();
-        result.added += fields
-            .next()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0);
-        result.deleted += fields
-            .next()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0);
-    }
-    let status = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()?;
-    if !status.status.success() {
-        return None;
-    }
-    let status = String::from_utf8_lossy(&status.stdout);
-    result.files = status.lines().count();
-    result.untracked = status.lines().filter(|line| line.starts_with("??")).count();
-    Some(result)
-}
-
 fn age(since: Option<u64>) -> String {
     let Some(since) = since else {
-        return "now".into();
+        return "unknown".into();
     };
     let elapsed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1730,23 +2024,32 @@ fn age(since: Option<u64>) -> String {
 
 fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     if app.filtering {
-        let message = format!("› {}_", app.filter);
-        ui::render_footer(
-            frame,
+        let message = if app.config.redact_labels && !app.filter.is_empty() {
+            "[redacted]"
+        } else {
+            &app.filter
+        };
+        frame.render_widget(
+            Paragraph::new(vec![
+                ui::action_line(&[FILTER_ACTIONS], app.theme),
+                Line::from(format!(" SEARCH > {message}_")),
+            ])
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::TOP)),
             area,
-            app.theme,
-            &[FILTER_ACTIONS],
-            ("FILTER", &message, FooterTone::Info),
         );
         return;
     }
 
     if app.error.is_none() && app.filter.is_empty() {
-        ui::render_action_bar(
-            frame,
+        frame.render_widget(
+            Paragraph::new(ui::action_line(
+                &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
+                app.theme,
+            ))
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::TOP)),
             area,
-            app.theme,
-            &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
         );
         return;
     }
@@ -1776,13 +2079,19 @@ fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         );
         return;
     }
-    let (label, message, tone) = ("FILTER", app.filter.as_str(), FooterTone::Info);
-    ui::render_footer(
-        frame,
+    let query = if app.config.redact_labels {
+        "[redacted]"
+    } else {
+        app.filter.as_str()
+    };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(" / search · x clear · d details · Enter open"),
+            Line::from(format!(" SEARCH {query}")),
+        ])
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::TOP)),
         area,
-        app.theme,
-        &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
-        (label, message, tone),
     );
 }
 

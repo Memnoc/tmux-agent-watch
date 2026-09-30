@@ -317,40 +317,38 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
             clear(guard, window)?;
             continue;
         };
-        for key in ["agent", "state", "source", "since", "attention_since"] {
-            let value = tmux_output(&[
-                "show-option",
-                "-pqv",
-                "-t",
-                f[1],
-                &format!("@drudwyn_p_{key}"),
-            ])?;
-            set_option(guard, window, &format!("@drudwyn_{key}"), &value)?;
+        // Read the updated pane projection once under the same guard. Publish
+        // fixed non-content fields in one child-held command queue.
+        let current = tmux_output(&[
+            "display-message",
+            "-p",
+            "-t",
+            f[1],
+            "#{@drudwyn_p_agent}␟#{@drudwyn_p_state}␟#{@drudwyn_p_source}␟#{@drudwyn_p_since}␟#{@drudwyn_p_attention_since}",
+        ])?;
+        let values: Vec<_> = current.split(SEPARATOR).collect();
+        if values.len() != 5 {
+            return Err(LifecycleError::Tmux);
         }
-        set_option(guard, window, "@drudwyn_activity_pane", f[1])?;
-        set_option(guard, window, "@drudwyn_process", process_state)?;
         let pane_exit = *process_state == "exited" && f[4] == "1";
-        set_option(
+        window_options(
             guard,
             window,
-            "@drudwyn_exit_code",
-            if pane_exit { f[5] } else { "" },
+            &[
+                ("@drudwyn_agent", values[0]),
+                ("@drudwyn_state", values[1]),
+                ("@drudwyn_source", values[2]),
+                ("@drudwyn_since", values[3]),
+                ("@drudwyn_attention_since", values[4]),
+                ("@drudwyn_activity_pane", f[1]),
+                ("@drudwyn_process", process_state),
+                ("@drudwyn_exit_code", if pane_exit { f[5] } else { "" }),
+                ("@drudwyn_exit_time", if pane_exit { f[6] } else { "" }),
+                ("@drudwyn_exit_signal", if pane_exit { f[15] } else { "" }),
+                ("@drudwyn_message", ""),
+            ],
         )?;
-        set_option(
-            guard,
-            window,
-            "@drudwyn_exit_time",
-            if pane_exit { f[6] } else { "" },
-        )?;
-        set_option(
-            guard,
-            window,
-            "@drudwyn_exit_signal",
-            if pane_exit { f[15] } else { "" },
-        )?;
-        set_option(guard, window, "@drudwyn_message", "")?;
-        let state = tmux_output(&["show-option", "-wqv", "-t", window, "@drudwyn_state"])?;
-        write_style(guard, window, Lifecycle::from_tmux(&state))?;
+        write_style(guard, window, Lifecycle::from_tmux(values[1]))?;
     }
     Ok(())
 }
@@ -593,24 +591,50 @@ fn write_style(
 }
 
 fn clear(guard: &LifecycleGuard, window_id: &str) -> Result<(), LifecycleError> {
-    for option in [
-        "@drudwyn_state",
-        "@drudwyn_source",
-        "@drudwyn_message",
-        "@drudwyn_since",
-        "@drudwyn_attention_since",
-        "@drudwyn_marker",
-        "@drudwyn_window_style",
-        "@drudwyn_agent",
-        "@drudwyn_activity_pane",
-        "@drudwyn_process",
-        "@drudwyn_exit_code",
-        "@drudwyn_exit_time",
-        "@drudwyn_exit_signal",
-    ] {
-        set_option(guard, window_id, option, "")?;
+    window_options(
+        guard,
+        window_id,
+        &[
+            ("@drudwyn_state", ""),
+            ("@drudwyn_source", ""),
+            ("@drudwyn_message", ""),
+            ("@drudwyn_since", ""),
+            ("@drudwyn_attention_since", ""),
+            ("@drudwyn_marker", ""),
+            ("@drudwyn_window_style", ""),
+            ("@drudwyn_agent", ""),
+            ("@drudwyn_activity_pane", ""),
+            ("@drudwyn_process", ""),
+            ("@drudwyn_exit_code", ""),
+            ("@drudwyn_exit_time", ""),
+            ("@drudwyn_exit_signal", ""),
+        ],
+    )
+}
+
+fn window_options(
+    guard: &LifecycleGuard,
+    window: &str,
+    options: &[(&str, &str)],
+) -> Result<(), LifecycleError> {
+    // tmux recognizes a trailing semicolon even inside an argv value.
+    let values: Vec<String> = options
+        .iter()
+        .map(|(_, value)| {
+            value
+                .strip_suffix(';')
+                .map(|v| format!("{v}\\;"))
+                .unwrap_or_else(|| (*value).into())
+        })
+        .collect();
+    let mut args = Vec::new();
+    for ((name, _), value) in options.iter().zip(&values) {
+        if !args.is_empty() {
+            args.push(";");
+        }
+        args.extend(["set-option", "-wq", "-t", window, name, value]);
     }
-    Ok(())
+    tmux_status(guard, &args)
 }
 
 fn set_option(
