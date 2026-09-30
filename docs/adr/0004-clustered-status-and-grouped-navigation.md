@@ -1,11 +1,13 @@
 ---
-status: accepted
+status: superseded by ADR-0006
 date: 2026-09-02
 proposed-by: Memnoc
 approved-by: Memnoc
 ---
 
 # ADR-0004: Cluster workspace status and group navigation
+
+> Superseded by [ADR-0006](0006-two-row-status-and-persistent-attention.md) — both status rows now carry information; grouped navigation and the content-blind boundary are retained.
 
 ## Context
 

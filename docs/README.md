@@ -20,6 +20,7 @@ cockpit with `prefix + P`, then try the workspace navigator with `prefix + w`.
 ## Development and project background
 
 - [Update agenda](agenda.md): work planned for the next update.
+- [Worker workflow specification](specs/2026-09-30-worktree-worker-workflow.md) and [implementation breakdown](specs/2026-09-30-worktree-worker-ticket-plan.md): the planned launch, supervision, recovery, and integration improvements.
 - [README standard](readme-style.md): reusable layout and authoring skill.
 - [Contributing](../CONTRIBUTING.md): setup, repository map, and checks.
 - [Domain context](../CONTEXT.md): workspace and lifecycle terminology.
