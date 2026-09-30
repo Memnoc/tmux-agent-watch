@@ -80,6 +80,14 @@ counts require a running process; retained exited workers stay separately
 visible, including unresolved attention. Running and hook-backed Working are
 separate activity labels.
 
+Known nonzero or signalled exits also count as Failed, even when a Review or
+Needs input handoff survives. Failed, Input and Review categories may overlap;
+GLOBAL workers and attention count each worker once. Overlapping totals are
+labelled **categories overlap**. The Failed and retained-handoff filters both
+include such a worker; attention grouping places it once under Failed, and its
+row/details retain the original handoff and exit evidence. A zero or unknown
+exit alone does not establish failure or task completion.
+
 | Key | Action |
 | --- | --- |
 | `j/k`, arrows, `PgUp/PgDn`, `Home/End` | Inspect inventory rows without navigating |
@@ -107,8 +115,11 @@ exit receipts and changed-file names. Unknown integration and check evidence
 remain unknown. These fields do not enable integration or verification actions.
 Label redaction also covers details, search text, task references and file names.
 
-Refreshes reuse Git metadata once per unique checkout and batch metadata once
-per live batch. The header shows snapshot age and refresh duration. `r` runs
+Refreshes resolve each pane's Git checkout root and reuse Git details once per
+checkout, including panes in nested directories or symlink aliases. Linked
+worktrees keep distinct metadata even when they share a Git common directory.
+Details and navigation retain the selected pane's authoritative working
+directory. Batch metadata is reused once per live batch. The header shows snapshot age and refresh duration. `r` runs
 without blocking inspection; REFRESHING identifies retained data and disables
 actions until the new snapshot arrives. Failed refreshes retain the previous
 snapshot as STALE and require a successful retry before actions. There is no

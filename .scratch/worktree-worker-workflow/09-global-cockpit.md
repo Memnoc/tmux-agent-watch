@@ -159,3 +159,73 @@ are those described above; measurements are fixture-specific.
 
 Implementation and this verified ticket receipt are committed together on
 `work/worktree-worker-workflow`. Independent review remains pending.
+
+### Independent-review corrections (pending re-review)
+
+The first independent review found two P2 defects, both reproduced unchanged by
+`/tmp/drudwyn-review09-counting.py`; red output is retained in
+`/tmp/drudwyn-ticket09-counting-red.log`.
+
+1. Pane cwd had been used as the Git detail-cache key. Root and nested workers
+   in one worktree reported two checkouts and ran two status probes. The cache
+   now resolves the canonical checkout root, common directory and per-worktree
+   Git directory before sharing branch/commit/status details. Identity lookup
+   is shared per canonical cwd; detail lookup is shared per actual checkout.
+   Linked branches retain separate identities. Selected details and navigation
+   keep the authoritative pane cwd. Failed identity resolution remains unknown
+   and does not skip retained batch/task metadata. Out-of-Git paths are not
+   counted as identified checkouts.
+2. Failed counted only the retained lifecycle label. Review plus a known native
+   exit23 displayed a failed exit but disappeared from Failed filtering/counts.
+   Shared pure predicates now include known nonzero/signal exits without
+   rewriting hook history. Failed, Input and Review may overlap; the CLI and UI
+   label overlapping categories. Worker and attention totals count each worker
+   once. Failed grouping takes precedence while row/details retain Review and
+   the native exit evidence. Zero/unknown exit alone is not failure or task
+   completion. `Totals::from_workspaces`, state filtering, attention grouping
+   and search consume these predicates; ticket10's no-I/O count seam therefore
+   inherits the rule without Git scans.
+
+The checkout regression failed at six reported checkouts instead of three, then
+passed with exactly one status probe per actual checkout. It covers root,
+nested, symlink and literal-dollar/semicolon/space paths, two distinct linked
+branches, actual detail access and requester-only stable-ID navigation. The
+failure regression failed at failed0/MATCHING0, then passed for Failed, Review,
+Attention and Exited filters; it checks unique totals, retained hook timestamp,
+native exit23, native signal, replacement invalidation and zero exit. Actual
+48/80/120-column Cockpit captures preserve the Failed group, Review label,
+overlap explanation and snapshot status. Native tmux dead-pane visibility can
+precede or lose the exit receipt when terminal EOF wins the reaping race; the
+fixture briefly keeps its terminal open through reaping and explicitly waits
+for the signal receipt. Production continues to retain unknown receipts.
+
+Original unchanged reproof: `/tmp/drudwyn-ticket09-counting-green.log` now shows
+one checkout/one status probe, and one Failed match with Review plus exit23.
+Focused tests: all 11 global Cockpit cases and all 36 activity/concurrency cases
+passed (`/tmp/drudwyn-ticket09-corrections-global.log` and
+`/tmp/drudwyn-ticket09-corrections-activity.log`). Actual captures:
+`/tmp/drudwyn-ticket09-failed-review-{48,80,120}.txt`,
+`/tmp/drudwyn-ticket09-failed-review-group.txt`, and
+`/tmp/drudwyn-ticket09-failed-review-details.txt`.
+
+The corrected 36-worker/four-project/39-checkout fixture measured 1150ms
+snapshot, 1.165s CLI wall time, 1.107s UI ready, 28ms End inspection and 26ms
+inspection during a blocked refresh, in the same Linux/tmux3.4 environment
+recorded above. These are fixture measurements, not portable guarantees.
+Audit confirmed no lifecycle mutation/locking, launch, recovery, attention
+clearing, privacy-boundary or navigation changes; only cache identity and
+supervision classification changed. The authoritative-cwd fallback and
+non-Linux runtime limitations above remain. Code is frozen for final gates;
+independent re-review is pending.
+
+Correction final gates passed without code changes after freeze:
+`cargo fmt --check`, `git diff --check`, `cargo test --locked` (41 tests), and
+complete `bash tests/run.sh` (15 launch, 17 recovery, 11 global Cockpit,
+36 activity, 29 real-client, 13 navigator with the existing optional Resurrect
+skip, 10 settings, and shell/privacy/package/release checks). Logs:
+`/tmp/drudwyn-ticket09-corrections-rust.log` and
+`/tmp/drudwyn-ticket09-corrections-final-suite.log`. The final 36-worker,
+four-project, 39-checkout sample was 1147ms snapshot, 1.161s CLI, 1.110s UI
+ready, 29ms End inspection and 5ms inspection during blocked refresh.
+Implementation, regression tests, user guidance and this correction receipt
+are committed atomically; independent re-review remains pending.

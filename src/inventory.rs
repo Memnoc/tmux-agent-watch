@@ -59,9 +59,9 @@ impl State {
     fn matches(self, w: &Workspace) -> bool {
         match self {
             Self::All => true,
-            Self::Attention => w.lifecycle.needs_attention(),
+            Self::Attention => needs_attention(w),
             Self::Exited => w.process == "exited",
-            Self::Failed => w.lifecycle == Lifecycle::Failed,
+            Self::Failed => has_failure(w),
             Self::Input => w.lifecycle == Lifecycle::Waiting,
             Self::Review => w.lifecycle == Lifecycle::Review,
             Self::Working => w.lifecycle == Lifecycle::Working,
@@ -98,6 +98,26 @@ pub fn is_worker(workspace: &Workspace) -> bool {
         && workspace.coordinator.as_deref() != Some(workspace.identity.window_id.as_str())
 }
 
+/// Failure is independent of a retained hook handoff. These pure predicates are
+/// shared by filters, grouping and counts without rewriting lifecycle history.
+pub fn has_failure(workspace: &Workspace) -> bool {
+    workspace.lifecycle == Lifecycle::Failed
+        || (workspace.process == "exited"
+            && (workspace.exit_code.is_some_and(|code| code != 0)
+                || workspace.exit_signal.is_some()))
+}
+pub fn needs_attention(workspace: &Workspace) -> bool {
+    has_failure(workspace) || workspace.lifecycle.needs_attention()
+}
+/// Each row belongs to one attention group; a known failure takes precedence.
+pub fn attention_state(workspace: &Workspace) -> Lifecycle {
+    if has_failure(workspace) {
+        Lifecycle::Failed
+    } else {
+        workspace.lifecycle
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct Totals {
     pub workers: usize,
@@ -123,17 +143,20 @@ impl Totals {
             totals.workers += 1;
             totals.live += usize::from(w.process == "running");
             totals.exited += usize::from(w.process == "exited");
-            totals.attention += usize::from(w.lifecycle.needs_attention());
-            totals.failed += usize::from(w.lifecycle == Lifecycle::Failed);
+            totals.attention += usize::from(needs_attention(w));
+            totals.failed += usize::from(has_failure(w));
             totals.input += usize::from(w.lifecycle == Lifecycle::Waiting);
             totals.review += usize::from(w.lifecycle == Lifecycle::Review);
         }
         totals.projects = projects.len();
         totals
     }
+    pub fn categories_overlap(&self) -> bool {
+        self.failed + self.input + self.review > self.attention
+    }
     pub fn summary(&self) -> String {
         format!(
-            "GLOBAL {} workers · {} live · {} projects · {} exited · {} attention ({} failed / {} input / {} review)",
+            "GLOBAL {} workers · {} live · {} projects · {} exited · {} attention ({} failed / {} input / {} review{})",
             self.workers,
             self.live,
             self.projects,
@@ -141,7 +164,12 @@ impl Totals {
             self.attention,
             self.failed,
             self.input,
-            self.review
+            self.review,
+            if self.categories_overlap() {
+                "; categories overlap"
+            } else {
+                ""
+            }
         )
     }
 }
@@ -287,6 +315,7 @@ impl Snapshot {
                                 .map(String::as_str)
                                 .unwrap_or("unassociated"),
                             w.lifecycle.label(),
+                            attention_state(w).label(),
                             self.details
                                 .get(&w.identity.window_id)
                                 .and_then(|d| d.batch.as_ref())
@@ -315,8 +344,8 @@ impl Snapshot {
                 } else {
                     String::new()
                 },
-                !w.lifecycle.needs_attention(),
-                w.lifecycle.label(),
+                !needs_attention(w),
+                attention_state(w).label(),
                 w.identity.window_id.clone(),
             )
         });
@@ -398,7 +427,15 @@ fn git(path: &Path, args: &[&str]) -> io::Result<Vec<u8>> {
     }
     Ok(output.stdout)
 }
-fn checkout(path: &Path) -> io::Result<(Checkout, Option<String>, Vec<String>)> {
+/// A checkout is its canonical root and per-worktree Git directory. The shared
+/// common directory alone would collapse independent linked branches.
+#[derive(Clone, Eq, PartialEq, Hash)]
+struct CheckoutIdentity {
+    root: PathBuf,
+    common_dir: PathBuf,
+    git_dir: PathBuf,
+}
+fn checkout_identity(path: &Path) -> io::Result<CheckoutIdentity> {
     let raw = git(
         path,
         &[
@@ -414,7 +451,15 @@ fn checkout(path: &Path) -> io::Result<(Checkout, Option<String>, Vec<String>)> 
     if f.len() != 3 {
         return Err(io::Error::other("Git checkout identity unavailable"));
     }
-    let linked = f[1] != f[2];
+    Ok(CheckoutIdentity {
+        root: Path::new(f[0]).canonicalize()?,
+        common_dir: Path::new(f[1]).canonicalize()?,
+        git_dir: Path::new(f[2]).canonicalize()?,
+    })
+}
+fn checkout(identity: &CheckoutIdentity) -> io::Result<(Checkout, Option<String>, Vec<String>)> {
+    let path = &identity.root;
+    let linked = identity.common_dir != identity.git_dir;
     let branch = String::from_utf8_lossy(&git(path, &["branch", "--show-current"])?)
         .trim_end()
         .to_owned();
@@ -442,11 +487,11 @@ fn checkout(path: &Path) -> io::Result<(Checkout, Option<String>, Vec<String>)> 
         Checkout {
             working_directory: path.into(),
             repository: if linked {
-                Path::new(f[1]).parent().map(PathBuf::from)
+                identity.common_dir.parent().map(PathBuf::from)
             } else {
-                Some(PathBuf::from(f[0]))
+                Some(identity.root.clone())
             },
-            worktree: linked.then(|| PathBuf::from(f[0])),
+            worktree: linked.then(|| identity.root.clone()),
             branch: (!branch.is_empty()).then_some(branch),
             git_state: if files.is_empty() {
                 GitState::Clean
@@ -474,6 +519,7 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
         })
         .collect();
     let mut batches = HashMap::new();
+    let mut identities = HashMap::new();
     let mut checkouts = HashMap::new();
     let mut details = HashMap::new();
     for w in workspaces {
@@ -497,18 +543,28 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
                 None
             };
             if let Some(path) = path.and_then(|p| p.canonicalize().ok()) {
-                let data = checkouts
+                let identity = identities
                     .entry(path.clone())
-                    .or_insert_with(|| checkout(&path).map_err(|e| e.to_string()));
+                    .or_insert_with(|| checkout_identity(&path).map_err(|e| e.to_string()));
+                let data = match identity {
+                    Ok(identity) => checkouts
+                        .entry(identity.clone())
+                        .or_insert_with(|| checkout(identity).map_err(|e| e.to_string()))
+                        .as_ref()
+                        .map_err(String::as_str),
+                    Err(error) => Err(error.as_str()),
+                };
                 match data {
                     Ok((checkout, commit, files)) => {
                         w.checkout = checkout.clone();
+                        // The cached Git root is not the selected pane's cwd.
+                        w.checkout.working_directory = path;
                         detail.commit = commit.clone();
                         detail.changed_files = files.clone();
                     }
                     Err(error) => {
                         w.checkout = unknown_checkout(path);
-                        detail.warning = Some(error.clone());
+                        detail.warning = Some(error.to_owned());
                     }
                 }
             } else {

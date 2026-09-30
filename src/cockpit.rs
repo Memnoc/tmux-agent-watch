@@ -1604,8 +1604,17 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             totals.workers, totals.live, totals.projects
         )),
         Line::from(format!(
-            " Attention {}: {} failed / {} input / {} review · {} exited",
-            totals.attention, totals.failed, totals.input, totals.review, totals.exited
+            " Attention {}: {} failed / {} input / {} review · {} exited{}",
+            totals.attention,
+            totals.failed,
+            totals.input,
+            totals.review,
+            totals.exited,
+            if totals.categories_overlap() {
+                " · categories overlap"
+            } else {
+                ""
+            }
         )),
         Line::from(format!(
             " {} · project {} · state {}",
@@ -1650,7 +1659,7 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         if app.query.group == crate::inventory::Group::Project {
             w.project.clone().unwrap_or_else(|| "unassociated".into())
         } else {
-            w.lifecycle.label().into()
+            crate::inventory::attention_state(w).label().into()
         }
     };
     let mut counts = HashMap::new();
@@ -1680,7 +1689,7 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 Style::default().fg(app.theme.pine),
             ));
         }
-        let color = match w.lifecycle {
+        let color = match crate::inventory::attention_state(w) {
             Lifecycle::Waiting => app.theme.gold,
             Lifecycle::Failed => app.theme.love,
             Lifecycle::Review => app.theme.pine,
@@ -1711,7 +1720,9 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 "  {} · {}{}",
                 w.role(),
                 w.lifecycle.label(),
-                if w.process == "exited" {
+                if w.process == "exited" && crate::inventory::has_failure(w) {
+                    " · Exited (FAILED)"
+                } else if w.process == "exited" {
                     " · Exited"
                 } else {
                     ""
@@ -1742,7 +1753,7 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         );
         return;
     };
-    let color = match workspace.lifecycle {
+    let color = match crate::inventory::attention_state(workspace) {
         Lifecycle::Waiting => app.theme.gold,
         Lifecycle::Review => app.theme.pine,
         Lifecycle::Failed => app.theme.love,

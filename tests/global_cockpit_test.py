@@ -302,6 +302,141 @@ class GlobalCockpitTest(IndependentNavigation):
         self.assertEqual(self.tmux('display-message', '-p', '-t', replacement, '#{window_id}'), replacement)
         subprocess.run(['git', '-C', str(self.repo), 'show-ref', '--verify', '--quiet', 'refs/heads/pending-finish'], check=True)
 
+    def test_checkout_cache_shares_root_subdir_and_symlink_but_not_linked_branches(self):
+        import shutil
+        fake = Path(self.tmp.name) / 'fake-worker/codex'
+        self.assertEqual(fake.resolve(), Path(shutil.which('sleep')).resolve())
+        nested = self.repo / 'nested $literal; path'; nested.mkdir()
+        alias = Path(self.tmp.name) / 'alias $literal'; alias.symlink_to(nested, target_is_directory=True)
+        roots = [self.repo]
+        paths = [('nested-root', nested), ('alias-root', alias)]
+        for number in [1, 2]:
+            root = Path(self.tmp.name) / f'linked {number} $literal; tree'
+            subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-qb', f'work/cache-{number}', str(root)], check=True)
+            roots.append(root)
+            subdir = root / 'nested'; subdir.mkdir()
+            paths.extend([(f'linked-root-{number}', root), (f'linked-subdir-{number}', subdir)])
+        windows = {}
+        for name, path in paths:
+            window = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', 'project', '-n', name, '-c', str(path), str(fake), '300')
+            pid = self.tmux('display-message', '-p', '-t', window, '#{pane_pid}')
+            self.assertEqual(Path(os.readlink('/proc/' + pid + '/cwd')), path.resolve())
+            windows[name] = window
+        gate = Path(self.tmp.name) / 'git-probes'; gate.mkdir()
+        status_log = gate / 'status-calls'
+        wrapper = gate / 'git'
+        wrapper.write_text('#!/bin/sh\nif [ "$3" = status ]; then printf "%s\\n" "$2" >> ' + shlex.quote(str(status_log)) + '; fi\nexec ' + shlex.quote(shutil.which('git')) + ' "$@"\n')
+        wrapper.chmod(0o755)
+        self.env['PATH'] = str(gate) + ':' + self.env['PATH']
+        output = self.command('cockpit', '--list', client=self.clients[0]).stdout
+        self.assertIn('3 unique checkouts', output)
+        self.assertCountEqual(status_log.read_text().splitlines(), [str(p) for p in roots])
+        rows = {line.split('\t')[0]: line.split('\t') for line in output.splitlines() if line.startswith('@')}
+        for number in [1, 2]:
+            self.assertEqual(rows[windows[f'linked-subdir-{number}']][-1], f'work/cache-{number}')
+        self.assertEqual(rows[windows['nested-root']][-1], 'main')
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit', '--search', 'nested-root')
+        self.wait_pane(pane, 'MATCHING 1')
+        self.tmux('send-keys', '-t', pane, 'd')
+        screen = self.wait_pane(pane, 'DETAILS')
+        self.assertIn(str(nested), screen)
+        other = self.selection(self.clients[1])
+        self.tmux('send-keys', '-t', pane, 'd')
+        self.wait_pane(pane, 'MATCHING 1')
+        self.tmux('send-keys', '-t', pane, 'Enter')
+        for _ in range(100):
+            if self.selection(self.clients[0]).endswith(':' + windows['nested-root']): break
+            time.sleep(.02)
+        self.assertTrue(self.selection(self.clients[0]).endswith(':' + windows['nested-root']))
+        self.assertEqual(self.selection(self.clients[1]), other)
+
+    def test_review_with_native_failure_counts_once_and_remains_inspectable(self):
+        import shutil
+        fake = Path(self.tmp.name) / 'fake-worker/codex'
+        self.assertEqual(fake.resolve(), Path(shutil.which('sleep')).resolve())
+        self.tmux('set-option', '-w', '-t', self.worker, 'remain-on-exit', 'on')
+        worker_pane = self.tmux('display-message', '-p', '-t', self.worker, '#{pane_id}')
+        # Hold the terminal open briefly so tmux reaps the native exit before
+        # terminal EOF; an EOF-first race can legitimately lose the receipt.
+        self.tmux('respawn-pane', '-k', '-t', worker_pane, 'sh', '-c', shlex.quote(str(fake)) + ' 1; sleep 1 & exit 23')
+        deadline = time.monotonic() + 2
+        while True:
+            hook = subprocess.run([str(BIN), 'hook', 'codex', 'stop'], env={**self.env, 'TMUX_PANE': worker_pane}, capture_output=True, text=True)
+            if hook.returncode == 0: break
+            self.assertLess(time.monotonic(), deadline, hook.stderr)
+            time.sleep(.01)
+        for _ in range(150):
+            if self.tmux('display-message', '-p', '-t', worker_pane, '#{pane_dead}') == '1': break
+            time.sleep(.02)
+        for state in ['failed', 'review', 'attention', 'exited']:
+            output = self.command('cockpit', '--list', '--state', state, client=self.clients[0]).stdout
+            self.assertIn('GLOBAL 1 workers · 0 live', output)
+            self.assertIn('1 exited · 1 attention', output)
+            self.assertIn('1 failed / 0 input / 1 review; categories overlap', output)
+            self.assertIn('MATCHING 1 workers', output)
+            self.assertIn('REVIEW', output)
+            self.assertIn('exit code 23', output)
+        original_handoff = self.tmux('show-option', '-pqv', '-t', worker_pane, '@drudwyn_p_attention_since')
+        self.assertTrue(original_handoff)
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit', '--state', 'failed', '--group', 'attention')
+        screen = self.wait_pane(pane, 'FAILED [FAILED]')
+        self.assertIn('REVIEW', screen)
+        self.assertIn('Exited (FAILED)', screen)
+        self.assertIn('categories overlap', screen)
+        Path('/tmp/drudwyn-ticket09-failed-review-group.txt').write_text(screen)
+        for width in [48, 80, 120]:
+            self.tmux('resize-window', '-t', pane, '-x', str(width), '-y', '40')
+            screen = self.wait_pane(pane, 'categories overlap')
+            self.assertIn('FAILED [FAILED]', screen)
+            self.assertIn('Snapshot: r refresh', screen)
+            Path(f'/tmp/drudwyn-ticket09-failed-review-{width}.txt').write_text(screen)
+        self.tmux('send-keys', '-t', pane, 'd')
+        screen = self.wait_pane(pane, 'DETAILS')
+        self.assertIn('exit code 23', screen)
+        self.assertIn('hook', screen)
+        self.assertIn('Not task completion', screen)
+        Path('/tmp/drudwyn-ticket09-failed-review-details.txt').write_text(screen)
+        self.assertEqual(self.tmux('show-option', '-pqv', '-t', worker_pane, '@drudwyn_p_attention_since'), original_handoff)
+        self.tmux('kill-pane', '-t', pane)
+        # A replacement cannot inherit either the handoff or the exit failure.
+        self.tmux('respawn-pane', '-k', '-t', worker_pane, 'sh', '-c', 'sleep 2 & exec ' + shlex.quote(str(fake)) + ' 300')
+        output = self.command('cockpit', '--list', '--state', 'failed', client=self.clients[0]).stdout
+        self.assertIn('GLOBAL 1 workers · 1 live', output)
+        self.assertIn('0 exited · 0 attention', output)
+        self.assertIn('MATCHING 0 workers', output)
+        # A native signal is also failure, even when the Review handoff survives.
+        self.worker_hook('stop')
+        os.kill(int(self.tmux('display-message', '-p', '-t', worker_pane, '#{pane_pid}')), 15)
+        for _ in range(100):
+            if self.tmux('display-message', '-p', '-t', worker_pane, '#{pane_dead}') == '1': break
+            time.sleep(.02)
+        # pane_dead may become visible before tmux publishes the native receipt.
+        deadline = time.monotonic() + 2
+        while True:
+            native_signal = self.tmux('display-message', '-p', '-t', worker_pane, '#{pane_dead_signal}')
+            if native_signal: break
+            self.assertLess(time.monotonic(), deadline, 'Native signal receipt unavailable')
+            time.sleep(.01)
+        output = self.command('cockpit', '--list', '--state', 'failed', client=self.clients[0]).stdout
+        self.assertIn('MATCHING 1 workers', output)
+        self.assertIn('1 exited · 1 attention', output)
+        self.assertIn('1 failed / 0 input / 1 review', output)
+        # A zero native exit plus Review still needs review, but is not failure.
+        self.tmux('respawn-pane', '-k', '-t', worker_pane, 'sh', '-c', shlex.quote(str(fake)) + ' 1; sleep 1 & exit 0')
+        deadline = time.monotonic() + 2
+        while True:
+            hook = subprocess.run([str(BIN), 'hook', 'codex', 'stop'], env={**self.env, 'TMUX_PANE': worker_pane}, capture_output=True, text=True)
+            if hook.returncode == 0: break
+            self.assertLess(time.monotonic(), deadline, hook.stderr)
+            time.sleep(.01)
+        for _ in range(150):
+            if self.tmux('display-message', '-p', '-t', worker_pane, '#{pane_dead}') == '1': break
+            time.sleep(.02)
+        output = self.command('cockpit', '--list', '--state', 'failed', client=self.clients[0]).stdout
+        self.assertIn('1 exited · 1 attention', output)
+        self.assertIn('0 failed / 0 input / 1 review', output)
+        self.assertIn('MATCHING 0 workers', output)
+
 if __name__ == '__main__':
     names = [n for n in GlobalCockpitTest.__dict__ if n.startswith('test_') and (len(sys.argv) == 1 or sys.argv[1] in n)]
     result = unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(GlobalCockpitTest(n) for n in names))
