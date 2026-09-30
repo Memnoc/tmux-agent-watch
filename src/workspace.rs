@@ -203,11 +203,49 @@ pub fn start(request: Start) -> Result<Started, Error> {
             .arg(&target)
             .arg(&commit),
     )?;
-    let command = if request.command.is_empty() {
-        vec!["codex".into()]
-    } else {
-        request.command
-    };
+    launch_existing(
+        Launch {
+            path: target,
+            repo,
+            branch: request.branch.clone(),
+            name: name.to_owned(),
+            command: if request.command.is_empty() {
+                vec!["codex".into()]
+            } else {
+                request.command
+            },
+            project,
+            batch,
+            task_file: request.task_file,
+            allocated_commit: Some(commit),
+            track_agent: true,
+        },
+        None,
+    )
+}
+
+pub(crate) struct Launch {
+    pub path: PathBuf,
+    pub repo: PathBuf,
+    pub branch: String,
+    pub name: String,
+    pub command: Vec<String>,
+    pub project: Option<String>,
+    pub batch: Option<crate::batch::Batch>,
+    pub task_file: Option<String>,
+    pub allocated_commit: Option<String>,
+    pub track_agent: bool,
+}
+
+/// Shared initialization establishes the same process and delivery binding for
+/// an allocated worker and a deliberately recovered existing checkout.
+pub(crate) fn launch_existing(request: Launch, guard: Option<&fs::File>) -> Result<Started, Error> {
+    let target = request.path;
+    let repo = request.repo;
+    let project = request.project;
+    let batch = request.batch;
+    let name = request.name.as_str();
+    let command = request.command;
     let expected_agent = command
         .first()
         .and_then(|c| crate::domain::AgentKind::from_command(c));
@@ -215,6 +253,9 @@ pub fn start(request: Start) -> Result<Started, Error> {
     launch.arg("new-window");
     if let Some(project) = &project {
         launch.args(["-t", project]);
+    }
+    if let Some(guard) = guard {
+        launch.stdin(Stdio::from(guard.try_clone()?));
     }
     let window = launch
         .args([
@@ -239,17 +280,20 @@ pub fn start(request: Start) -> Result<Started, Error> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
-    let child = match window {
-        Ok(child) => child,
-        Err(error) => {
-            // The tmux executable never started, so no worker could use this
-            // allocation. Even here, only remove an unchanged, clean checkout.
-            if remove_unused_start(&repo, &target, &request.branch, &commit) {
-                return Err(Error::Io(error));
+    let child =
+        match window {
+            Ok(child) => child,
+            Err(error) => {
+                // The tmux executable never started, so no worker could use this
+                // allocation. Even here, only remove an unchanged, clean checkout.
+                if request.allocated_commit.as_ref().is_some_and(|commit| {
+                    remove_unused_start(&repo, &target, &request.branch, commit)
+                }) {
+                    return Err(Error::Io(error));
+                }
+                return Err(retained_start_error(error, &target, &request.branch, None));
             }
-            return Err(retained_start_error(error, &target, &request.branch, None));
-        }
-    };
+        };
     // Once tmux starts, even an error can follow creation of a worker. Never
     // kill its window or remove its checkout on an uncertain command result.
     let output = child
@@ -290,10 +334,19 @@ pub fn start(request: Start) -> Result<Started, Error> {
     let initialize = || -> Result<(), Error> {
         // Bind startup before any slower project or Git initialization. The
         // launch wrapper retains even a process that exits before this point.
-        set_window(&window, "@drudwyn_launch_pane", &launch_pane)?;
-        set_window(&window, "@drudwyn_launch_pid", &launch_pid)?;
-        crate::lifecycle::starting(&launch_pane, &launch_pid, expected_agent)
-            .map_err(|error| Error::Invalid(error.to_string()))?;
+        if !request.track_agent {
+            set_window(
+                &window,
+                "@drudwyn_recovery_checkout",
+                &crate::recovery::encode(&target.canonicalize()?),
+            )?;
+        }
+        if request.track_agent {
+            set_window(&window, "@drudwyn_launch_pane", &launch_pane)?;
+            set_window(&window, "@drudwyn_launch_pid", &launch_pid)?;
+            crate::lifecycle::starting(&launch_pane, &launch_pid, expected_agent)
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+        }
         crate::coordinator::protect_name(&window)?;
         // A fast process may emit a rename escape before new-window returns.
         // Finish initialization with the requested name after blocking escapes;
@@ -318,19 +371,53 @@ pub fn start(request: Start) -> Result<Started, Error> {
         if let Some(batch) = &batch {
             crate::batch::select_created(&batch.id, &window, &target)?;
         }
+        let git_state = match git(
+            &target,
+            &["status", "--porcelain", "--untracked-files=normal"],
+        ) {
+            Ok(status) if status.is_empty() => "clean",
+            Ok(_) => "dirty",
+            Err(_) => "unknown",
+        };
+        let linked = git(
+            &target,
+            &["rev-parse", "--path-format=absolute", "--git-dir"],
+        )? != git(
+            &target,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )?;
         for (name, value) in [
             ("@drudwyn_branch", request.branch.as_str()),
-            ("@drudwyn_worktree", target.to_str().unwrap_or("")),
+            (
+                "@drudwyn_worktree",
+                if linked {
+                    target.to_str().unwrap_or("")
+                } else {
+                    ""
+                },
+            ),
             ("@drudwyn_repo", repo.to_str().unwrap_or("")),
-            ("@drudwyn_git_status", "clean"),
+            ("@drudwyn_git_status", git_state),
             ("@drudwyn_message", ""),
         ] {
-            tmux_ok(Command::new("tmux").args(["set-option", "-wq", "-t", &window, name, value]))?;
+            tmux_ok(Command::new("tmux").args([
+                "set-option",
+                "-wq",
+                "-t",
+                &window,
+                name,
+                &tmux_argument(value),
+            ]))?;
         }
         if let Some(reference) = &request.task_file {
             validate_task_file(&target, reference)?;
             // The selected path is operational metadata; never read file content.
             set_window(&window, "@drudwyn_task_file", &tmux_argument(reference))?;
+            set_window(
+                &window,
+                "@drudwyn_task_reference",
+                &crate::recovery::encode(Path::new(reference)),
+            )?;
         }
         // tmux can report a new window before its command has had a chance to
         // exit. Do not publish a workspace until the initial process survives
@@ -362,26 +449,28 @@ pub fn start(request: Start) -> Result<Started, Error> {
                 "Launch pane/process changed during initialization".into(),
             ));
         }
-        set_window(&window, "@drudwyn_launch_pane", &launch_pane)?;
-        set_window(&window, "@drudwyn_launch_pid", &launch_pid)?;
-        // tmux output escapes some literal path characters. Keep the exact
-        // checkout bytes for the delivery guard, rather than guessing how to
-        // unescape a display label or falling back to a different directory.
-        let checkout = target.canonicalize()?;
-        let checkout = checkout
-            .as_os_str()
-            .as_bytes()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        set_window(&window, "@drudwyn_launch_checkout", &checkout)?;
-        set_window(
-            &window,
-            "@drudwyn_launch_command",
-            expected_agent.map(|a| a.command()).unwrap_or(&pane.command),
-        )?;
-        set_window(&window, "@drudwyn_delivery", "not_sent")?;
-        set_window(&window, "@drudwyn_launch_stage", "observed")?;
+        if request.track_agent {
+            set_window(&window, "@drudwyn_launch_pane", &launch_pane)?;
+            set_window(&window, "@drudwyn_launch_pid", &launch_pid)?;
+            // tmux output escapes some literal path characters. Keep the exact
+            // checkout bytes for the delivery guard, rather than guessing how to
+            // unescape a display label or falling back to a different directory.
+            let checkout = target.canonicalize()?;
+            let checkout = checkout
+                .as_os_str()
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            set_window(&window, "@drudwyn_launch_checkout", &checkout)?;
+            set_window(
+                &window,
+                "@drudwyn_launch_command",
+                expected_agent.map(|a| a.command()).unwrap_or(&pane.command),
+            )?;
+            set_window(&window, "@drudwyn_delivery", "not_sent")?;
+            set_window(&window, "@drudwyn_launch_stage", "observed")?;
+        }
         crate::lifecycle::scan().map_err(|error| Error::Invalid(error.to_string()))?;
         Ok(())
     };
@@ -557,18 +646,19 @@ pub fn deliver_task(target: &str, task: &str) -> Result<(), Error> {
 
 pub fn deliver_reference(target: &str, reference: &str, retry: bool) -> Result<(), Error> {
     let pane = bound_target(target)?;
-    let checkout = tmux(Command::new("tmux").args([
-        "show-option",
-        "-wqv",
-        "-t",
-        &pane.window,
-        "@drudwyn_worktree",
-    ]))?;
-    validate_task_file(Path::new(&checkout), reference)?;
+    let checkout = crate::recovery::decode(&pane.checkout).ok_or_else(|| {
+        Error::Invalid("Launch checkout identity missing or malformed; task not sent".into())
+    })?;
+    validate_task_file(&checkout, reference)?;
     set_window(
         &pane.window,
         "@drudwyn_task_file",
         &tmux_argument(reference),
+    )?;
+    set_window(
+        &pane.window,
+        "@drudwyn_task_reference",
+        &crate::recovery::encode(Path::new(reference)),
     )?;
     deliver(
         &pane.pane,

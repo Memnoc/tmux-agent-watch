@@ -161,6 +161,41 @@ enum CoordinatorCommand {
 
 #[derive(Debug, Subcommand)]
 enum WorkspaceCommand {
+    /// Open a surviving checkout; never create/reset a worktree.
+    Recover {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long, required_unless_present = "agent", conflicts_with_all = ["agent", "task_file", "task_stdin", "use_task_reference", "batch", "unassociated"])]
+        shell: bool,
+        #[arg(long, value_enum, requires = "recovery_batch")]
+        agent: Option<AgentArg>,
+        #[arg(long, conflicts_with_all = ["task_stdin", "use_task_reference"], requires = "agent")]
+        task_file: Option<String>,
+        #[arg(long, conflicts_with = "use_task_reference", requires = "agent")]
+        task_stdin: bool,
+        #[arg(long, requires = "agent")]
+        use_task_reference: bool,
+        #[arg(
+            long,
+            group = "recovery_batch",
+            conflicts_with = "unassociated",
+            requires = "agent"
+        )]
+        batch: Option<String>,
+        /// Explicitly restart without a live batch; historical choices stay unknown.
+        #[arg(long, group = "recovery_batch", requires = "agent")]
+        unassociated: bool,
+        /// Restore the missing coordinator in this project.
+        #[arg(long)]
+        coordinator: bool,
+    },
+    /// Enumerate surviving checkouts for a selected known repository.
+    RecoverList {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
     Start {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -415,6 +450,52 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         },
         Command::Settings { theme } => settings::run(theme.into())?,
         Command::Workspace { command } => match command {
+            WorkspaceCommand::Recover {
+                repo,
+                path,
+                shell: _,
+                agent,
+                task_file,
+                task_stdin,
+                use_task_reference,
+                batch,
+                unassociated: _,
+                coordinator,
+            } => {
+                use tmux_drudwyn::recovery::{Request, Task};
+                let task = if let Some(file) = task_file {
+                    Task::File(file)
+                } else if task_stdin {
+                    let mut text = String::new();
+                    std::io::stdin().read_to_string(&mut text)?;
+                    Task::Text(text)
+                } else if use_task_reference {
+                    Task::RetainedReference
+                } else {
+                    Task::None
+                };
+                let agent = agent.map(Into::into);
+                let started = tmux_drudwyn::recovery::recover(Request {
+                    repo,
+                    path,
+                    agent,
+                    task,
+                    batch,
+                    coordinator,
+                })?;
+                println!("{}", started.window_id);
+                if agent.is_some() {
+                    println!(
+                        "Fresh conversation; task sent. Acceptance, historical exit and checks unknown; conversation not restored."
+                    );
+                }
+            }
+            WorkspaceCommand::RecoverList { repo } => {
+                let redact = Config::load_tmux()?.redact_labels;
+                for checkout in tmux_drudwyn::recovery::list(&repo)? {
+                    println!("{}", checkout.display(redact));
+                }
+            }
             WorkspaceCommand::Start {
                 repo,
                 worktree_root,

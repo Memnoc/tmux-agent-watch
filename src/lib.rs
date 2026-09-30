@@ -11,6 +11,7 @@ pub mod lifecycle;
 pub mod navigation;
 pub mod navigator;
 mod persistence;
+pub mod recovery;
 pub mod session;
 pub mod session_navigator;
 pub mod settings;

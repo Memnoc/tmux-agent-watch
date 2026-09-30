@@ -34,14 +34,17 @@ pub fn set(window: &str, session: Option<&str>) -> io::Result<()> {
         "list-windows",
         "-a",
         "-F",
-        "#{session_id}␟#{window_id}␟#{pane_current_path}",
+        "#{session_id}␟#{window_id}␟#{pane_current_path}␟#{@drudwyn_launch_checkout}␟#{@drudwyn_recovery_checkout}",
     ])?;
     let row = rows
         .lines()
         .map(|r| r.split('␟').collect::<Vec<_>>())
         .find(|r| r[0] == project && r[1] == window)
         .ok_or_else(|| io::Error::other("Coordinator window is not a member of this project"))?;
-    let repo = repository(Path::new(row[2]))?;
+    // Use a lossless known checkout identity, never unescape tmux display cwd.
+    let exact = if row[3].is_empty() { row[4] } else { row[3] };
+    let path = crate::recovery::decode(exact).unwrap_or_else(|| row[2].into());
+    let repo = repository(&path)?;
     let previous = tmux(&[
         "show-option",
         "-qv",

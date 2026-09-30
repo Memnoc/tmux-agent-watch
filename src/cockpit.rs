@@ -36,6 +36,7 @@ use crate::{
 
 const COCKPIT_NAVIGATION: &[(&str, &str)] = &[("j/k", "Move"), ("Enter", "Open")];
 const COCKPIT_ACTIONS: &[(&str, &str)] = &[
+    ("o", "Recover"),
     ("n", "New"),
     ("b", "Batch setup"),
     ("c", "Coordinator"),
@@ -75,6 +76,7 @@ pub struct App {
     start_error: Option<String>,
     active_batch: Option<batch::Batch>,
     batch_form: Option<BatchForm>,
+    recovery: Option<RecoveryForm>,
     batches: HashMap<String, String>,
     finishing: bool,
     git_diffs: HashMap<PathBuf, GitDiff>,
@@ -91,6 +93,19 @@ struct LaunchForm {
     field: usize,
     cursors: [usize; 3],
     file: bool,
+}
+
+struct RecoveryForm {
+    repo: PathBuf,
+    checkouts: Vec<crate::recovery::Checkout>,
+    selected: usize,
+    restart: bool,
+    task: String,
+    file: bool,
+    batch: String,
+    field: usize,
+    cursors: [usize; 2],
+    error: Option<String>,
 }
 
 struct BatchForm {
@@ -131,6 +146,7 @@ impl App {
             batches,
             active_batch: None,
             batch_form: None,
+            recovery: None,
             workspaces,
             visible,
             selected: 0,
@@ -152,6 +168,158 @@ impl App {
             config,
             theme: Theme::rose_pine(variant),
         }
+    }
+
+    fn begin_recovery(&mut self) {
+        let repo = self
+            .selected_workspace()
+            .map(|w| {
+                w.checkout
+                    .repository
+                    .clone()
+                    .unwrap_or_else(|| w.checkout.working_directory.clone())
+            })
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_default();
+        match crate::recovery::list(&repo) {
+            Ok(checkouts) => {
+                self.recovery = Some(RecoveryForm {
+                    repo,
+                    checkouts,
+                    selected: 0,
+                    restart: false,
+                    task: String::new(),
+                    file: false,
+                    batch: String::new(),
+                    field: 0,
+                    cursors: [0; 2],
+                    error: None,
+                })
+            }
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    fn recovery_edit(&mut self, key: KeyCode, paste: Option<&str>) {
+        if let Some(form) = &mut self.recovery {
+            if form.restart {
+                let text = if form.field == 0 {
+                    &mut form.task
+                } else {
+                    &mut form.batch
+                };
+                edit_text(
+                    text,
+                    &mut form.cursors[form.field],
+                    key,
+                    paste,
+                    form.field == 0 && !form.file,
+                );
+            }
+        }
+    }
+
+    fn recovery_key(&mut self, key: KeyCode) -> bool {
+        let agent = self.start_agent();
+        let Some(form) = &mut self.recovery else {
+            return false;
+        };
+        if key == KeyCode::Esc {
+            if form.restart {
+                form.restart = false;
+                form.task.clear();
+                form.error = None;
+            } else {
+                self.recovery = None;
+            }
+            return false;
+        }
+        let mut action = None;
+        if form.restart {
+            match key {
+                KeyCode::Tab | KeyCode::BackTab => form.field = 1 - form.field,
+                KeyCode::F(4) => {
+                    self.next_start_agent();
+                    return false;
+                }
+                KeyCode::F(5) => {
+                    form.file = !form.file;
+                    form.task.clear();
+                    form.cursors[0] = 0;
+                }
+                KeyCode::F(6) => action = Some((Some(agent), false)),
+                _ => {
+                    self.recovery_edit(key, None);
+                    return false;
+                }
+            }
+        } else {
+            match key {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    form.selected = (form.selected + 1).min(form.checkouts.len().saturating_sub(1))
+                }
+                KeyCode::Up | KeyCode::Char('k') => form.selected = form.selected.saturating_sub(1),
+                KeyCode::Char('r') => match crate::recovery::list(&form.repo) {
+                    Ok(rows) => {
+                        let path = form.checkouts.get(form.selected).map(|c| c.path.clone());
+                        form.selected = rows
+                            .iter()
+                            .position(|c| Some(&c.path) == path.as_ref())
+                            .unwrap_or(0);
+                        form.checkouts = rows;
+                    }
+                    Err(e) => form.error = Some(e.to_string()),
+                },
+                KeyCode::Char('s') => action = Some((None, false)),
+                KeyCode::Char('c') => action = Some((None, true)),
+                KeyCode::Char('t') => {
+                    form.restart = true;
+                    form.task = form
+                        .checkouts
+                        .get(form.selected)
+                        .and_then(|c| c.task_file.clone())
+                        .unwrap_or_default();
+                    form.file = !form.task.is_empty();
+                    form.cursors = [form.task.len(), 0];
+                    form.field = 0;
+                    form.batch.clear();
+                    form.error = None;
+                }
+                KeyCode::Enter => {
+                    if let Some(row) = form.checkouts.get(form.selected) {
+                        match row.live.as_slice() {
+                            [window] => match crate::navigation::open(Some(window), None) { Ok(()) => return true, Err(e) => form.error = Some(e.to_string()) },
+                            _ => form.error = Some("Select Open shell or Restart for a survivor; multiple live windows require the navigator".into()),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some((agent, coordinator)) = action {
+            if let Some(checkout) = form.checkouts.get(form.selected) {
+                let task = if agent.is_none() {
+                    crate::recovery::Task::None
+                } else if form.file {
+                    crate::recovery::Task::File(form.task.clone())
+                } else {
+                    crate::recovery::Task::Text(form.task.clone())
+                };
+                let request = crate::recovery::Request {
+                    repo: form.repo.clone(),
+                    path: checkout.path.clone(),
+                    agent,
+                    task,
+                    batch: (!form.batch.is_empty()).then(|| form.batch.clone()),
+                    coordinator,
+                };
+                match crate::recovery::recover(request) {
+                    Ok(_) => return true,
+                    Err(error) => form.error = Some(error.to_string()),
+                }
+            }
+        }
+        false
     }
 
     fn begin_start(&mut self) {
@@ -601,6 +769,10 @@ fn event_loop(
         }
         let input = event::read()?;
         if let Event::Paste(text) = &input {
+            if app.recovery.is_some() {
+                app.recovery_edit(KeyCode::Null, Some(text));
+                continue;
+            }
             if app.task.is_some() && app.batch_form.is_none() {
                 app.launch_edit(KeyCode::Null, Some(text));
             }
@@ -610,6 +782,12 @@ fn event_loop(
             continue;
         };
         if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        if app.recovery.is_some() {
+            if app.recovery_key(key.code) {
+                return Ok(());
+            }
             continue;
         }
         if app.batch_form.is_some() {
@@ -687,6 +865,7 @@ fn event_loop(
             KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
             KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
             KeyCode::Char('/') => app.filtering = true,
+            KeyCode::Char('o') => app.begin_recovery(),
             KeyCode::Char('b') => app.begin_batch(),
             KeyCode::Char('n') => {
                 app.begin_start();
@@ -726,6 +905,10 @@ fn event_loop(
 }
 
 fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
+    if let Some(form) = &app.recovery {
+        render_recovery(frame, app, form);
+        return;
+    }
     let area = frame.area();
     let footer_height = if let Some(error) = &app.error {
         let width = frame.area().width.max(1) as usize;
@@ -988,6 +1171,139 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             modal,
         );
     }
+}
+
+fn render_recovery(frame: &mut ratatui::Frame<'_>, app: &App, form: &RecoveryForm) {
+    let area = frame.area();
+    let private = |value: &str| {
+        if app.config.redact_labels {
+            "[redacted]".to_owned()
+        } else {
+            value.to_owned()
+        }
+    };
+    if form.restart {
+        let groups = Layout::vertical([
+            Constraint::Length(5),
+            Constraint::Min(3),
+            Constraint::Length(if area.width < 80 { 12 } else { 8 }),
+        ])
+        .split(area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from("RESTART WITH TASK · Fresh conversation"),
+                Line::from("Conversation is not restored; no resume offered."),
+                Line::from("F4 agent · F5 text/reference · Tab task/batch"),
+                Line::from("F6 restart once · Esc cancel"),
+                Line::from(format!("Agent: {}", app.start_agent().command())),
+            ])
+            .wrap(Wrap { trim: false }),
+            groups[0],
+        );
+        let label = if form.file {
+            "Task reference"
+        } else {
+            "Task (multiline)"
+        };
+        let text = if app.config.redact_labels {
+            "[redacted]".to_owned()
+        } else {
+            form.task.clone()
+        };
+        let (rows, line, col) = editor_rows(
+            &text,
+            form.cursors[0].min(text.len()),
+            area.width.saturating_sub(2) as usize,
+        );
+        let height = groups[1].height.saturating_sub(2) as usize;
+        let offset = line.saturating_sub(height.saturating_sub(1));
+        frame.render_widget(
+            Paragraph::new(
+                rows.into_iter()
+                    .skip(offset)
+                    .map(Line::from)
+                    .collect::<Vec<_>>(),
+            )
+            .block(Block::default().borders(Borders::ALL).title(label)),
+            groups[1],
+        );
+        if form.field == 0 && !app.config.redact_labels {
+            frame.set_cursor_position((
+                groups[1].x + 1 + col as u16,
+                groups[1].y + 1 + (line - offset) as u16,
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format!(
+                    "{} Batch ID: {}",
+                    if form.field == 1 { ">" } else { " " },
+                    private(&form.batch)
+                )),
+                Line::from("Blank deliberately means no batch association."),
+                Line::from("Reselect batch after metadata loss; source/destination unknown."),
+                Line::from("Historical prompts, checks and exit: Unknown"),
+                Line::from(private(
+                    form.error
+                        .as_deref()
+                        .unwrap_or("Review the task and batch choice, then F6."),
+                )),
+            ])
+            .wrap(Wrap { trim: false }),
+            groups[2],
+        );
+        return;
+    }
+    let groups = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(2),
+        Constraint::Length(if area.width < 80 { 12 } else { 8 }),
+    ])
+    .split(area);
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from("RECOVER WORKTREE · selected repository"),
+            Line::from("j/k select · Enter open live · r refresh · Esc cancel"),
+        ])
+        .wrap(Wrap { trim: false }),
+        groups[0],
+    );
+    let rows: Vec<_> = form
+        .checkouts
+        .iter()
+        .map(|row| ListItem::new(format!("{} · {}", row.state(), private(&row.branch))))
+        .collect();
+    let mut selection =
+        ListState::default().with_selected((!rows.is_empty()).then_some(form.selected));
+    frame.render_stateful_widget(
+        List::new(rows)
+            .highlight_symbol("› ")
+            .highlight_style(Style::default().fg(app.theme.rose)),
+        groups[1],
+        &mut selection,
+    );
+    let detail = form
+        .checkouts
+        .get(form.selected)
+        .map(|r| r.display(app.config.redact_labels))
+        .unwrap_or_else(|| "No registered worktrees".into());
+    let lines = vec![
+        Line::from("s Open shell · t Restart with task"),
+        Line::from("c Recover coordinator shell"),
+        Line::from("Fresh agent does not restore a conversation."),
+        Line::from(detail),
+        Line::from(private(
+            form.error
+                .as_deref()
+                .unwrap_or("Files and branches are preserved."),
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::TOP)),
+        groups[2],
+    );
 }
 
 fn slug(value: &str) -> String {

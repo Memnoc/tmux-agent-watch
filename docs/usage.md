@@ -326,6 +326,58 @@ path. Drudwyn only removes a clean, unchanged allocation automatically when the
 tmux executable could not start at all. An immediate process exit, including
 exit code zero, is a failed launch rather than evidence of task completion.
 
+### Recover existing work (Rust v2)
+
+In Cockpit, **o Recover** lists the selected workspace's repository worktrees
+(or the invoking checkout when no workspace is selected). It distinguishes
+**Recoverable** checkouts without windows, **Stopped workspace** retained panes,
+and **Live workspace** windows. These survivors do not become running workers
+until an agent is actually observed. Nothing crawls unrelated directories.
+
+Select with **j/k**. **s Open shell** opens the existing checkout; **t Restart
+with task** starts a fresh agent; **c Recover coordinator shell** restores a
+missing coordinator using the selected checkout. **Enter** opens a sole live
+window; multiple live windows remain selectable through the workspace navigator.
+**r** refreshes, and **Esc** cancels without changing files or windows.
+
+Restart explicitly explains that a fresh conversation does not restore the old
+one. No conversation-resume action is offered without a supported identity.
+Use **F4** for the agent, **F5** for text versus reference, **Tab** for task and
+batch fields, and **F6** to restart and send once. Task text supports multiline
+editing and paste. A retained task-file reference is prefilled for deliberate
+review. After metadata loss, select it again. Enter a live batch ID or deliberately
+leave the batch field blank for an unassociated worker; old source/destination,
+prompts, checks, and historical exit receipts are never reconstructed.
+
+```sh
+tmux-drudwyn workspace recover-list --repo /path/to/repo
+tmux-drudwyn workspace recover --repo /path/to/repo \
+  --path /path/to/existing-worktree --shell
+
+tmux-drudwyn workspace recover --repo /path/to/repo \
+  --path /path/to/existing-worktree --agent codex --unassociated \
+  --task-file tasks/next.md
+# Or deliberately reuse a reference retained in a stopped pane:
+tmux-drudwyn workspace recover --repo /path/to/repo \
+  --path /path/to/existing-worktree --agent codex --batch '$3/123-456' \
+  --use-task-reference
+```
+
+`--task-stdin` accepts ephemeral text instead of a file reference. Task files
+must exist inside the surviving checkout; they need not be committed, because
+recovery reuses that checkout. Drudwyn never reads their contents. Agent
+executables are resolved from the invoking command's environment before launch.
+Recovery switches only its requesting client. Supply `--client` when ambiguous.
+
+Recovery preserves tracked modifications, untracked files, branches and old
+stopped panes. It refuses a live terminal already using the checkout, locked or
+prunable worktrees, missing directories, unavailable agents and missing task
+files. Concurrent Drudwyn recovery/delivery is guarded by the existing checkout
+inode. A competing external window causes an explicit retained-window result;
+it is not killed. A failed or uncertain creation/send retains work for inspection
+and never resends automatically. Select Open on an existing worker instead of
+starting a duplicate. No worktree repair, reset or forced cleanup is performed.
+
 ### Project coordinator and worker names (Rust v2)
 
 Explicitly choose an existing shell or agent window as the project's coordinator.
@@ -364,9 +416,10 @@ renaming. Explicit later renames through tmux or the navigator remain authoritat
 The coordinator's existing name is preserved when it is associated.
 
 If the coordinator disappears, return reports that it is unavailable instead of
-selecting a window that reused its name or index. Open a shell in the project
-checkout, then explicitly select it with `coordinator set --window ID` to recover
-the route. This does not restore an agent conversation. Associations live only
+selecting a window that reused its name or index. Use Cockpit **o**, select the
+checkout, then **c Recover coordinator shell**; the CLI equivalent is
+`workspace recover --repo REPO --path CHECKOUT --shell --coordinator`.
+An existing shell can also be selected with `coordinator set --window ID`. This does not restore an agent conversation. Associations live only
 in tmux and must be selected again after that metadata is lost.
 
 
