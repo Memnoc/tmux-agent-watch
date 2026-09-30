@@ -205,3 +205,40 @@ It uses Rust's [standard Unix nonblocking flock mapping](https://doc.rust-lang.o
 Linux was exercised here; macOS runtime behavior was not exercised. Process
 observation and a sent receipt still do not prove agent readiness, acceptance,
 or completion. `main` remains `eaf2446`.
+
+## Independent correction crosscheck — 2026-09-30
+
+Reviewed `git diff 99e083b...1de76ab` against this ticket, the originating spec,
+CONTRIBUTING, CONTEXT, privacy, and the stateless/tool-agnostic ADRs, with the
+whole-ticket baseline `d5a6dd8` as context. No production changes were made.
+
+- **Standards: 0 findings.** The existing-directory descriptor guard adds no
+  task store, content inspection, lock file, dependency, or fallback delivery.
+  Its lifetime covers state checks, transmission, receipts, and buffer cleanup.
+- **Spec: 0 findings.** The original concurrent default-delivery P2 is resolved:
+  default and explicit-retry competitors are refused while a delivery holds the
+  checkout lock. Binding and checkout identity are revalidated; literal paths
+  remain usable, independent worktrees remain independent, and failures retain
+  the worker without automatic resending.
+- Independently reran five focused public-command tests: concurrent default and
+  retry calls; killed owner before load/after submission; literal dollar-sign
+  and backslash checkout with a parallel sibling; missing/malformed/unavailable
+  checkout identity; injected load/paste/submission failures and later recovery.
+  All five passed. The initial sandbox run could not create disposable tmux
+  sockets; the authorized escalated run passed.
+- Two additional disposable review probes passed: changing the recorded launch
+  PID while buffer loading is paused refuses transmission and cleans the buffer;
+  assigning two windows the same checkout identity conservatively serializes
+  them and allows a later send after release. These probes assert that their
+  absolute fake-agent executable resolves to Python before launch. No installed
+  agent was invoked. The shared-identity probe tests the lock key, not a recovery
+  or shared-checkout launch feature.
+- `git diff --check` passed. The builder's recorded full-suite results were
+  reviewed, not rerun in this focused correction review. Runtime verification
+  was Linux only; macOS directory locking remains untested here. Future recovery
+  and coordinator delivery paths must establish explicit live launch binding
+  rather than weaken the missing-identity guard.
+
+The feature working tree was clean before this receipt-only change; `main`
+remains `eaf2446`. This review closes the reported concurrency finding without
+claiming agent readiness, acceptance, or task completion.
