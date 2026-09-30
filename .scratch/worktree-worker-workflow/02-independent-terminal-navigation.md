@@ -70,3 +70,28 @@ coordinating session.
 Limit: independent views separate window selection, not pane layout or input
 into shared worker processes. Native tmux retains its normal shared-session
 semantics until clients use distinct views. No real user tmux server was touched.
+
+## Review correction — 2026-09-30
+
+- Confirmed the independent review finding through the existing real two-client
+  command seam. With global `destroy-unattached on`, the new regression failed
+  before navigation with exit 1 and `tmux-drudwyn: no such session: $1`.
+  The detached grouped view inherited automatic destruction before its next
+  configuration/attachment command could run.
+- View creation now gives the new session an exact, uniquely generated target
+  and sets only that view's `destroy-unattached off` in the same tmux command
+  sequence. Subsequent operations retain the stable session ID; attachment
+  enables automatic destruction again. The user's global option is never
+  changed, and existing ownership-marker/error cleanup remains in place.
+- Regression checks successful requester-only navigation, view reuse, unchanged
+  global configuration, removal on detach, surviving original windows and
+  unchanged pane/process identities. Existing tests continue to cover retained
+  user-grouped sessions and cleanup across repeated switches.
+- Verification: `python3 tests/independent_navigation_test.py` passed all 10
+  tests; `cargo fmt --check` and `git diff --check` passed; `cargo test --locked`
+  passed all 33 tests. Full `bash tests/run.sh` passed, including 13 navigator
+  tests (one existing optional Resurrect skip), 10 two-client tests, 10 settings
+  tests, lifecycle/start-failure, privacy, packaging, and release checks.
+- This correction changes only navigation, its behavioral regression, and this
+  ticket. `main` remains `eaf2446`; the coordinating session will independently
+  re-review the correction commit before advancing to the next ticket.

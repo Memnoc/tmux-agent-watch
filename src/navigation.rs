@@ -1,6 +1,10 @@
 //! Client-local navigation over shared tmux windows. Only application-created
 //! views carry `@drudwyn_view_of`; unrelated grouped sessions remain user-owned.
-use std::{io, process::Command};
+use std::{
+    io,
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 pub(crate) fn tmux(args: &[&str]) -> io::Result<String> {
     let output = Command::new("tmux").args(args).output()?;
@@ -129,15 +133,31 @@ pub fn open(window: Option<&str>, session: Option<&str>) -> io::Result<()> {
     };
     let mut created = false;
     if busy(&destination) {
-        // Let tmux allocate a collision-free name, then mark ownership explicitly.
+        // Protect the new view in the same command queue as its creation:
+        // inherited destroy-unattached may remove it before a second tmux call.
+        // A unique exact name lets us address it before receiving its stable ID.
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_nanos();
+        let name = format!("drudwyn-view-{}-{nonce}", std::process::id());
+        let exact_name = format!("={name}:");
         destination = tmux(&[
             "new-session",
             "-d",
+            "-s",
+            &name,
             "-P",
             "-F",
             "#{session_id}",
             "-t",
             &target,
+            ";",
+            "set-option",
+            "-t",
+            &exact_name,
+            "destroy-unattached",
+            "off",
         ])?;
         if let Err(error) = tmux(&["set-option", "-t", &destination, "@drudwyn_view_of", anchor]) {
             let _ = tmux(&["kill-session", "-t", &destination]);

@@ -138,6 +138,26 @@ class IndependentNavigation(unittest.TestCase):
         self.ui('sessions', 'project')
         self.assertEqual(self.selection(self.clients[1]), other)
 
+    def test_global_destroy_unattached_allows_navigation_and_view_detach_cleanup(self):
+        other = self.selection(self.clients[1])
+        panes = set(self.tmux('list-panes', '-a', '-F', '#{pane_id} #{pane_pid}').splitlines())
+        self.tmux('set-option', '-g', 'destroy-unattached', 'on')
+        result = self.command('navigate', '--client', self.clients[0], '--window', self.worker, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        view = self.selection(self.clients[0]).split(':')[0]
+        self.assertNotEqual(view, other.split(':')[0])
+        self.assertEqual(self.selection(self.clients[0]), view + ':' + self.worker)
+        self.assertEqual(self.selection(self.clients[1]), other)
+        self.assertEqual(self.tmux('show-options', '-gv', 'destroy-unattached'), 'on')
+        self.command('navigate', '--client', self.clients[0], '--window', self.home)
+        self.assertEqual(self.selection(self.clients[0]), view + ':' + self.home)
+        self.tmux('detach-client', '-t', self.clients[0])
+        self.assertNotIn(view, self.tmux('list-sessions', '-F', '#{session_id}').splitlines())
+        self.assertEqual(self.selection(self.clients[1]), other)
+        self.assertIn(self.worker, self.tmux('list-windows', '-a', '-F', '#{window_id}'))
+        self.assertEqual(set(self.tmux('list-panes', '-a', '-F', '#{pane_id} #{pane_pid}').splitlines()), panes)
+        self.assertEqual(self.tmux('show-options', '-gv', 'destroy-unattached'), 'on')
+
     def test_invalid_routes_preserve_both_clients_and_sessions(self):
         before = [self.selection(client) for client in self.clients]
         sessions = self.tmux('list-sessions', '-F', '#{session_id}')
