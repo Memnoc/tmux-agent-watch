@@ -153,3 +153,33 @@ The literal dollar-sign worker path is not preserved through the launcher shell.
 Batch literal-value tests use ordinary numbered worker names to keep this
 correction scoped to metadata transport; their source/destination refs still
 include the literal `$value`.
+
+## Independent correction crosscheck — 2026-09-30
+
+Fresh focused review of `git diff 976caa7...3beb18c`, with ticket 05's full
+`20016c7...3beb18c` scope and originating spec as context. No implementation
+changes were made by this reviewer.
+
+- Standards: zero findings against CONTRIBUTING, CONTEXT, the privacy boundary,
+  ADRs 0002/0003/0005/0007, and the crosscheck smell baseline. The versioned
+  transport stays inside the batch module and retains only live operational
+  metadata; no dependency, persistent registry, or content inspection was added.
+- Spec: zero remaining findings in the correction. Encoding every field fixes
+  the prior literal-checkout truncation without changing batch identity, pinned
+  source selection, destination separation, or worker association. Old and
+  malformed records fail before allocation and require explicit reselection.
+- Reviewer validation: `bash tests/batch_test.sh` passed against a disposable
+  tmux server. A separate `/tmp`-only fixture additionally decoded and compared
+  all seven stored fields byte-for-byte with their expected values, then rewrote
+  valid records with uppercase hex and repeated show/select/worker checks.
+  Both runs passed semicolon, trailing ASCII/nonbreaking spaces, Unicode,
+  format-looking paths, literal dollar-sign refs, pinned worker commits, exact
+  associations, malformed-record refusal, metadata loss, and redaction checks.
+  The builder's recorded Rust/full-suite/UI results remain builder evidence;
+  this focused review did not rerun those broader checks. `git diff --check`
+  passed before this receipt.
+- The separately documented dollar-sign worker-path launcher failure remains
+  assigned to ticket 06; this review does not claim it is fixed.
+
+Review outcome: Standards 0 findings; Spec 0 findings. `main` remains
+`eaf2446`; the feature working tree was clean before this receipt-only change.
