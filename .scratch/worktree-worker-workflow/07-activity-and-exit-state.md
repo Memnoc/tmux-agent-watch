@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done — reaped-child attention P2 correction pending fresh independent review
+**Status:** done — independently reviewed through `d88713f`; Standards and Spec clear of blockers
 
 **What to build:** Users can distinguish a running process, reported task
 activity, attention requests, and an agent that exited, across current surfaces.
@@ -419,3 +419,53 @@ macOS was not exercised.
 Fresh independent Standards/Spec review remains required; this correction does
 not claim crosscheck clearance. `main` remains
 `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+## Independent final crosscheck receipt — 2026-09-30
+
+Reviewed the full ticket diff `git diff 5b5183e...d88713f`, with particular
+attention to the final `d1ed39d...d88713f` correction. Standards and Spec were
+reviewed sequentially under the implementation workflow. The reviewer session
+was reused because the harness could not create another thread; this reviewer
+identified the earlier zombie defect and did not implement either subsequent
+exit-state correction. Findings were checked against current files and public
+command behavior, not accepted from the builder's receipt.
+
+Standards: no blocking documented-standard violation. The implementation
+preserves CONTRIBUTING.md's content-blind data boundary, CONTEXT.md's live
+operational metadata model, and the relevant accepted ADRs. Process state and
+root birth are fixed metadata; the synchronization still uses the existing
+directory and child-held kernel lock without a durable registry. The previously
+noted possible Primitive Obsession in `Workspace.process: String` remains one
+nonblocking design observation, not a new requirement for this ticket.
+
+Spec: no outstanding ticket-07 finding. Running remains distinct from
+hook-backed Working; missing and ambiguous evidence stays explicit. An exited
+or reaped child cannot own a new hook. Historical attention survives reaping
+under the recorded root lifetime, including reaping between scans, while a live
+replacement supersedes the old binding. Missing child exit code, signal and time
+remain unknown, and zero/native exit receipts do not imply task completion.
+Legacy live bindings upgrade without clearing attention. Inspection and unrelated
+scans preserve valid handoffs. The earlier scan/hook serialization, orphaned-write
+ownership and queued-hook replacement corrections remain present and covered.
+Tickets 08 and later were not treated as missing ticket-07 functionality.
+
+Independent validation on frozen `d88713f`: all 36 activity cases passed in
+42.517 seconds; log `/tmp/drudwyn-rereview07c-final-activity.log`. This includes
+the locking, orphaned mutation, queued ownership, split/linked-pane, replacement,
+zombie, reaped-child, and actual Cockpit/navigator inspection scenarios. The
+original `/tmp/drudwyn-rereview07c-zombie.py` reproduction now shows Unknown /
+Exited with unavailable receipt fields and rejects `userPromptSubmit` with
+exit 1. The original `/tmp/drudwyn-rereview07d-reaped.py` reproduction preserves
+Review/hook and the exact same attention timestamp after `waitpid`, with its
+parent pane still live. All runtime fixtures used disposable tmux servers and
+resolution-checked sleep fake agents; no installed agent or live user server
+was used.
+
+The builder's frozen-code fmt receipt and logs for 41 Rust tests and the full
+suite were inspected; those checks were not redundantly rerun or represented
+as reviewer-owned full-suite evidence. The full suite retains its existing
+optional navigator skip. `git diff --check` passed, the tree was clean before
+this receipt, and `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`. Runtime evidence remains Linux/tmux
+3.4; macOS was not exercised. This commit changes only the ticket receipt and
+status, with no implementation edits.
