@@ -4,6 +4,7 @@ import os
 from contextlib import contextmanager
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 import time
@@ -49,6 +50,136 @@ class Activity(unittest.TestCase):
 
     def option(self, name):
         return self.tmux('show-option', '-wqv', '-t', self.window, '@drudwyn_' + name)
+
+    @contextmanager
+    def queued_hook(self, event='permissionRequest'):
+        """Observe entry to real guard acquisition while another CLI owns it."""
+        gate = self.path / ('hook-' + event)
+        gate.mkdir()
+        ready = gate / 'ready'
+        wrapper = gate / 'tmux'
+        wrapper.write_text('#!/bin/sh\n'
+                           'if [ "$1" = display-message ] && [ "$3" = "#{socket_path}" ]; then\n'
+                           f'    : > {shlex.quote(str(ready))}\nfi\n'
+                           f'exec {shlex.quote(shutil.which("tmux"))} "$@"\n')
+        wrapper.chmod(0o755)
+        process = subprocess.Popen([str(BIN), 'hook', 'codex', event], env=dict(self.env, PATH=str(gate) + ':' + self.env['PATH']), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists():
+                self.assertIsNone(process.poll(), 'hook exited before guard acquisition')
+                self.assertLess(time.monotonic(), deadline, 'hook did not reach guard acquisition')
+                time.sleep(.01)
+            yield process
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+
+    def wait_fake_agents(self, count):
+        root = self.tmux('display-message', '-p', '-t', self.pane, '#{pane_pid}')
+        deadline = time.monotonic() + 3
+        while True:
+            rows = subprocess.check_output(['ps', '-eo', 'pid=,ppid=,stat=,comm='], text=True)
+            agents = {pid for pid, parent, state, name in (row.split(maxsplit=3) for row in rows.splitlines())
+                      if (pid == root or parent == root) and not state.startswith('Z') and Path(name).name == 'codex'}
+            if len(agents) == count:
+                return agents
+            self.assertLess(time.monotonic(), deadline, 'fake worker population did not settle')
+            time.sleep(.01)
+
+    def test_queued_hook_rejects_same_pane_replacement(self):
+        self.cli('scan')
+        before = self.wait_fake_agents(1)
+        with self.paused_cli('scan') as (scan, release):
+            with self.queued_hook() as hook:
+                self.tmux('respawn-pane', '-k', '-t', self.pane, str(self.fake), '300')
+                self.assertNotEqual(self.wait_fake_agents(1), before)
+                release.touch()
+                _, error = scan.communicate(timeout=5)
+                self.assertEqual(scan.returncode, 0, error)
+                _, error = hook.communicate(timeout=5)
+                self.assertNotEqual(hook.returncode, 0, 'queued hook was rebound to replacement')
+                self.assertIn('originating pane', error)
+        self.assertIn('RUNNING', self.cli('status', timeout=5))
+        self.assertEqual(self.option('source'), 'process')
+        self.assertEqual(self.option('attention_since'), '')
+
+    def test_queued_hook_keeps_unchanged_worker_attention(self):
+        self.cli('hook', 'codex', 'permissionRequest')
+        since = self.option('attention_since')
+        with self.paused_cli('scan') as (scan, release):
+            with self.queued_hook() as hook:
+                release.touch()
+                _, error = scan.communicate(timeout=5)
+                self.assertEqual(scan.returncode, 0, error)
+                _, error = hook.communicate(timeout=5)
+                self.assertEqual(hook.returncode, 0, error)
+        self.assertEqual(self.option('state'), 'needs_input')
+        self.assertEqual(self.option('source'), 'hook')
+        self.assertEqual(self.option('attention_since'), since)
+
+    def test_queued_child_replacement_preserves_new_hook(self):
+        self.tmux('respawn-pane', '-k', '-t', self.pane, 'bash', '--noprofile', '--norc')
+        self.tmux('send-keys', '-t', self.pane, str(self.fake) + ' 300', 'Enter')
+        before = self.wait_fake_agents(1)
+        root = self.tmux('display-message', '-p', '-t', self.pane, '#{pane_pid}')
+        self.cli('scan')
+        with self.paused_cli('scan') as (scan, release):
+            with self.queued_hook() as old_hook:
+                self.tmux('send-keys', '-t', self.pane, 'C-c')
+                self.wait_fake_agents(0)
+                self.tmux('send-keys', '-t', self.pane, str(self.fake) + ' 300', 'Enter')
+                self.assertNotEqual(self.wait_fake_agents(1), before)
+                self.assertEqual(self.tmux('display-message', '-p', '-t', self.pane, '#{pane_pid}'), root)
+                with self.queued_hook('userPromptSubmit') as new_hook:
+                    release.touch()
+                    _, error = scan.communicate(timeout=5)
+                    self.assertEqual(scan.returncode, 0, error)
+                    _, error = old_hook.communicate(timeout=5)
+                    self.assertNotEqual(old_hook.returncode, 0, 'old event was rebound to the new child')
+                    self.assertIn('originating pane', error)
+                    _, error = new_hook.communicate(timeout=5)
+                    self.assertEqual(new_hook.returncode, 0, error)
+        # Neither possible acquisition order may erase the new child's event.
+        self.assertEqual(self.option('state'), 'working')
+        self.assertEqual(self.option('source'), 'hook')
+        self.assertEqual(self.option('attention_since'), '')
+        self.assertIn('WORKING', self.cli('status', timeout=5))
+
+    def test_queued_hook_rejects_worker_that_exited(self):
+        self.cli('scan')
+        with self.paused_cli('scan') as (scan, release):
+            with self.queued_hook() as hook:
+                self.tmux('send-keys', '-t', self.pane, 'C-c')
+                self.wait_fake_agents(0)
+                release.touch()
+                _, error = scan.communicate(timeout=5)
+                self.assertEqual(scan.returncode, 0, error)
+                _, error = hook.communicate(timeout=5)
+                self.assertNotEqual(hook.returncode, 0)
+                self.assertIn('originating pane', error)
+        self.assertNotIn('NEEDS INPUT', self.cli('status', timeout=5))
+        self.assertNotEqual(self.option('source'), 'hook')
+
+    def test_queued_hook_rejects_ambiguous_pane_ownership(self):
+        self.tmux('respawn-pane', '-k', '-t', self.pane, 'bash', '--noprofile', '--norc')
+        self.tmux('send-keys', '-t', self.pane, str(self.fake) + ' 300 &', 'Enter')
+        self.wait_fake_agents(1)
+        self.cli('scan')
+        with self.paused_cli('scan') as (scan, release):
+            with self.queued_hook() as hook:
+                self.tmux('send-keys', '-t', self.pane, str(self.fake) + ' 300 &', 'Enter')
+                self.wait_fake_agents(2)
+                release.touch()
+                _, error = scan.communicate(timeout=5)
+                self.assertEqual(scan.returncode, 0, error)
+                _, error = hook.communicate(timeout=5)
+                self.assertNotEqual(hook.returncode, 0)
+                self.assertIn('originating pane', error)
+        self.assertEqual(self.option('state'), 'unknown')
+        self.assertEqual(self.option('process'), 'ambiguous')
+        self.assertNotEqual(self.tmux('show-option', '-pqv', '-t', self.pane, '@drudwyn_p_source'), 'hook')
 
     @contextmanager
     def paused_cli(self, *args, phase='snapshot', fail=False):

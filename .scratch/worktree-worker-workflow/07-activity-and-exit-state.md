@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done — orphaned mutation P1 correction pending fresh independent review
+**Status:** done — queued hook lifetime P1 correction pending fresh independent review
 
 **What to build:** Users can distinguish a running process, reported task
 activity, attention requests, and an agent that exited, across current surfaces.
@@ -247,4 +247,61 @@ and its fixture mode were added; the loaded activity suite was still the
 Fresh independent Standards/Spec review is still required; this receipt does
 not mark crosscheck clear. Runtime validation remains Linux/tmux 3.4 only;
 macOS was not exercised. `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+## Independent re-review queued hook P1 correction — 2026-09-30
+
+Review of `b39329d` confirmed the orphan-mutation correction, then found that
+`hook()` first observed its worker after acquiring the lifecycle guard. A hook
+waiting behind a paused scan could therefore bind itself to a replacement in
+the same pane. The public CLI reproduction
+`PYTHONDONTWRITEBYTECODE=1 python3 /tmp/drudwyn-review07-queued-replacement.py`
+confirmed different original/replacement PIDs followed by Needs input/hook and
+a nonempty attention timestamp on the replacement. The new deterministic
+`Activity.test_queued_hook_rejects_same_pane_replacement` regression failed
+before the fix because the queued hook returned success after replacement.
+Rerunning the original script after the fix instead stopped at its old success
+assertion with the explicit observed-agent-changed error; the regression now
+asserts that rejection and the replacement remains Running/process.
+
+Hooks now observe the pane root PID and unique matching agent PID/birth identity
+before guard acquisition. After acquiring the guard, they observe the target
+again and reject changed, unavailable, or ambiguous ownership before submitting
+any lifecycle mutation. The previous lifecycle state used for timestamp updates
+comes from the second, guarded observation. A matching worker still accepts the
+queued event, preserving an existing attention timestamp when its state has not
+changed. Revalidation and publication use the existing lifecycle guard and
+child-held mutation lock; the process metadata boundary is unchanged.
+
+This binds the event to the worker the CLI observed, not to proven caller
+ancestry or an unobservable emission history. An externally invoked hook with a
+pane environment remains an observation of that pane. Same-worker hooks still
+apply in successful guard-acquisition order; the lock does not promise FIFO
+invocation/observation order. No event sequence or chronology is invented by
+this correction. The existing pane identity also ensures later discovery can
+invalidate evidence after an external process change.
+
+Five added command-boundary scenarios cover unchanged queued attention,
+same-pane replacement, child replacement under an unchanged shell, exit while
+queued, and ambiguous ownership appearing while queued. The child replacement
+case also queues a valid event for the new child; the old event is rejected and
+the new Working/hook evidence survives either acquisition order. The fixture
+observes the real socket-resolution call to establish that the hook reached
+guard acquisition before changing the worker, rather than assuming that a
+sleep was long enough. All calls continue to real tmux; worker readiness uses
+only process metadata and asserted fake sleep executables. Two initial fixture
+names exceeded Unix socket limits and were shortened; readiness polling was
+corrected to exclude exited zombie processes. Those failed fixture runs are
+not counted as validation.
+
+Validation on the frozen correction: focused activity coverage passed all 28
+cases; `cargo fmt --check` and all 41 `cargo test --locked` tests passed; the
+complete `bash tests/run.sh` exited 0, including all 28 activity cases, 15
+delivery cases, 29 independent-navigation cases, 10 settings cases, privacy,
+packaging, and release checks. The navigator retained its existing optional
+skip. `git diff --check` passed, and no Python cache or probe artifact is
+included. Runtime evidence remains Linux/tmux 3.4; macOS was not exercised.
+
+Fresh independent Standards/Spec review remains required; no crosscheck
+clearance is claimed. `main` remains
 `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.

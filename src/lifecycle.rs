@@ -26,6 +26,8 @@ pub enum LifecycleError {
     MissingPane,
     #[error("Lifecycle event has no unique matching live agent in its originating pane")]
     Unattributed,
+    #[error("Lifecycle event's observed agent changed in its originating pane")]
+    ChangedAgent,
     #[error("unsupported lifecycle event: {0}")]
     UnsupportedEvent(String),
     #[error("could not serialize lifecycle updates: {0}")]
@@ -320,8 +322,32 @@ pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
     let lifecycle = map_event(agent, event)
         .ok_or_else(|| LifecycleError::UnsupportedEvent(event.to_owned()))?;
     let pane = env::var("TMUX_PANE").map_err(|_| LifecycleError::MissingPane)?;
+    // Bind before contention can replace the worker. This is an observation of
+    // the pane's unique agent, not proof of the caller's identity or event time.
+    let observed = observe_hook_target(&pane, agent)?;
     let guard = LifecycleGuard::acquire()?;
-    let record = tmux_output(&["display-message", "-p", "-t", &pane, PANE_FORMAT])?;
+    let current = observe_hook_target(&pane, agent)?;
+    if observed.identity != current.identity {
+        return Err(LifecycleError::ChangedAgent);
+    }
+    pane_state(
+        &guard,
+        &pane,
+        lifecycle,
+        "hook",
+        &current.previous_state,
+        Some((&current.identity, agent.command())),
+    )?;
+    reconcile(&guard)
+}
+
+struct HookTarget {
+    identity: String,
+    previous_state: String,
+}
+
+fn observe_hook_target(pane: &str, agent: AgentKind) -> Result<HookTarget, LifecycleError> {
+    let record = tmux_output(&["display-message", "-p", "-t", pane, PANE_FORMAT])?;
     let f: Vec<_> = record.split(SEPARATOR).collect();
     if f.len() != 17 || f[1] != pane || f[4] != "0" {
         return Err(LifecycleError::Unattributed);
@@ -335,15 +361,10 @@ pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
         return Err(LifecycleError::Unattributed);
     }
     let identity = format!("{}:{}:{}", f[2], agents[0].pid, agents[0].birth);
-    pane_state(
-        &guard,
-        &pane,
-        lifecycle,
-        "hook",
-        if f[7] == identity { f[9] } else { "" },
-        Some((&identity, agent.command())),
-    )?;
-    reconcile(&guard)
+    Ok(HookTarget {
+        previous_state: if f[7] == identity { f[9] } else { "" }.to_owned(),
+        identity,
+    })
 }
 
 fn pane_options(
