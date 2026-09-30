@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done
+**Status:** done — independently reviewed through `346e42340a1b5c79c3ac586178326c742681c919`; Standards and Spec clear of material findings.
 
 **What to build:** Users inspect and integrate commits into the chosen destination
 from Cockpit or a command, without manually opening a shell to run Git.
@@ -234,3 +234,55 @@ Both corrections and this receipt are committed together. Independent correction
 re-review is pending; this receipt does not self-clear it. `main` remains
 `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`. No ticket12 work was started;
 work pauses after ticket11 independent clearance as requested.
+
+### Independent final crosscheck receipt
+
+Reviewed fixed full-ticket range
+`29144fd311cec9574a94e82b0bbac93baadafbb7..346e42340a1b5c79c3ac586178326c742681c919`,
+including correction range `948b902..346e423`. This reused reviewer session did
+not implement either correction. Standards and Spec were reviewed sequentially
+under the coordinating implement-all protocol, without nested reviewers.
+Sources were CONTRIBUTING, CONTEXT, privacy, ADR0005, the approved workflow spec
+and ticket plan, this ticket, and the crosscheck skill's standards/smell baseline.
+
+Standards: no new material finding. The shared integration seam keeps CLI and
+Cockpit behavior aligned, observes metadata rather than task/file/diff bodies,
+and retains explicit errors and normal Git hooks. Canonical checkout identity,
+target-directory locking with mutation-child inheritance, environment-address
+isolation, and current-ancestry enrichment preserve the documented boundaries.
+
+Spec: the original P2 is resolved. Explicit `--no-squash --commit` makes the
+reviewed fast-forward or normal merge authoritative over branch merge options.
+Both original independent scripts were rerun against the frozen correction:
+`/tmp/drudwyn-review11-merge-options.py` and `-merge-options-ff.py`. All four
+fast-forward/divergent × squash/no-commit cases now return success, advance HEAD,
+leave clean status and no MERGE_HEAD, and retain the worker. Evidence:
+`/tmp/drudwyn-review11-merge-options-final.log` and
+`/tmp/drudwyn-review11-merge-options-ff-final.log`.
+
+The narrowly related lifecycle correction was independently inspected and its
+three deterministic public-scan regressions rerun: exit between observations
+preserves Review/Input and their timestamps; replacement does not inherit old
+attention; persistent incoherence preserves prior evidence and freshness while
+returning retry uncertainty. All three passed in 2.358s; evidence:
+`/tmp/drudwyn-review11-lifecycle-final.log`. The retry remains bounded and does
+not claim atomic tmux/process observation or weaken identity/birth validation.
+
+Earlier independent checks on the ticket passed five focused integration
+regressions in 5.031s: orphan-child/alias serialization, conflict and failing-hook
+preservation, stale/vanished Cockpit identity, ignored-file collision, and Git
+environment addressing. Evidence: `/tmp/drudwyn-review11-focused.log`.
+Actual narrow preview/end captures were inspected. No additional blockers were
+found in preview revalidation, actual destination selection, ancestry/no-op,
+stable UI targeting, redaction, client independence, or preserved failures.
+Unknown checks and later coordinator handling remain correctly scoped to 13/12.
+
+Builder frozen-gate logs were inspected rather than duplicating the full suite:
+`/tmp/drudwyn-ticket11-correction-final-rust.log` (41 passed) and
+`/tmp/drudwyn-ticket11-correction-final-suite.log` (complete suite green,
+including integration16/activity39; one existing optional Resurrect skip).
+Reviewer fixtures used disposable temporary Git/tmux servers and asserted fake
+agents only. Runtime evidence is Linux with tmux3.4; other platforms remain
+unverified. No production edits, push, or ticket12 implementation were made by
+this review. The final receipt and pause checkpoint are documentation only;
+`main` remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
