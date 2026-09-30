@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done
+**Status:** done — independently reviewed through `3c4f71f`; Standards and Spec clear of blockers
 
 **What to build:** The accepted visual design renders in tmux with stable tabs,
 selected context, persistent global attention, and functional Cockpit links.
@@ -233,3 +233,58 @@ were refreshed by this passing run. No implementation changes followed the
 successful run. This correction commit is the fixed re-review target after
 `78cd0d6b360050a0f32a3725c32ac5a47112086e`; independent re-review remains pending.
 `main` remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+## Independent final crosscheck receipt — 2026-09-30
+
+Reviewed the full ticket diff `2220f3f...3c4f71f`, with correction review of
+`78cd0d6...3c4f71f`, against this ticket, the approved specification, CONTRIBUTING.md,
+CONTEXT.md, privacy documentation and ADRs 0006/0007. Standards and Spec were
+reviewed sequentially under the implementation workflow. The independent
+reviewer session was reused because of the harness thread limit; it reported
+both original P2s and did not implement the ticket or its corrections.
+
+Standards: no blocking documented-standard violation or new material smell.
+Ambient rows reuse fixed observer metadata without per-tab Git/process probes,
+content inspection or persistent caches. Reconciliation freshness is published
+only after successful guarded writes, with mutation-child lock ownership
+preserved. Selected-branch lookup now reuses the existing stable-pane resolver,
+rejects empty/relative identity and respects lossless encoded checkout paths.
+The renderer keeps labels separate from stable action IDs and escapes tmux
+format characters; client navigation uses the existing validated routing seam.
+
+Spec: no outstanding ticket-10 finding. The two informative rows retain stable
+local ordering, selected visibility, density controls, spacing, role/activity
+labels, explicit stale projection and shared global attention rules. Overflow
+targets exact local session membership, including shells; mouse and keyboard
+routes preserve the other client's selection and reject vanished targets.
+Both P2s are corrected: retained handoff and process exit are visible together
+locally, including compact narrow context, and missing checkout identity cannot
+borrow the renderer's branch. Known literal checkout metadata resolves the
+worker's own branch; unavailable evidence remains unknown. Attention totals,
+overlap semantics, redaction, settings and explicit legacy fallback remain
+consistent. The previously recorded shell-text and header grammar polish items
+remain nonblocking; later integration tickets were not treated as missing scope.
+
+Independent evidence: all nine original status cases passed on `78cd0d6` in
+30.651 seconds (`/tmp/drudwyn-review10-status.log`), exercising actual terminal
+cells, widths/themes/icons, caps, client actions, freshness and compatibility.
+On frozen `3c4f71f`, both added correction cases passed in 5.062 seconds
+(`/tmp/drudwyn-review10-correction-tests.log`): actual 48/160-column rows retain
+Review/Input alongside known nonzero, zero and unknown exit; managed
+literal-dollar checkout, missing/malformed/relative metadata and ordinary
+stopped-pane branch context remain truthful. The original independent
+`/tmp/drudwyn-review10-exit-label.py` was rerun unchanged after its fixture cwd
+was pinned in the original review. Output in
+`/tmp/drudwyn-review10-correction-original.log` confirms both public rendering
+and installed rows show `REVIEW / EXIT 23`, `REVIEW (hook) / EXIT 23`, and
+`ref ?` for the stopped ordinary worker, with unchanged global totals. All
+fixtures used disposable Git/tmux resources and verified fake agents only.
+
+The builder's frozen fmt receipt and final Rust/full-suite logs were inspected,
+including 41 Rust tests, all 11 final status cases, recovery/activity/client
+coverage and the existing optional Resurrect skip. Those broader gates were
+not redundantly rerun or claimed as reviewer-owned full-suite evidence.
+`git diff --check` passed; the tree was clean before this receipt and `main`
+remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`. Runtime evidence remains
+Linux/tmux 3.4; non-Linux fallback was not exercised. This commit changes only
+the ticket status and independent review receipt.
