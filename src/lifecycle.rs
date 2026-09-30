@@ -41,12 +41,18 @@ pub enum LifecycleError {
 /// while an already-spawned child can still write stale evidence.
 /// All lifecycle snapshots and writes, including window projection, must be
 /// inside this guard. A reread alone would leave another read/write race.
-struct LifecycleGuard {
+pub(crate) struct LifecycleGuard {
     directory: File,
 }
 
 impl LifecycleGuard {
-    fn acquire() -> Result<Self, LifecycleError> {
+    /// Association writers share the same socket-directory lock. Only mutation
+    /// children inherit it; an outstanding write remains serialized after death.
+    pub(crate) fn mutation(&self, args: &[&str]) -> Result<(), LifecycleError> {
+        tmux_status(self, args)
+    }
+
+    pub(crate) fn acquire() -> Result<Self, LifecycleError> {
         let socket = tmux_output(&["display-message", "-p", "#{socket_path}"])?;
         let path = Path::new(&socket);
         let parent = path

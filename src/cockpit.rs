@@ -171,16 +171,19 @@ impl App {
     }
 
     fn begin_recovery(&mut self) {
-        let repo = self
-            .selected_workspace()
-            .map(|w| {
-                w.checkout
-                    .repository
-                    .clone()
-                    .unwrap_or_else(|| w.checkout.working_directory.clone())
-            })
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_default();
+        let repo = match self.selected_workspace() {
+            Some(w) => {
+                crate::recovery::selected_checkout(&w.identity.window_id, &w.identity.pane_id)
+            }
+            None => std::env::current_dir().map_err(workspace::Error::from),
+        };
+        let repo = match repo {
+            Ok(repo) => repo,
+            Err(error) => {
+                self.error = Some(error.to_string());
+                return;
+            }
+        };
         match crate::recovery::list(&repo) {
             Ok(checkouts) => {
                 self.recovery = Some(RecoveryForm {
@@ -914,7 +917,13 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         let width = frame.area().width.max(1) as usize;
         // Leave room for word wrapping so retained launch resources are visible.
         let lines = (error.chars().count() + 10).div_ceil((width / 2).max(1));
-        (lines as u16 + 2)
+        let actions = ui::action_line(
+            &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
+            app.theme,
+        )
+        .width()
+        .div_ceil(width);
+        (lines as u16 + actions as u16 + 1)
             .min(frame.area().height.saturating_sub(5))
             .max(3)
     } else if app.filtering || !app.filter.is_empty() {

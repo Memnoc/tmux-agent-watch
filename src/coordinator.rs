@@ -24,52 +24,91 @@ pub fn repository(path: &Path) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&result.stdout).trim().into())
 }
 
+fn ownership(project: &str) -> io::Result<(String, bool)> {
+    let current = tmux(&["show-option", "-qv", "-t", project, "@drudwyn_coordinator"])?;
+    let windows = tmux(&["list-windows", "-t", project, "-F", "#{window_id}"])?;
+    let live = !current.is_empty() && windows.lines().any(|w| w == current);
+    Ok((current, live))
+}
+
+/// Observe absent ownership under the same guard used for final assignment.
+/// Release it during launch: a deliberate intervening selection must win.
+pub(crate) fn missing(project: &str) -> io::Result<String> {
+    let _guard = crate::lifecycle::LifecycleGuard::acquire().map_err(io::Error::other)?;
+    let (current, live) = ownership(project)?;
+    if live {
+        return Err(io::Error::other(
+            "Coordinator still exists; open it instead",
+        ));
+    }
+    Ok(current)
+}
+
 pub fn set(window: &str, session: Option<&str>) -> io::Result<()> {
     let session = match session {
         Some(id) => id.to_owned(),
         None => navigation::context("#{session_id}")?,
     };
     let project = project(&session)?;
+    let guard = crate::lifecycle::LifecycleGuard::acquire().map_err(io::Error::other)?;
+    assign(&guard, window, &project)
+}
+
+/// Compare and assign atomically with other Drudwyn coordinator writers.
+/// Recovery holds its checkout guard first, then this socket guard. Coordinator
+/// setters never acquire checkout guards; no reverse lock ordering is allowed.
+pub(crate) fn restore(window: &str, project: &str, expected: &str) -> io::Result<()> {
+    let guard = crate::lifecycle::LifecycleGuard::acquire().map_err(io::Error::other)?;
+    let (current, live) = ownership(project)?;
+    if current != expected || live {
+        return Err(io::Error::other(format!(
+            "Coordinator changed during recovery; retained window {window} and checkout. No task sent; open the chosen coordinator instead"
+        )));
+    }
+    assign(&guard, window, project)
+}
+
+fn assign(guard: &crate::lifecycle::LifecycleGuard, window: &str, project: &str) -> io::Result<()> {
     let rows = tmux(&[
         "list-windows",
-        "-a",
-        "-F",
-        "#{session_id}␟#{window_id}␟#{pane_current_path}␟#{@drudwyn_launch_checkout}␟#{@drudwyn_recovery_checkout}",
-    ])?;
-    let row = rows
-        .lines()
-        .map(|r| r.split('␟').collect::<Vec<_>>())
-        .find(|r| r[0] == project && r[1] == window)
-        .ok_or_else(|| io::Error::other("Coordinator window is not a member of this project"))?;
-    // Use a lossless known checkout identity, never unescape tmux display cwd.
-    let exact = if row[3].is_empty() { row[4] } else { row[3] };
-    let path = crate::recovery::decode(exact).unwrap_or_else(|| row[2].into());
-    let repo = repository(&path)?;
-    let previous = tmux(&[
-        "show-option",
-        "-qv",
         "-t",
-        &project,
-        "@drudwyn_project_repo",
+        project,
+        "-F",
+        "#{window_id}␟#{pane_id}",
     ])?;
+    let pane = rows
+        .lines()
+        .filter_map(|r| r.split_once('␟'))
+        .find(|(id, _)| *id == window)
+        .map(|(_, pane)| pane)
+        .ok_or_else(|| io::Error::other("Coordinator window is not a member of this project"))?;
+    let path = crate::recovery::selected_checkout(window, pane).map_err(io::Error::other)?;
+    let repo = repository(&path)?;
+    let previous = tmux(&["show-option", "-qv", "-t", project, "@drudwyn_project_repo"])?;
     if !previous.is_empty() && previous != repo {
         return Err(io::Error::other(
             "Project is associated with a different repository; use a separate session",
         ));
     }
-    // Preserve the user's current name. Disable process-driven renames without
-    // periodically rewriting it, so future explicit renames remain authoritative.
-    protect_name(window)?;
-    tmux(&["set-option", "-t", &project, "@drudwyn_project_repo", &repo])?;
-    tmux(&["set-option", "-t", &project, "@drudwyn_coordinator", window])?;
-    tmux(&[
-        "set-option",
-        "-w",
-        "-t",
-        window,
-        "@drudwyn_project",
-        &project,
-    ])?;
+    for option in ["automatic-rename", "allow-rename"] {
+        guard
+            .mutation(&["set-option", "-w", "-t", window, option, "off"])
+            .map_err(io::Error::other)?;
+    }
+    for args in [
+        vec!["set-option", "-t", project, "@drudwyn_project_repo", &repo],
+        vec!["set-option", "-t", project, "@drudwyn_coordinator", window],
+        vec![
+            "set-option",
+            "-w",
+            "-t",
+            window,
+            "@drudwyn_project",
+            project,
+        ],
+    ] {
+        guard.mutation(&args).map_err(io::Error::other)?;
+    }
     Ok(())
 }
 

@@ -58,6 +58,54 @@ impl Checkout {
     }
 }
 
+/// Resolve the selected stable pane using known operational identity or native
+/// process cwd metadata. Display labels are never unescaped into authority.
+pub(crate) fn selected_checkout(window: &str, pane: &str) -> Result<PathBuf, Error> {
+    let format = "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_dead}␟#{@drudwyn_launch_pane}␟#{@drudwyn_launch_pid}␟#{@drudwyn_launch_checkout}␟#{@drudwyn_recovery_checkout}␟#{pane_current_path}";
+    let before = tmux(&["display-message", "-p", "-t", pane, format])?;
+    let f: Vec<_> = before.split('␟').collect();
+    if f.len() != 9 || f[0] != window || f[1] != pane {
+        return Err(Error::Invalid(
+            "Selected pane changed; refresh before recovery".into(),
+        ));
+    }
+    let encoded = if f[4] == pane && f[5] == f[2] {
+        f[6]
+    } else {
+        f[7]
+    };
+    let path = if !encoded.is_empty() {
+        let path = decode(encoded)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| {
+                Error::Invalid(
+                    "Selected checkout identity is malformed; refresh or reselect the checkout"
+                        .into(),
+                )
+            })?;
+        path
+    } else {
+        if f[3] != "0" {
+            return Err(Error::Invalid(
+                "Selected pane exited without a known checkout; explicitly select a repository"
+                    .into(),
+            ));
+        }
+        fs::read_link(format!("/proc/{}/cwd", f[2])).unwrap_or_else(|_| PathBuf::from(f[8]))
+    };
+    let path = path.canonicalize().map_err(|_| {
+        Error::Invalid(
+            "Selected pane checkout is unavailable; no display-path unescaping attempted".into(),
+        )
+    })?;
+    if tmux(&["display-message", "-p", "-t", pane, format])? != before {
+        return Err(Error::Invalid(
+            "Selected pane changed; refresh before recovery".into(),
+        ));
+    }
+    Ok(path)
+}
+
 pub fn list(repo: &Path) -> Result<Vec<Checkout>, Error> {
     // Enumerate only the selected repository, never search the filesystem.
     let output = Command::new("git")
@@ -247,27 +295,10 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
             checkout.live.join(", ")
         )));
     }
-    if request.coordinator {
-        let existing = tmux(&["show-option", "-qv", "-t", &project, "@drudwyn_coordinator"])?;
-        let windows = tmux(&["list-windows", "-t", &project, "-F", "#{window_id}"])?;
-        if !existing.is_empty() && windows.lines().any(|w| w == existing) {
-            return Err(Error::Invalid(
-                "Coordinator still exists; open it instead".into(),
-            ));
-        }
-        let recorded = tmux(&[
-            "show-option",
-            "-qv",
-            "-t",
-            &project,
-            "@drudwyn_project_repo",
-        ])?;
-        if !recorded.is_empty() && recorded != identity {
-            return Err(Error::Invalid(
-                "Coordinator repository differs from this project".into(),
-            ));
-        }
-    }
+    let coordinator_before = request
+        .coordinator
+        .then(|| crate::coordinator::missing(&project))
+        .transpose()?;
     let batch = request
         .batch
         .as_deref()
@@ -375,8 +406,8 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
             started.window_id
         )));
     }
-    if request.coordinator {
-        crate::coordinator::set(&started.window_id, Some(&project))?;
+    if let Some(expected) = coordinator_before {
+        crate::coordinator::restore(&started.window_id, &project, &expected)?;
     }
     drop(directory); // Delivery reacquires this inode and revalidates its binding.
     match task {

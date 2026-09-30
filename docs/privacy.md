@@ -50,13 +50,21 @@ and reads no directory or task-file content.
 Lifecycle updates likewise use a kernel advisory lock on the existing tmux
 socket directory. They read no directory contents and create no lock file.
 Servers sharing that directory serialize conservatively. Contention waits at
-most five seconds before returning an explicit retry error. Only lifecycle
+most five seconds before returning an explicit retry error. Only lifecycle and coordinator-association
 mutation children inherit a duplicate of the lock descriptor, through their
 unused stdin; read commands and agent processes do not inherit it. The lock
 releases after the parent and any outstanding mutation child finish, including
 after errors. Killing the parent cannot allow an older surviving write to
 overwrite a newer hook. A stalled child can delay updates, which still return
 the bounded retry error rather than bypassing the lock.
+
+Coordinator assignment uses that same guard. Recovery snapshots missing ownership,
+releases the guard during process creation, then compares ownership again under
+the guard before assignment. A deliberate selection or another recovery that
+wins meanwhile remains selected; the losing recovery retains its window and
+checkout with an explicit conflict. Recovery takes the checkout guard before
+the socket guard; coordinator setters never acquire checkout guards. No tmux
+wait-for lock or persistent reservation is created.
 
 Set `@drudwyn-redact-labels on` before screen sharing to replace repository,
 branch, session, and window labels while preserving lifecycle state and click

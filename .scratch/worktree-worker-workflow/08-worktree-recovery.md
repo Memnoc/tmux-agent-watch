@@ -93,3 +93,49 @@ Global Cockpit redesign and integration remain later tickets.
 
 The implementation stays on `work/worktree-worker-workflow`; `main` remains
 `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`. Independent review follows this commit.
+
+## Independent-review corrections — 2026-09-30
+
+- Reproduced both reported P2s before changing code. The paused coordinator
+  recovery overwrote a live coordinator selected during launch, and Cockpit
+  passed an unmanaged agent's escaped dollar-containing display cwd to Git.
+  Original reproductions: `/tmp/drudwyn-review08-coordinator-race.py` and
+  `/tmp/drudwyn-review08-literal-ui.py`.
+- Coordinator recovery now snapshots missing ownership and compares it again
+  under the existing socket-directory guard immediately before assignment.
+  Manual coordinator selection uses the same guard. It is released during
+  launch, so a deliberate intervening choice wins; the losing recovery reports
+  an explicit conflict and retains its window/checkout without sending a task.
+  Assignment receives an explicit guard, never nests lifecycle acquisition,
+  and passes the guard to every mutation child. Recovery acquires checkout
+  before socket; coordinator setters acquire only socket. Bounded contention,
+  kernel cleanup and child-held lifetime avoid stale tmux wait-for locks.
+- Recovery entry now revalidates the selected window/pane/process and resolves
+  known encoded checkout identity or native cwd metadata. It never unescapes a
+  presentation string or borrows another pane's directory after disappearance.
+  The vanished-pane test also exposed a clipped short error at 120 columns:
+  footer sizing now includes wrapped action hints, preserving the explicit
+  stable-target error without changing inventory selection behavior.
+- Focused verification passed all 17 recovery tests, retaining the original 12.
+  Added manual-selection competition, simultaneous recoveries in distinct
+  checkouts, a real Cockpit action for an unmanaged agent in a literal-dollar
+  repository, mutation-child guard retention after parent death, and vanished
+  selected-pane behavior. The orphan test proves a competing set receives the
+  bounded retry error until the outstanding child finishes, then succeeds.
+  Corrected-behavior reproofs of both original scenarios passed:
+  `/tmp/drudwyn-ticket08-coordinator-reproof.py` and
+  `/tmp/drudwyn-ticket08-literal-reproof.py`.
+- Platform limits remain explicit: unmanaged literal paths were exercised with
+  Linux `/proc/PID/cwd`. Other platforms require known checkout metadata or a
+  directly resolvable tmux cwd; no blanket display unescaping was introduced,
+  and non-Linux runtime behavior is not claimed as tested.
+- Final frozen-code gates passed: `cargo fmt --check`, `git diff --check`,
+  `cargo test --locked` (41 Rust tests), and complete `bash tests/run.sh`.
+  The complete run passed 15 launch, 17 recovery, 36 activity, 29 real-client,
+  13 navigator (one existing optional Resurrect skip), and 10 settings tests,
+  plus all shell, lifecycle, privacy, packaging and release checks. Log:
+  `/tmp/drudwyn-ticket08-corrections-final-suite.log`. No implementation changes
+  followed the frozen run. Both original review scenarios and all five added
+  correction scenarios passed; independent re-review is not self-cleared.
+
+Independent re-review remains pending after this correction commit.

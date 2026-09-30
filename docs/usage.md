@@ -374,7 +374,11 @@ stopped panes. It refuses a live terminal already using the checkout, locked or
 prunable worktrees, missing directories, unavailable agents and missing task
 files. Concurrent Drudwyn recovery/delivery is guarded by the existing checkout
 inode. A competing external window causes an explicit retained-window result;
-it is not killed. A failed or uncertain creation/send retains work for inspection
+it is not killed. If a coordinator is chosen during recovery, that choice wins;
+the recovered window and checkout remain available with an explicit conflict.
+Cockpit resolves the selected pane's known checkout or native working-directory
+metadata; a missing or changed pane requires refresh instead of borrowing another
+workspace's directory. A failed or uncertain creation/send retains work for inspection
 and never resends automatically. Select Open on an existing worker instead of
 starting a duplicate. No worktree repair, reset or forced cleanup is performed.
 

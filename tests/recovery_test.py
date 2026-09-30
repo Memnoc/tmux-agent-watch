@@ -267,6 +267,115 @@ class RecoveryTest(IndependentNavigation):
         self.assertEqual(before, subprocess.check_output(['git', '-C', str(self.repo), 'worktree', 'list', '--porcelain']))
         self.assertIn('1', self.tmux('list-panes', '-a', '-F', '#{pane_dead}'))
 
+    def paused_coordinator_recovery(self, name):
+        checkout = Path(self.tmp.name) / name
+        subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-qb', name, str(checkout)], check=True)
+        gate = Path(self.tmp.name) / ('gate-' + name); gate.mkdir()
+        ready, release = gate / 'ready', gate / 'release'
+        shim = gate / 'tmux'
+        shim.write_text('#!/bin/sh\nif [ "$1" = new-window ]; then touch ' + shlex.quote(str(ready)) + '; while [ ! -f ' + shlex.quote(str(release)) + ' ]; do sleep .02; done; fi\nexec ' + shlex.quote(shutil.which('tmux')) + ' "$@"\n')
+        shim.chmod(0o755)
+        env = dict(self.env, DRUDWYN_CLIENT=self.clients[0], PATH=str(gate) + os.pathsep + self.env['PATH'])
+        process = subprocess.Popen([str(BIN), 'workspace', 'recover', '--repo', str(self.repo), '--path', str(checkout), '--shell', '--coordinator'], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        def cleanup():
+            release.touch()
+            if process.poll() is None: process.kill()
+            process.communicate(timeout=10)
+        self.addCleanup(cleanup)
+        for _ in range(200):
+            if ready.exists(): break
+            self.assertIsNone(process.poll())
+            time.sleep(.02)
+        self.assertTrue(ready.exists())
+        return process, release, checkout
+
+    def test_coordinator_manual_selection_wins_over_pending_recovery(self):
+        process, release, checkout = self.paused_coordinator_recovery('pending')
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        release.touch()
+        stdout, stderr = process.communicate(timeout=15)
+        self.assertNotEqual(process.returncode, 0, stdout)
+        self.assertIn('Coordinator changed', stderr)
+        self.assertIn('retained', stderr)
+        self.assertEqual(self.tmux('show-option', '-qv', '-t', 'project', '@drudwyn_coordinator'), self.home)
+        self.assertTrue(checkout.is_dir())
+        self.assertEqual(len(self.tmux('list-windows', '-t', 'project', '-F', '#{window_id}').splitlines()), 3)
+
+    def test_coordinator_recoveries_in_different_checkouts_do_not_overwrite(self):
+        process, release, checkout = self.paused_coordinator_recovery('first')
+        other = Path(self.tmp.name) / 'second'
+        subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-qb', 'second', str(other)], check=True)
+        selected = self.command('workspace', 'recover', '--repo', str(self.repo), '--path', str(other), '--shell', '--coordinator', client=self.clients[1]).stdout.strip()
+        release.touch()
+        stdout, stderr = process.communicate(timeout=15)
+        self.assertNotEqual(process.returncode, 0, stdout)
+        self.assertIn('Coordinator changed', stderr)
+        self.assertEqual(self.tmux('show-option', '-qv', '-t', 'project', '@drudwyn_coordinator'), selected)
+        self.assertTrue(checkout.is_dir() and other.is_dir())
+        self.assertTrue(self.selection(self.clients[1]).endswith(':' + selected))
+        self.assertEqual(len(self.tmux('list-windows', '-t', 'project', '-F', '#{window_id}').splitlines()), 4)
+
+    def test_cockpit_recovers_selected_unmanaged_agent_in_literal_repository(self):
+        repo = Path(self.tmp.name) / 'repo $literal'
+        subprocess.run(['git', 'init', '-q', '-b', 'main', str(repo)], check=True)
+        subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'initial', '--allow-empty'], check=True)
+        survivor = Path(self.tmp.name) / 'literal-survivor'
+        subprocess.run(['git', '-C', str(repo), 'worktree', 'add', '-qb', 'literal-survivor', str(survivor)], check=True)
+        fake = Path(self.tmp.name) / 'fake-worker' / 'codex'
+        self.assertEqual(fake.resolve(), Path(shutil.which('sleep')).resolve())
+        worker = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-n', 'literal-worker', '-c', str(repo), str(fake), '300')
+        self.assertEqual(self.tmux('show-option', '-wqv', '-t', worker, '@drudwyn_launch_checkout'), '')
+        self.assertIn('literal-survivor', self.command('workspace', 'recover-list', '--repo', str(repo), client=self.clients[0]).stdout)
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit')
+        self.wait_pane(pane, 'WORKSPACE')
+        self.tmux('send-keys', '-t', pane, '-l', '/literal-worker')
+        time.sleep(.1)
+        self.tmux('send-keys', '-t', pane, 'Enter', 'o')
+        self.wait_pane(pane, 'RECOVER WORKTREE')
+        self.wait_pane(pane, 'literal-survivor')
+        self.tmux('send-keys', '-t', pane, 'j', 's')
+        for _ in range(200):
+            window = self.selection(self.clients[0]).split(':')[1]
+            if self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_branch') == 'literal-survivor': break
+            time.sleep(.02)
+        self.assertEqual(self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_branch'), 'literal-survivor')
+
+    def test_coordinator_mutation_keeps_guard_after_parent_death(self):
+        gate = Path(self.tmp.name) / 'assignment-gate'; gate.mkdir()
+        ready, release = gate / 'ready', gate / 'release'
+        shim = gate / 'tmux'
+        shim.write_text('#!/bin/sh\nif [ "$1" = set-option ] && [ "$4" = @drudwyn_coordinator ]; then touch ' + shlex.quote(str(ready)) + '; while [ ! -f ' + shlex.quote(str(release)) + ' ]; do sleep .02; done; fi\nexec ' + shlex.quote(shutil.which('tmux')) + ' "$@"\n')
+        shim.chmod(0o755)
+        env = dict(self.env, DRUDWYN_CLIENT=self.clients[0], PATH=str(gate) + os.pathsep + self.env['PATH'])
+        process = subprocess.Popen([str(BIN), 'coordinator', 'set', '--window', self.home], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        def cleanup():
+            release.touch()
+            if process.poll() is None: process.kill()
+            process.communicate(timeout=10)
+        self.addCleanup(cleanup)
+        for _ in range(200):
+            if ready.exists(): break
+            self.assertIsNone(process.poll())
+            time.sleep(.02)
+        self.assertTrue(ready.exists())
+        process.kill(); process.wait(timeout=5)
+        result = self.command('coordinator', 'set', '--window', self.worker, client=self.clients[0], check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('another update is still in progress', result.stderr)
+        release.touch()
+        process.communicate(timeout=10)
+        self.command('coordinator', 'set', '--window', self.worker, client=self.clients[0])
+        self.assertEqual(self.tmux('show-option', '-qv', '-t', 'project', '@drudwyn_coordinator'), self.worker)
+
+    def test_cockpit_missing_selected_pane_does_not_borrow_invoking_repo(self):
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit')
+        self.wait_pane(pane, 'WORKSPACE')
+        self.tmux('kill-window', '-t', self.worker)
+        self.tmux('send-keys', '-t', pane, 'o')
+        screen = self.wait_pane(pane, 'Selected pane changed')
+        self.assertNotIn('RECOVER WORKTREE', screen)
+        self.assertIn('ERROR', screen)
+
 if __name__ == '__main__':
     names = [n for n in RecoveryTest.__dict__ if n.startswith('test_') and (len(sys.argv) == 1 or sys.argv[1] in n)]
     result = unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(RecoveryTest(n) for n in names))
