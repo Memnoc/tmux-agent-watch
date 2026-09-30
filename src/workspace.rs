@@ -1,7 +1,12 @@
 use std::{
     collections::BTreeSet,
+    ffi::OsString,
     fs,
     io::{self, Write},
+    os::unix::{
+        ffi::{OsStrExt, OsStringExt},
+        fs::MetadataExt,
+    },
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -347,6 +352,17 @@ pub fn start(request: Start) -> Result<Started, Error> {
         }
         set_window(&window, "@drudwyn_launch_pane", &launch_pane)?;
         set_window(&window, "@drudwyn_launch_pid", &launch_pid)?;
+        // tmux output escapes some literal path characters. Keep the exact
+        // checkout bytes for the delivery guard, rather than guessing how to
+        // unescape a display label or falling back to a different directory.
+        let checkout = target.canonicalize()?;
+        let checkout = checkout
+            .as_os_str()
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        set_window(&window, "@drudwyn_launch_checkout", &checkout)?;
         set_window(
             &window,
             "@drudwyn_launch_command",
@@ -404,11 +420,13 @@ pub fn validate_task_file(checkout: &Path, reference: &str) -> Result<(), Error>
     }
     Ok(())
 }
+#[derive(PartialEq, Eq)]
 struct DeliveryTarget {
     window: String,
     pane: String,
     pid: String,
     command: String,
+    checkout: String,
 }
 fn delivery_target(target: &str) -> Result<DeliveryTarget, Error> {
     let record = tmux(Command::new("tmux").args([
@@ -416,10 +434,10 @@ fn delivery_target(target: &str) -> Result<DeliveryTarget, Error> {
         "-p",
         "-t",
         target,
-        "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_current_command}␟#{pane_dead}",
+        "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_current_command}␟#{pane_dead}␟#{@drudwyn_launch_checkout}",
     ]))?;
     let fields: Vec<_> = record.split('␟').collect();
-    if fields.len() != 5 || fields[4] != "0" {
+    if fields.len() != 6 || fields[4] != "0" {
         return Err(Error::Invalid(
             "Delivery target unavailable or exited; task not sent".into(),
         ));
@@ -429,6 +447,7 @@ fn delivery_target(target: &str) -> Result<DeliveryTarget, Error> {
         pane: fields[1].into(),
         pid: fields[2].into(),
         command: fields[3].into(),
+        checkout: fields[5].into(),
     })
 }
 
@@ -573,14 +592,65 @@ fn bound_target(target: &str) -> Result<DeliveryTarget, Error> {
 }
 
 fn same_process(expected: &DeliveryTarget) -> Result<(), Error> {
-    let current = delivery_target(&expected.pane)?;
-    if current.window != expected.window
-        || current.pid != expected.pid
-        || current.command != expected.command
-    {
+    let current = bound_target(&expected.pane)?;
+    if current != *expected {
         return Err(Error::Invalid("Delivery pane/process changed; delivery uncertain. Inspect the worker before deliberate recovery".into()));
     }
     Ok(())
+}
+
+/// Lock an existing checkout inode, never a created lock file or task registry.
+/// Sibling launches have distinct checkouts. Windows sharing a checkout also
+/// serialize conservatively. The descriptor is close-on-exec; drop or process
+/// death releases the kernel lock, including after an interrupted delivery.
+fn delivery_guard(pane: &DeliveryTarget) -> Result<fs::File, Error> {
+    if pane.checkout.is_empty()
+        || pane.checkout.len() % 2 != 0
+        || !pane.checkout.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(Error::Invalid(
+            "Launch checkout identity missing or malformed; cannot guard delivery. Task not sent; no fallback attempted".into(),
+        ));
+    }
+    let bytes = (0..pane.checkout.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&pane.checkout[i..i + 2], 16).unwrap())
+        .collect();
+    let checkout = PathBuf::from(OsString::from_vec(bytes));
+    if !checkout.is_absolute() {
+        return Err(Error::Invalid(
+            "Launch checkout identity is not absolute; task not sent; no fallback attempted".into(),
+        ));
+    }
+    let unavailable = |error| {
+        Error::Invalid(format!(
+            "Cannot guard delivery for the recorded worker checkout: {error}. Task not sent; no fallback attempted"
+        ))
+    };
+    let directory = fs::File::open(&checkout).map_err(unavailable)?;
+    let held = directory.metadata().map_err(unavailable)?;
+    if !held.is_dir() {
+        return Err(Error::Invalid(
+            "Recorded worker checkout is not a directory; task not sent".into(),
+        ));
+    }
+    match directory.try_lock() {
+        Ok(()) => {}
+        Err(fs::TryLockError::WouldBlock) => {
+            return Err(Error::Invalid(
+                "A delivery is already in progress for this worker checkout. Nothing resent; inspect it before deliberate retry".into(),
+            ));
+        }
+        Err(fs::TryLockError::Error(error)) => return Err(unavailable(error)),
+    }
+    same_process(pane)?;
+    let current = fs::metadata(&checkout).map_err(unavailable)?;
+    if held.dev() != current.dev() || held.ino() != current.ino() {
+        return Err(Error::Invalid(
+            "Worker checkout changed while guarding delivery; task not sent".into(),
+        ));
+    }
+    Ok(directory)
 }
 
 struct TransientBuffer(String);
@@ -599,6 +669,8 @@ pub fn deliver(target: &str, task: &str, retry: bool) -> Result<(), Error> {
         return Err(Error::Invalid("Task is empty; not sent".into()));
     }
     let pane = bound_target(target)?;
+    // Hold through state checks, transmission, receipt, and buffer cleanup.
+    let _guard = delivery_guard(&pane)?;
     let previous = tmux(Command::new("tmux").args([
         "show-option",
         "-wqv",

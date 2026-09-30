@@ -327,7 +327,9 @@ privacy_task='rotate private customer token 9f47c2'
 receiver="$TMP_DIR/task-receiver"
 printf '%s\n' '#!/bin/sh' 'IFS= read -r task' 'printf "accepted\n"' 'sleep 2' > "$receiver"
 chmod +x "$receiver"
-privacy_pane="$(tmux -L "$SOCKET" new-window -d -P -F '#{pane_id}' -t v2: -n privacy "$receiver")"
+TMUX="$socket_path,$server_pid,0" "$real_binary" workspace start \
+  --repo "$repo" --name privacy work/privacy-delivery "$receiver" >/dev/null
+privacy_pane="$(tmux -L "$SOCKET" display-message -p -t v2:privacy '#{pane_id}')"
 printf '%s' "$privacy_task" | TMUX="$socket_path,$server_pid,0" \
   "$real_binary" workspace deliver-task "$privacy_pane"
 sleep 0.2

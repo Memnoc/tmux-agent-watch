@@ -1,6 +1,8 @@
 """Named worker launch and transient task delivery through real CLI/tmux seams."""
 import os
 import hashlib
+import shlex
+import signal
 import sys
 from pathlib import Path
 import subprocess
@@ -115,6 +117,12 @@ class WorkerLaunchTest(unittest.TestCase):
                     self.assertNotEqual(again.returncode, 0)
                     self.assertIn('Nothing resent', again.stderr)
                 self.assertNotIn('private failure instruction', self.tmux('show-options', '-w', '-t', window))
+                retry = ['--retry'] if operation != 'load-buffer' else []
+                recovered = self.cli('workspace', 'deliver-task', window, *retry,
+                                     input='deliberate recovery', check=False)
+                self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                self.wait(pane, 'RECEIVED')
+                self.assertEqual(self.tmux('list-buffers', '-F', '#{buffer_name}'), '')
 
     def raw_receiver(self):
         script = self.root / 'raw_receiver.py'
@@ -134,6 +142,116 @@ while True:
         agent = self.root / 'codex'
         if not agent.exists(): agent.symlink_to(sys.executable)
         return agent, script
+
+    def paused_delivery(self, window, operation='load-buffer', after=False):
+        """Pause a real tmux operation without retaining the synthetic input."""
+        gate = self.root / ('pause-' + window[1:] + '-' + operation)
+        gate.mkdir()
+        ready, release = gate / 'ready', gate / 'release'
+        shim = gate / 'tmux'
+        shim.write_text('#!/bin/sh\nif [ "$1" = ' + shlex.quote(operation) + ' ]; then\n'
+                        + ('/usr/bin/tmux "$@" || exit $?\n' if after else '')
+                        + 'touch ' + shlex.quote(str(ready)) + '\n'
+                        + 'while [ ! -e ' + shlex.quote(str(release)) + ' ]; do sleep .02; done\n'
+                        + ('exit 0\n' if after else '')
+                        + 'fi\nexec /usr/bin/tmux "$@"\n')
+        shim.chmod(0o755)
+        env = dict(self.env, PATH=str(gate) + ':' + self.env['PATH'])
+        process = subprocess.Popen([str(BIN), 'workspace', 'deliver-task', window],
+                                   env=env, text=True, stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   start_new_session=True)
+        def cleanup():
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=10)
+        self.addCleanup(cleanup)
+        process.stdin.write('concurrent synthetic task')
+        process.stdin.close()
+        process.stdin = None
+        for _ in range(200):
+            if ready.exists(): return process, release
+            if process.poll() is not None:
+                _, stderr = process.communicate(timeout=10)
+                self.fail('Delivery exited before controlled ' + operation + ': ' + stderr)
+            time.sleep(.025)
+        self.fail('Delivery did not reach controlled ' + operation)
+
+    def test_concurrent_delivery_sends_once_and_allows_later_explicit_retry(self):
+        agent, script = self.raw_receiver()
+        self.cli('workspace', 'start', '--repo', str(self.repo), '--batch', self.batch,
+                 'concurrent', str(agent), str(script))
+        window = self.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').splitlines()[-1]
+        self.wait(window, 'READY')
+        first, release = self.paused_delivery(window)
+        second = self.cli('workspace', 'deliver-task', window,
+                          input='concurrent synthetic task', check=False)
+        concurrent_retry = self.cli('workspace', 'deliver-task', window, '--retry',
+                                    input='overlapping retry', check=False)
+        release.touch()
+        stdout, stderr = first.communicate(timeout=10)
+        self.assertEqual(first.returncode, 0, stderr)
+        self.assertNotEqual(second.returncode, 0, 'Both overlapping deliveries reported success')
+        self.assertIn('Nothing resent', second.stderr)
+        self.assertNotEqual(concurrent_retry.returncode, 0)
+        self.assertIn('Nothing resent', concurrent_retry.stderr)
+        self.assertEqual(self.wait(window, 'HASH:').count('HASH:'), 1)
+        self.cli('workspace', 'deliver-task', window, '--retry', input='deliberate retry')
+        self.assertEqual(self.tmux('capture-pane', '-p', '-t', window).count('HASH:'), 2)
+        self.assertEqual(self.tmux('list-buffers', '-F', '#{buffer_name}'), '')
+
+    def test_crashed_delivery_releases_guard_without_automatic_resend(self):
+        agent, script = self.raw_receiver()
+        for operation, after, expected in [('load-buffer', False, 'not_sent'),
+                                            ('send-keys', True, 'uncertain')]:
+            with self.subTest(operation=operation):
+                self.cli('workspace', 'start', '--repo', str(self.repo), '--batch', self.batch,
+                         'crash-' + operation, str(agent), str(script))
+                window = self.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').splitlines()[-1]
+                self.wait(window, 'READY')
+                owner, _ = self.paused_delivery(window, operation, after)
+                os.killpg(owner.pid, signal.SIGKILL)
+                owner.communicate(timeout=10)
+                self.assertEqual(self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_delivery'), expected)
+                self.assertEqual(self.tmux('list-buffers', '-F', '#{buffer_name}'), '')
+                if expected == 'uncertain':
+                    refused = self.cli('workspace', 'deliver-task', window,
+                                       input='do not silently resend', check=False)
+                    self.assertNotEqual(refused.returncode, 0)
+                    self.assertIn('Nothing resent', refused.stderr)
+                    self.assertEqual(self.wait(window, 'HASH:').count('HASH:'), 1)
+                retry = ['--retry'] if expected == 'uncertain' else []
+                self.cli('workspace', 'deliver-task', window, *retry, input='deliberate recovery')
+                self.assertEqual(self.wait(window, 'HASH:').count('HASH:'), 2 if retry else 1)
+
+    def test_guard_uses_literal_checkout_and_does_not_block_other_workers(self):
+        agent, script = self.raw_receiver()
+        for branch in ['one', 'two']:
+            self.cli('workspace', 'start', '--repo', str(self.repo), '--batch', self.batch,
+                     '--worktree-root', str(self.root / 'literal-$value\\path'),
+                     branch, str(agent), str(script))
+        one, two = self.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').splitlines()[-2:]
+        self.wait(one, 'READY'); self.wait(two, 'READY')
+        first, release = self.paused_delivery(one)
+        self.cli('workspace', 'deliver-task', two, input='independent task')
+        self.assertEqual(self.wait(two, 'HASH:').count('HASH:'), 1)
+        release.touch()
+        _, stderr = first.communicate(timeout=10)
+        self.assertEqual(first.returncode, 0, stderr)
+        self.assertEqual(self.wait(one, 'HASH:').count('HASH:'), 1)
+
+    def test_missing_checkout_guard_fails_closed(self):
+        window, pane = self.start_receiver()
+        for identity in ['', 'malformed', str(self.root / 'missing').encode().hex()]:
+            with self.subTest(identity=identity):
+                self.tmux('set-option', '-w', '-t', window, '@drudwyn_launch_checkout', identity)
+                result = self.cli('workspace', 'deliver-task', window, input='not transmitted', check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('cannot guard delivery', result.stderr.lower())
+                self.assertIn('no fallback', result.stderr)
+                self.assertNotIn('RECEIVED', self.tmux('capture-pane', '-p', '-t', pane))
+                self.assertEqual(self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_delivery'), 'not_sent')
+                self.assertEqual(self.tmux('list-buffers', '-F', '#{buffer_name}'), '')
 
     def test_single_start_sends_multiline_stdin_once_without_content_metadata(self):
         agent, script = self.raw_receiver()

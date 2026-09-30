@@ -25,7 +25,7 @@ for sensitive or organisational workflows without a separate assessment.
 | batch ID, pinned source ref/commit, destination branch/starting commit/checkout | keep sibling launches and integration choices explicit | current tmux session only | batch commands and Cockpit unless redacted |
 | clean/dirty state and merge ancestry | prevent unsafe worktree removal | current command | fixed readiness state |
 | lifecycle state and timestamps | show working, waiting, review, or failed state | current tmux session | cockpit, HUD, and sidebar |
-| launch pane/process identity, expected executable and delivery state | bind a send to its worker and distinguish not sent/sent/uncertain | current tmux session | workspace commands and Cockpit |
+| launch pane/process identity, losslessly encoded checkout path, expected executable and delivery state | bind and serialize a send to its worker and distinguish not sent/sent/uncertain | current tmux session | workspace commands and Cockpit |
 | deliberately selected repository task-file reference | let the agent read the chosen task in its checkout | current tmux session | launch form and live window option |
 | task entered in the start form or stdin | deliver the initial instruction to the selected agent | form/command memory and delete-on-paste tmux buffer | selected third-party agent pane |
 
@@ -37,6 +37,9 @@ with delete-on-paste, and is never placed in arguments, options, logs, or files.
 removed on failure as well as successful paste. File-reference validation reads
 Git tree/path metadata only; Drudwyn never reads the referenced task file. A sent
 receipt does not establish agent acceptance or task completion.
+Concurrent delivery uses a kernel advisory lock on the existing checkout
+directory for the command's lifetime. It creates no lock file or durable registry
+and reads no directory or task-file content.
 
 Set `@drudwyn-redact-labels on` before screen sharing to replace repository,
 branch, session, and window labels while preserving lifecycle state and click

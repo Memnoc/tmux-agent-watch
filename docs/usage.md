@@ -288,6 +288,13 @@ success and failure; task text is discarded after the attempt. To retry text,
 supply it again; there is no prompt history. Worker creation does not change either
 terminal's selection or replace the coordinator. Open the reported worker to inspect.
 
+Only one delivery can run in a worker checkout at a time, including explicit
+retries; an overlapping call is refused. The guard uses the existing checkout
+directory and releases when the delivery command exits, including on a crash.
+Windows sharing that checkout share the guard. Delivery requires the live launch
+checkout identity recorded by this version; older or missing metadata and
+filesystems without advisory locking produce an error, with no fallback send.
+
 ### Failed worker starts (Rust v2)
 
 A failed start reports the retained worktree path and branch. Once tmux may have

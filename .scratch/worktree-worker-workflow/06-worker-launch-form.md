@@ -140,3 +140,68 @@ metadata and task-file associations do not reconstruct lost conversations or
 persist across tmux restarts. The original literal-path fix applies to initial
 launch binding and does not claim a general redesign of tmux path display.
 `main` remains `eaf2446`.
+
+## Correction receipt — concurrent delivery — 2026-09-30
+
+Corrected the independent review's Spec P2 finding from `99e083b`: two default
+delivery commands could both read `not_sent` before either marked the attempt
+uncertain, then both paste, submit, and report success.
+
+- A nonblocking kernel advisory lock on the worker's existing checkout directory
+  now covers binding and delivery-state revalidation, buffer loading, paste,
+  submission, receipt, and scoped buffer cleanup. Overlapping default calls and
+  explicit retries are refused. Sibling checkouts remain independent; windows
+  deliberately sharing one checkout share the guard conservatively.
+- The lock is held by a close-on-exec descriptor and released on command return
+  or process death. No lock file, owner registry, daemon, content read, or new
+  dependency was added. A crashed attempt that already transmitted remains
+  uncertain and requires an explicit retry; failure never triggers a resend.
+- Launch records a losslessly encoded canonical checkout path in live tmux
+  metadata. This avoids interpreting tmux's escaped path display as a filesystem
+  identity. The guarded path's inode and the original window/pane/process binding
+  are revalidated before reading delivery state. Missing or malformed launch
+  identity, absent directories, and unsupported locking fail closed, with no
+  global or unrelated-directory fallback. Older windows without this new live
+  identity cannot use guarded delivery; `--retry` does not bypass that check.
+- Usage and privacy documentation describe this operational metadata and guard.
+  The older v2 privacy fixture now obtains its bound fake receiver through the
+  public workspace-start command instead of creating an unbound raw tmux pane;
+  its transmission and privacy assertions remain intact.
+
+Validation:
+
+- Red before green: `python3 tests/worker_launch_test.py
+  WorkerLaunchTest.test_concurrent_delivery_sends_once_and_allows_later_explicit_retry`
+  failed with `Both overlapping deliveries reported success`. The test pauses
+  the first real CLI process at the tmux load boundary, invokes competing actual
+  CLI processes, then checks a single receiver submission and later explicit
+  retry. It passes with the guard.
+- The literal `$` plus backslash checkout test also went red before lossless
+  launch identity was added. It now sends successfully and proves a different
+  worker can receive while the first delivery is paused.
+- The 15-case launch matrix passed, including concurrent default/retry refusal,
+  killed-owner recovery before load and after Enter, sticky uncertain state,
+  deliberate later retry, release after injected load/paste/Enter failures,
+  empty transient buffers, and missing/malformed/unavailable checkout refusal.
+  New receivers use exact absolute fake-agent paths; the existing UI resolution
+  checks remain fail-closed. No real agent was launched for this correction.
+- The original `/tmp/review06-probe.py` now reports one successful delivery and
+  one busy refusal, one receiver hash, and no remaining buffers.
+- Final `cargo fmt --check`, `cargo test --locked` (39 passed), focused launch
+  matrix (15 passed), focused `tests/v2_test.sh`, complete `bash tests/run.sh`,
+  and `git diff --check` passed. The full run includes the same 15 launch cases,
+  29 independent-navigation cases, 10 settings cases, and the existing navigator
+  skip. Disposable tmux fixtures required authorized sandbox escalation.
+
+Builder review: Standards and Spec checked against CONTRIBUTING, CONTEXT, the
+privacy boundary, and ticket 06. This addresses the reported concurrency gap
+while preserving initial pane/process binding, failure cleanup, explicit retry,
+and truthful transmission receipts. No later ticket or specification was changed.
+Fresh independent review follows this atomic correction commit.
+
+Limits: the guard is checkout-wide and relies on filesystem advisory-lock support.
+It uses Rust's [standard Unix nonblocking flock mapping](https://doc.rust-lang.org/std/fs/struct.File.html#method.try_lock);
+[Apple documents the corresponding flock API and unsupported-object errors](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html).
+Linux was exercised here; macOS runtime behavior was not exercised. Process
+observation and a sent receipt still do not prove agent readiness, acceptance,
+or completion. `main` remains `eaf2446`.
