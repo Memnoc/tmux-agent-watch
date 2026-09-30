@@ -20,6 +20,7 @@ for sensitive or organisational workflows without a separate assessment.
 | Local datum | Immediate purpose | Lifetime | Surface |
 |-------------|-------------------|----------|---------|
 | tmux session, window, and pane IDs, explicit project/coordinator association | route navigation and lifecycle updates | current command or tmux session | internal routing and click map |
+| tmux socket path and socket-directory inode | serialize lifecycle snapshots and updates | current command | internal synchronization |
 | process executable name, PID, parent PID, process birth time, and derived agent kind | identify Codex, Claude Code, or OpenCode and bind evidence to its lifetime | current scan or tmux session | agent symbol and label |
 | working directory, Git repository/common directory, worktree, and branch | identify workspaces and enforce safe start/finish | current command or tmux session | cockpit/sidebar unless redacted |
 | batch ID, pinned source ref/commit, destination branch/starting commit/checkout | keep sibling launches and integration choices explicit | current tmux session only | batch commands and Cockpit unless redacted |
@@ -40,6 +41,11 @@ receipt does not establish agent acceptance or task completion.
 Concurrent delivery uses a kernel advisory lock on the existing checkout
 directory for the command's lifetime. It creates no lock file or durable registry
 and reads no directory or task-file content.
+Lifecycle updates likewise use a kernel advisory lock on the existing tmux
+socket directory. They read no directory contents and create no lock file.
+Servers sharing that directory serialize conservatively. Contention waits at
+most five seconds before returning an explicit retry error; process exit or
+failure releases the lock.
 
 Set `@drudwyn-redact-labels on` before screen sharing to replace repository,
 branch, session, and window labels while preserving lifecycle state and click

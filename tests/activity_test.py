@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Activity provenance through the public CLI on disposable real tmux panes."""
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import subprocess
@@ -48,6 +49,152 @@ class Activity(unittest.TestCase):
 
     def option(self, name):
         return self.tmux('show-option', '-wqv', '-t', self.window, '@drudwyn_' + name)
+
+    @contextmanager
+    def paused_cli(self, *args, phase='snapshot', fail=False):
+        """Pause a real tmux call at its boundary, without faking its result."""
+        gate = self.path / 'gate'
+        gate.mkdir()
+        wrapper = gate / 'tmux'
+        wrapper.write_text('''#!/usr/bin/python3
+import os, pathlib, subprocess, sys, time
+gate = pathlib.Path(__file__).parent
+real = REAL
+args = sys.argv[1:]
+pause = (args[:1] == ['list-panes'] if PHASE == 'snapshot' else
+         args[:1] == ['set-option'] and '@drudwyn_p_state' in args and
+         args[args.index('@drudwyn_p_state') + 1] == 'running')
+if pause and not (gate / 'ready').exists():
+    result = subprocess.run([real, *args], capture_output=True) if PHASE == 'snapshot' else None
+    (gate / 'ready').touch()
+    deadline = time.monotonic() + 15
+    while not (gate / 'release').exists():
+        if time.monotonic() > deadline: sys.exit(97)
+        time.sleep(.01)
+    if FAIL: sys.exit(1)
+    if result is not None:
+        sys.stdout.buffer.write(result.stdout)
+        sys.stderr.buffer.write(result.stderr)
+        sys.exit(result.returncode)
+os.execv(real, [real, *args])
+'''.replace('REAL', repr(shutil.which('tmux'))).replace('PHASE', repr(phase)).replace('FAIL', repr(fail)))
+        wrapper.chmod(0o755)
+        process = subprocess.Popen([str(BIN), *args], env=dict(self.env, PATH=str(gate) + ':' + self.env['PATH']), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 5
+            while not (gate / 'ready').exists():
+                self.assertIsNone(process.poll(), 'CLI exited before reaching the timing gate')
+                self.assertLess(time.monotonic(), deadline, 'CLI did not reach the timing gate')
+                time.sleep(.01)
+            yield process, gate / 'release'
+        finally:
+            (gate / 'release').touch()
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+
+    def attention_during_scan(self, phase):
+        with self.paused_cli('scan', phase=phase) as (scan, release):
+            hook = subprocess.Popen([str(BIN), 'hook', 'codex', 'permissionRequest'], env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                # A serialized implementation may queue the hook; an atomic
+                # stale-write rejection may let it finish before the scan.
+                try:
+                    hook.wait(timeout=.4)
+                except subprocess.TimeoutExpired:
+                    pass
+                release.touch()
+                _, error = scan.communicate(timeout=5)
+                self.assertEqual(scan.returncode, 0, error)
+                _, error = hook.communicate(timeout=5)
+                self.assertEqual(hook.returncode, 0, error)
+            finally:
+                if hook.poll() is None:
+                    hook.kill()
+                hook.communicate(timeout=5)
+        self.assertEqual(self.option('state'), 'needs_input')
+        self.assertEqual(self.option('source'), 'hook')
+        since = self.option('attention_since')
+        self.assertNotEqual(since, '')
+        self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
+        self.assertEqual(self.option('attention_since'), since)
+
+    def test_initial_scan_cannot_erase_concurrent_attention(self):
+        self.attention_during_scan('snapshot')
+
+    def test_replacement_scan_cannot_erase_concurrent_attention_at_write(self):
+        self.cli('hook', 'codex', 'stop')
+        self.tmux('respawn-pane', '-k', '-t', self.pane, str(self.fake), '300')
+        time.sleep(.08)
+        # Pause at mutation, after any protective reread could have happened.
+        self.attention_during_scan('write')
+        self.tmux('respawn-pane', '-k', '-t', self.pane, str(self.fake), '300')
+        time.sleep(.08)
+        self.assertIn('RUNNING', self.cli('status', timeout=5))
+        self.assertEqual(self.option('attention_since'), '')
+
+    def test_simultaneous_scans_and_hook_keep_one_attention_receipt(self):
+        with self.paused_cli('scan') as (first, release):
+            commands = [('scan',), ('hook', 'codex', 'permissionRequest'), ('scan',)]
+            pending = [subprocess.Popen([str(BIN), *args], env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for args in commands]
+            try:
+                time.sleep(.2)
+                release.touch()
+                for process in [first, *pending]:
+                    _, error = process.communicate(timeout=5)
+                    self.assertEqual(process.returncode, 0, error)
+            finally:
+                for process in pending:
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate(timeout=5)
+        self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
+        self.assertEqual(self.option('source'), 'hook')
+        self.assertNotEqual(self.option('attention_since'), '')
+
+    def test_killed_scan_releases_guard_for_hook(self):
+        with self.paused_cli('scan') as (scan, release):
+            scan.kill()
+            # Its paused tmux child is still alive: it must not inherit the lock.
+            self.cli('hook', 'codex', 'permissionRequest', timeout=5)
+            release.touch()
+            scan.communicate(timeout=5)
+        self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
+
+    def test_failed_scan_releases_guard_for_hook(self):
+        with self.paused_cli('scan', fail=True) as (scan, release):
+            release.touch()
+            scan.communicate(timeout=5)
+            self.assertNotEqual(scan.returncode, 0)
+        self.cli('hook', 'codex', 'permissionRequest', timeout=5)
+        self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
+
+    def test_failed_replacement_update_cannot_inherit_old_handoff(self):
+        self.cli('hook', 'codex', 'stop')
+        self.tmux('respawn-pane', '-k', '-t', self.pane, str(self.fake), '300')
+        time.sleep(.08)
+        with self.paused_cli('scan', phase='write', fail=True) as (scan, release):
+            release.touch()
+            scan.communicate(timeout=5)
+            self.assertNotEqual(scan.returncode, 0)
+        self.assertIn('RUNNING', self.cli('status', timeout=5))
+        self.assertEqual(self.option('source'), 'process')
+        self.assertEqual(self.option('attention_since'), '')
+
+    def test_stalled_scan_returns_bounded_retry_without_losing_attention(self):
+        self.cli('hook', 'codex', 'permissionRequest')
+        since = self.option('attention_since')
+        with self.paused_cli('scan') as (scan, release):
+            result = subprocess.run([str(BIN), 'hook', 'codex', 'stop'], env=self.env, capture_output=True, text=True, timeout=7)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('another update is still in progress; retry', result.stderr)
+            self.assertEqual(self.option('state'), 'needs_input')
+            self.assertEqual(self.option('attention_since'), since)
+            release.touch()
+            scan.communicate(timeout=5)
+            self.assertEqual(scan.returncode, 0)
+        self.cli('hook', 'codex', 'stop', timeout=5)
+        self.assertIn('REVIEW', self.cli('status', timeout=5))
 
     def test_same_pane_replacement_loses_old_attention(self):
         self.cli('hook', 'codex', 'permissionRequest')

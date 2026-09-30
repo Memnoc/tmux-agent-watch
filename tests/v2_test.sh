@@ -87,8 +87,23 @@ watcher_pid="$(tmux -L "$SOCKET" show-option -gqv @drudwyn_watcher_pid 2>/dev/nu
 [ -z "$watcher_pid" ] || kill "$watcher_pid" 2>/dev/null || true
 tmux -L "$SOCKET" set-option -gq @drudwyn_watcher_pid ''
 tmux -L "$SOCKET" set-option -g @drudwyn-v2 on
+tmux -L "$SOCKET" set-environment -g DRUDWYN_V2_BIN "$real_binary"
+tmux -L "$SOCKET" run-shell "$ROOT/tmux-drudwyn.tmux"
+hook="$(tmux -L "$SOCKET" show-hooks -g after-new-window)"
+printf '%s' "$hook" | grep -Fq 'scripts/v2.sh scan' &&
+  ! printf '%s' "$hook" | grep -Fq 'scripts/scan.sh' || {
+  printf 'not ok: v1-to-v2 reload retained the legacy observer\n'; exit 1;
+}
+printf 'ok: v1-to-v2 reload replaces the legacy observer\n'
+# The following assertions drive the CLI explicitly. Stop the observer and
+# window hook so their asynchronous scans cannot race the fixture mutations.
+watcher_pid="$(tmux -L "$SOCKET" show-option -gqv @drudwyn_watcher_pid 2>/dev/null || true)"
+[ -z "$watcher_pid" ] || kill "$watcher_pid" 2>/dev/null || true
+tmux -L "$SOCKET" set-option -gq @drudwyn_watcher_pid ''
+tmux -L "$SOCKET" set-hook -gu 'after-new-window[100]'
 ln -s "$(command -v sleep)" "$TMP_DIR/codex"
-tmux -L "$SOCKET" new-window -d -t v2 -n agent "$TMP_DIR/codex 30"
+[ "$(readlink -f "$TMP_DIR/codex")" = "$(readlink -f "$(command -v sleep)")" ]
+tmux -L "$SOCKET" new-window -d -t v2 -n agent "$TMP_DIR/codex" 30
 agent_pane="$(tmux -L "$SOCKET" list-panes -t v2:agent -F '#{pane_id}' | head -n 1)"
 agent_window="$(tmux -L "$SOCKET" display-message -p -t "$agent_pane" '#{window_id}')"
 tmux -L "$SOCKET" set-option -wq -t "$agent_window" @drudwyn_message 'sensitive legacy summary'

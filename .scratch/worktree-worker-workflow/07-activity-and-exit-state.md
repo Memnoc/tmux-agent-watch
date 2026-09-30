@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done
+**Status:** done — P1 correction pending fresh independent review
 
 **What to build:** Users can distinguish a running process, reported task
 activity, attention requests, and an agent that exited, across current surfaces.
@@ -113,3 +113,70 @@ Limits: Linux/tmux 3.4 runtime was exercised; macOS was not. Executable/ancestry
 observation is not agent readiness, acceptance, or task completion. Missing or
 ambiguous attribution is not guessed. Global Cockpit, redesigned status bar,
 recovery, and durable history are outside this ticket. `main` remains `eaf2446`.
+
+## Independent review P1 correction — 2026-09-30
+
+The independent review reproduced an initial scan paused after its pane
+snapshot, followed by a completed `permissionRequest` hook. Resuming the scan
+changed Needs input/hook to Running/process and erased `attention_since`.
+`python3 /tmp/drudwyn-review07-race.py` reproduced that report, and the committed
+public-CLI regression failed with `running != needs_input` before the fix.
+
+Lifecycle snapshots, reconciliation, and window projection now share one
+kernel advisory guard. Hooks and startup bookkeeping call reconciliation with
+the guard already held, avoiding recursive acquisition; style refreshes use
+the same guard. This closes both the stale-snapshot race and the remaining
+read/write gap that a narrow reread would leave.
+
+The guard resolves `#{socket_path}` through the selected tmux connection and
+locks the existing parent-directory inode. It creates no file and reads no
+directory contents. Servers whose sockets share a directory conservatively
+share the lock. It waits up to five seconds, then fails explicitly with a retry
+message without writing lifecycle evidence. It checks device/inode identity
+after acquisition and fails closed if the directory changed. The descriptor
+is close-on-exec; command error, unwind, or owner death releases it. A stopped
+owner therefore cannot leave a tmux `wait-for` lock stranded indefinitely.
+The caller/UI may wait during contention; the five-second bound covers lock
+acquisition, not an independently stalled tmux subprocess.
+
+Ticket 06's delivery lock remains separate. Static call-path inspection found
+no lifecycle call under `deliver`'s checkout guard and no delivery call under
+the lifecycle guard. A custom `tmux -S` socket directly in that checkout can
+make the locks share an inode, causing bounded contention between independent
+commands, without a synchronous nested acquisition in these paths.
+
+A second red regression injected a tmux write failure during replacement
+initialization and observed the replacement incorrectly inherit Review/hook.
+Pane state and binding are now submitted in one synchronous tmux command queue,
+with identity last, instead of publishing identity before separate state
+commands. This is a single submitted command batch, not a claim of a database
+transaction or atomicity across every external tmux/process mutation.
+
+Seven new public-CLI scenarios cover initial-snapshot contention, replacement
+contention paused at the write boundary, simultaneous scans and a hook,
+owner death while a read subprocess remains alive, command-error release,
+failed replacement publication, and bounded contention/retry. The replacement
+case also confirms the next worker loses the previous worker's attention.
+All original eleven activity/exit cases remain covered. Fake workers resolve
+explicitly to `sleep`; fixture wrappers delay or fail real tmux boundary calls
+without replacing pane, process, or Git behavior.
+
+The first full-suite run stopped at a v2 fixture that changed its mode option
+without reloading the previously installed v1 new-window observer. A focused
+trace reproduced the legacy observer's asynchronous Working overwrite. The
+fixture now exercises the supported v1-to-v2 plugin reload, asserts replacement
+of that hook, then stops background observers for its explicit CLI assertions.
+The focused v2 suite passed. Production compatibility behavior is unchanged;
+the failed full run is not counted as validation.
+
+Validation on final code: `cargo fmt --check` passed; `cargo test --locked`
+passed all 41 Rust tests; the complete `bash tests/run.sh` rerun exited 0,
+including 15 delivery cases, 18 activity cases, 29 independent-navigation
+cases, 10 settings cases, privacy, packaging, and release checks. The navigator
+suite retained its preexisting optional skip. Focused activity and v2 suites
+also passed. `git diff --check` passed. No Python cache or probe artifact is
+included. `main` remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+Fresh independent Standards/Spec re-review remains required; this correction
+does not mark crosscheck clear.
+Runtime evidence remains Linux/tmux 3.4 only; macOS was not exercised.

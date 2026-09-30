@@ -1,8 +1,12 @@
 use std::{
     collections::BTreeMap,
     env,
+    fs::{self, File},
+    os::unix::fs::MetadataExt,
+    path::Path,
     process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use thiserror::Error;
@@ -24,6 +28,58 @@ pub enum LifecycleError {
     Unattributed,
     #[error("unsupported lifecycle event: {0}")]
     UnsupportedEvent(String),
+    #[error("could not serialize lifecycle updates: {0}")]
+    Synchronization(String),
+}
+
+/// Lock the existing socket directory, without creating a lock file or storing
+/// state. Servers sharing a directory serialize conservatively. The descriptor
+/// is close-on-exec; errors, unwinding and process death release the kernel lock.
+/// All lifecycle snapshots and writes, including window projection, must be
+/// inside this guard. A reread alone would leave another read/write race.
+struct LifecycleGuard {
+    _directory: File,
+}
+
+impl LifecycleGuard {
+    fn acquire() -> Result<Self, LifecycleError> {
+        let socket = tmux_output(&["display-message", "-p", "#{socket_path}"])?;
+        let path = Path::new(&socket);
+        let parent = path
+            .parent()
+            .filter(|_| path.is_absolute())
+            .ok_or_else(|| {
+                LifecycleError::Synchronization("tmux socket directory is unavailable".into())
+            })?;
+        let unavailable =
+            |error: std::io::Error| LifecycleError::Synchronization(error.to_string());
+        let directory = File::open(parent).map_err(unavailable)?;
+        let held = directory.metadata().map_err(unavailable)?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match directory.try_lock() {
+                Ok(()) => break,
+                Err(fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(fs::TryLockError::WouldBlock) => {
+                    return Err(LifecycleError::Synchronization(
+                        "another update is still in progress; retry this command".into(),
+                    ));
+                }
+                Err(fs::TryLockError::Error(error)) => return Err(unavailable(error)),
+            }
+        }
+        let current = fs::metadata(parent).map_err(unavailable)?;
+        if !held.is_dir() || held.dev() != current.dev() || held.ino() != current.ino() {
+            return Err(LifecycleError::Synchronization(
+                "tmux socket directory changed; retry this command".into(),
+            ));
+        }
+        Ok(Self {
+            _directory: directory,
+        })
+    }
 }
 
 // Only executable names, process ancestry and birth times are observed. In
@@ -72,6 +128,11 @@ fn belongs_to(process: &Process, root: &str, all: &[Process]) -> bool {
 }
 
 pub fn scan() -> Result<(), LifecycleError> {
+    let guard = LifecycleGuard::acquire()?;
+    reconcile(&guard)
+}
+
+fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
     let output = tmux_output(&["list-panes", "-a", "-F", PANE_FORMAT])?;
     let all = processes()?;
     let mut windows = BTreeMap::<&str, Vec<Vec<&str>>>::new();
@@ -103,24 +164,18 @@ pub fn scan() -> Result<(), LifecycleError> {
             if let Some(process) = live {
                 let identity = format!("{}:{}:{}", f[2], process.pid, process.birth);
                 if f[7] != identity {
-                    pane_option(f[1], "identity", &identity)?;
-                    pane_option(f[1], "agent", process.agent.unwrap().command())?;
-                    pane_state(f[1], Lifecycle::Running, "process", "")?;
+                    pane_state(
+                        f[1],
+                        Lifecycle::Running,
+                        "process",
+                        "",
+                        Some((&identity, process.agent.unwrap().command())),
+                    )?;
                 }
                 candidates.push((f, "running"));
             } else if f[4] == "1"
                 && (retained || launched || AgentKind::from_command(f[3]).is_some())
             {
-                if !retained {
-                    pane_option(f[1], "identity", &format!("{}:exited", f[2]))?;
-                    pane_option(
-                        f[1],
-                        "agent",
-                        AgentKind::from_command(f[3])
-                            .map(|a| a.command())
-                            .unwrap_or(""),
-                    )?;
-                }
                 // A surviving dead pane is tmux's authoritative exit receipt.
                 // Keep a hook handoff visible alongside its separate exit.
                 if !matches!(f[9], "done" | "needs_input" | "failed") || !retained {
@@ -129,7 +184,17 @@ pub fn scan() -> Result<(), LifecycleError> {
                     } else {
                         Lifecycle::Unknown
                     };
-                    pane_state(f[1], state, "process", if retained { f[9] } else { "" })?;
+                    let identity = format!("{}:exited", f[2]);
+                    let agent = AgentKind::from_command(f[3])
+                        .map(|a| a.command())
+                        .unwrap_or("");
+                    pane_state(
+                        f[1],
+                        state,
+                        "process",
+                        if retained { f[9] } else { "" },
+                        (!retained).then_some((&identity, agent)),
+                    )?;
                 }
                 candidates.push((f, "exited"));
             } else if launched && f[4] == "0" && f[7].ends_with(":launch") {
@@ -147,6 +212,7 @@ pub fn scan() -> Result<(), LifecycleError> {
                         "process"
                     },
                     f[9],
+                    None,
                 )?;
                 candidates.push((
                     f,
@@ -157,16 +223,17 @@ pub fn scan() -> Result<(), LifecycleError> {
                     },
                 ));
             } else if agents.len() <= 1 {
-                for key in [
-                    "identity",
-                    "agent",
-                    "state",
-                    "source",
-                    "since",
-                    "attention_since",
-                ] {
-                    pane_option(f[1], key, "")?;
-                }
+                pane_options(
+                    f[1],
+                    &[
+                        ("identity", ""),
+                        ("agent", ""),
+                        ("state", ""),
+                        ("source", ""),
+                        ("since", ""),
+                        ("attention_since", ""),
+                    ],
+                )?;
             }
         }
         // Multiple independent agents have no window-level owner. Do not let
@@ -220,23 +287,32 @@ pub fn scan() -> Result<(), LifecycleError> {
 }
 
 pub fn starting(pane: &str, pid: &str, agent: Option<AgentKind>) -> Result<(), LifecycleError> {
+    let guard = LifecycleGuard::acquire()?;
     let window = tmux_output(&["display-message", "-p", "-t", pane, "#{window_id}"])?;
     set_option(&window, "@drudwyn_launch_stage", "starting")?;
     let identity = tmux_output(&["show-option", "-pqv", "-t", pane, "@drudwyn_p_identity"])?;
     // A worker may report a hook before new-window returns. Never overwrite
     // that stronger evidence with the coordinator's startup bookkeeping.
     if identity.split(':').next() != Some(pid) {
-        pane_option(pane, "identity", &format!("{pid}:launch"))?;
-        pane_option(pane, "agent", agent.map(|a| a.command()).unwrap_or(""))?;
-        pane_state(pane, Lifecycle::Starting, "launch", "")?;
+        pane_state(
+            pane,
+            Lifecycle::Starting,
+            "launch",
+            "",
+            Some((
+                &format!("{pid}:launch"),
+                agent.map(|a| a.command()).unwrap_or(""),
+            )),
+        )?;
     }
-    scan()
+    reconcile(&guard)
 }
 
 pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
     let lifecycle = map_event(agent, event)
         .ok_or_else(|| LifecycleError::UnsupportedEvent(event.to_owned()))?;
     let pane = env::var("TMUX_PANE").map_err(|_| LifecycleError::MissingPane)?;
+    let guard = LifecycleGuard::acquire()?;
     let record = tmux_output(&["display-message", "-p", "-t", &pane, PANE_FORMAT])?;
     let f: Vec<_> = record.split(SEPARATOR).collect();
     if f.len() != 17 || f[1] != pane || f[4] != "0" {
@@ -251,32 +327,39 @@ pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
         return Err(LifecycleError::Unattributed);
     }
     let identity = format!("{}:{}:{}", f[2], agents[0].pid, agents[0].birth);
-    pane_option(&pane, "identity", &identity)?;
-    pane_option(&pane, "agent", agent.command())?;
     pane_state(
         &pane,
         lifecycle,
         "hook",
         if f[7] == identity { f[9] } else { "" },
+        Some((&identity, agent.command())),
     )?;
-    scan()
+    reconcile(&guard)
 }
 
-fn pane_option(pane: &str, name: &str, value: &str) -> Result<(), LifecycleError> {
-    tmux_status(&[
-        "set-option",
-        "-pq",
-        "-t",
-        pane,
-        &format!("@drudwyn_p_{name}"),
-        value,
-    ])
+fn pane_options(pane: &str, options: &[(&str, &str)]) -> Result<(), LifecycleError> {
+    // Submit state and its binding in one synchronous tmux command queue,
+    // with identity last. A failed submission must not publish a new identity
+    // before replacing the old process's evidence.
+    let names: Vec<_> = options
+        .iter()
+        .map(|(name, _)| format!("@drudwyn_p_{name}"))
+        .collect();
+    let mut args = Vec::new();
+    for ((_, value), name) in options.iter().zip(&names) {
+        if !args.is_empty() {
+            args.push(";");
+        }
+        args.extend(["set-option", "-pq", "-t", pane, name, value]);
+    }
+    tmux_status(&args)
 }
 fn pane_state(
     pane: &str,
     lifecycle: Lifecycle,
     source: &str,
     previous: &str,
+    binding: Option<(&str, &str)>,
 ) -> Result<(), LifecycleError> {
     let state = match lifecycle {
         Lifecycle::Starting => "starting",
@@ -287,25 +370,28 @@ fn pane_state(
         Lifecycle::Failed => "failed",
         Lifecycle::Unknown => "unknown",
     };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string();
+    let mut options = Vec::new();
     if previous != state {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .to_string();
-        pane_option(pane, "since", &now)?;
-        pane_option(
-            pane,
+        options.push(("since", now.as_str()));
+        options.push((
             "attention_since",
             if lifecycle.needs_attention() {
                 &now
             } else {
                 ""
             },
-        )?;
+        ));
     }
-    pane_option(pane, "state", state)?;
-    pane_option(pane, "source", source)
+    options.extend([("state", state), ("source", source)]);
+    if let Some((identity, agent)) = binding {
+        options.extend([("agent", agent), ("identity", identity)]);
+    }
+    pane_options(pane, &options)
 }
 
 pub fn map_event(agent: AgentKind, event: &str) -> Option<Lifecycle> {
@@ -328,6 +414,7 @@ pub fn map_event(agent: AgentKind, event: &str) -> Option<Lifecycle> {
 
 /// Repaint existing markers without altering lifecycle evidence or timestamps.
 pub fn refresh_styles() -> Result<(), LifecycleError> {
+    let _guard = LifecycleGuard::acquire()?;
     let windows = tmux_output(&["list-windows", "-a", "-F", "#{window_id}␟#{@drudwyn_state}"])?;
     for line in windows.lines() {
         if let Some((window, state)) = line.split_once(SEPARATOR) {
