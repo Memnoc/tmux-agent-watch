@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done — queued hook lifetime P1 correction pending fresh independent review
+**Status:** done — exited descendant ownership P2 correction pending fresh independent review
 
 **What to build:** Users can distinguish a running process, reported task
 activity, attention requests, and an agent that exited, across current surfaces.
@@ -301,6 +301,59 @@ delivery cases, 29 independent-navigation cases, 10 settings cases, privacy,
 packaging, and release checks. The navigator retained its existing optional
 skip. `git diff --check` passed, and no Python cache or probe artifact is
 included. Runtime evidence remains Linux/tmux 3.4; macOS was not exercised.
+
+Fresh independent Standards/Spec review remains required; no crosscheck
+clearance is claimed. `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+## Independent re-review exited descendant P2 correction — 2026-09-30
+
+Review of `194af14` cleared the queued-binding correction and found that an
+unreaped child was still eligible as a live agent because discovery did not
+request process state. The original public CLI reproduction,
+`PYTHONDONTWRITEBYTECODE=1 python3 /tmp/drudwyn-rereview07c-zombie.py`, showed
+`Z+ codex` under a non-reaping Python parent, Running/process before the hook,
+and successful `userPromptSubmit` producing Working/hook afterward. The new
+`Activity.test_zombie_is_exited_and_cannot_own_hook` regression failed before
+the fix with unexpected RUNNING output.
+
+The process metadata query now includes `stat`. Zombie/dead states `Z`, `X`,
+and `x` are excluded from live agent ownership, live ambiguity, and both
+observations of a queued hook target. State flags are interpreted by their
+leading character, so a terminal-associated `Z+` is still exited. The local
+procps manual identifies Z as terminated but unreaped and X as dead; the
+[Linux process-state documentation](https://docs.kernel.org/filesystems/proc.html)
+also distinguishes zombie state from a running process. No argv, environment,
+process content, or terminal content is read. The existing string-based public
+process projection is unchanged; its separate type cleanup remains deferred.
+
+An attributable zombie/dead child is projected as Exited with Unknown activity
+unless its exact pane-root/agent-PID/birth identity already owns valid attention.
+That historical Review/Needs input/Failed receipt may remain visible alongside
+Exited. An unmatched exited process cannot inherit another child's attention.
+A single genuinely live agent takes precedence over exited descendants, so an
+old zombie does not create false live ambiguity. With multiple exited children,
+only a matching existing identity or a unique exited candidate establishes the
+projection. Child exit does not supply tmux's native pane receipt: its exit
+code, signal, and time remain unknown, including when the fixture knows how it
+terminated the child. No completion or success is inferred.
+
+Three new public CLI cases exercise an unreaped child rejected as hook owner,
+a hook queued across child exit into zombie state while retaining the child's
+historical Review, and coexistence of a zombie with a live child. The latter
+accepts a hook for the live child and then verifies that its own receipt is
+retained when both children have exited. Fixtures fork verified sleep symlinks
+and deliberately avoid reaping; process-state polling establishes the boundary
+without timing assumptions. The original reproduction now prints Unknown /
+Exited / unknown exit receipt before and after a rejected hook.
+
+Frozen-code validation passed: all 31 focused activity cases,
+`cargo fmt --check`, and all 41 `cargo test --locked` tests. The complete
+`bash tests/run.sh` exited 0, including all 31 activity cases, 15 delivery
+cases, 29 independent-navigation cases, 10 settings cases, privacy, packaging,
+and release checks. The navigator retained its existing optional skip.
+`git diff --check` passed; no Python cache or probe artifact is included.
+Runtime validation remains Linux/tmux 3.4; macOS was not exercised.
 
 Fresh independent Standards/Spec review remains required; no crosscheck
 clearance is claimed. `main` remains

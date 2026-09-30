@@ -84,17 +84,18 @@ impl LifecycleGuard {
     }
 }
 
-// Only executable names, process ancestry and birth times are observed. In
+// Only executable names, process ancestry, birth times and state are observed. In
 // particular, never request argv, environment, or terminal output from ps.
 struct Process {
     pid: String,
     parent: String,
     birth: String,
+    exited: bool,
     agent: Option<AgentKind>,
 }
 fn processes() -> Result<Vec<Process>, LifecycleError> {
     let output = Command::new("ps")
-        .args(["-eo", "pid=,ppid=,lstart=,comm="])
+        .args(["-eo", "pid=,ppid=,lstart=,stat=,comm="])
         .output()?;
     if !output.status.success() {
         return Err(LifecycleError::Tmux);
@@ -103,11 +104,12 @@ fn processes() -> Result<Vec<Process>, LifecycleError> {
         .lines()
         .filter_map(|line| {
             let f: Vec<_> = line.split_whitespace().collect();
-            (f.len() >= 8).then(|| Process {
+            (f.len() >= 9).then(|| Process {
                 pid: f[0].into(),
                 parent: f[1].into(),
                 birth: f[2..7].join("-"),
-                agent: AgentKind::from_command(f[7]),
+                exited: matches!(f[7].as_bytes().first(), Some(b'Z' | b'X' | b'x')),
+                agent: AgentKind::from_command(f[8]),
             })
         })
         .collect())
@@ -151,8 +153,17 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
         for f in &panes {
             let agents: Vec<_> = all
                 .iter()
-                .filter(|p| p.agent.is_some() && belongs_to(p, f[2], &all))
+                .filter(|p| !p.exited && p.agent.is_some() && belongs_to(p, f[2], &all))
                 .collect();
+            let exited: Vec<_> = all
+                .iter()
+                .filter(|p| p.exited && p.agent.is_some() && belongs_to(p, f[2], &all))
+                .collect();
+            let exited = exited
+                .iter()
+                .copied()
+                .find(|p| f[7] == format!("{}:{}:{}", f[2], p.pid, p.birth))
+                .or_else(|| (exited.len() == 1).then(|| exited[0]));
             if agents.len() > 1 {
                 ambiguous = true;
             }
@@ -198,6 +209,22 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                         "process",
                         if retained { f[9] } else { "" },
                         (!retained).then_some((&identity, agent)),
+                    )?;
+                }
+                candidates.push((f, "exited"));
+            } else if let Some(process) = exited.filter(|_| agents.is_empty()) {
+                // A zombie/dead child establishes exit, but supplies no native
+                // pane receipt. Preserve only its own attributable attention.
+                let identity = format!("{}:{}:{}", f[2], process.pid, process.birth);
+                let retained = f[7] == identity;
+                if !retained || !matches!(f[9], "done" | "needs_input" | "failed") {
+                    pane_state(
+                        guard,
+                        f[1],
+                        Lifecycle::Unknown,
+                        "process",
+                        if retained { f[9] } else { "" },
+                        Some((&identity, process.agent.unwrap().command())),
                     )?;
                 }
                 candidates.push((f, "exited"));
@@ -266,27 +293,24 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
         }
         set_option(guard, window, "@drudwyn_activity_pane", f[1])?;
         set_option(guard, window, "@drudwyn_process", process_state)?;
+        let pane_exit = *process_state == "exited" && f[4] == "1";
         set_option(
             guard,
             window,
             "@drudwyn_exit_code",
-            if *process_state == "exited" { f[5] } else { "" },
+            if pane_exit { f[5] } else { "" },
         )?;
         set_option(
             guard,
             window,
             "@drudwyn_exit_time",
-            if *process_state == "exited" { f[6] } else { "" },
+            if pane_exit { f[6] } else { "" },
         )?;
         set_option(
             guard,
             window,
             "@drudwyn_exit_signal",
-            if *process_state == "exited" {
-                f[15]
-            } else {
-                ""
-            },
+            if pane_exit { f[15] } else { "" },
         )?;
         set_option(guard, window, "@drudwyn_message", "")?;
         let state = tmux_output(&["show-option", "-wqv", "-t", window, "@drudwyn_state"])?;
@@ -355,7 +379,7 @@ fn observe_hook_target(pane: &str, agent: AgentKind) -> Result<HookTarget, Lifec
     let all = processes()?;
     let agents: Vec<_> = all
         .iter()
-        .filter(|p| p.agent.is_some() && belongs_to(p, f[2], &all))
+        .filter(|p| !p.exited && p.agent.is_some() && belongs_to(p, f[2], &all))
         .collect();
     if agents.len() != 1 || agents[0].agent != Some(agent) {
         return Err(LifecycleError::Unattributed);

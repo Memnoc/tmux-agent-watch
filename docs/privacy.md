@@ -21,7 +21,7 @@ for sensitive or organisational workflows without a separate assessment.
 |-------------|-------------------|----------|---------|
 | tmux session, window, and pane IDs, explicit project/coordinator association | route navigation and lifecycle updates | current command or tmux session | internal routing and click map |
 | tmux socket path and socket-directory inode | serialize lifecycle snapshots and updates | current command and outstanding mutation child | internal synchronization |
-| process executable name, PID, parent PID, process birth time, and derived agent kind | identify Codex, Claude Code, or OpenCode and bind evidence to its lifetime | current scan or tmux session | agent symbol and label |
+| process executable name, PID, parent PID, process birth time/state, and derived agent kind | identify Codex, Claude Code, or OpenCode and bind evidence to its lifetime | current scan or tmux session | agent symbol and label |
 | working directory, Git repository/common directory, worktree, and branch | identify workspaces and enforce safe start/finish | current command or tmux session | cockpit/sidebar unless redacted |
 | batch ID, pinned source ref/commit, destination branch/starting commit/checkout | keep sibling launches and integration choices explicit | current tmux session only | batch commands and Cockpit unless redacted |
 | clean/dirty state and merge ancestry | prevent unsafe worktree removal | current command | fixed readiness state |

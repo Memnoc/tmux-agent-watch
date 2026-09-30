@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import shlex
+import signal
 import subprocess
 import tempfile
 import time
@@ -87,6 +88,85 @@ class Activity(unittest.TestCase):
                 return agents
             self.assertLess(time.monotonic(), deadline, 'fake worker population did not settle')
             time.sleep(.01)
+
+    def unreaped_workers(self, count=1):
+        parent = self.path / 'unreaped-parent.py'
+        parent.write_text('import os, time\n'
+                          f'for _ in range({count}):\n'
+                          '    if os.fork() == 0:\n'
+                          f'        os.execl({str(self.fake)!r}, "codex", "300")\n'
+                          'time.sleep(300)\n')
+        self.tmux('respawn-pane', '-k', '-t', self.pane, '/usr/bin/python3', str(parent))
+        return self.wait_fake_agents(count)
+
+    def make_zombie(self, pid):
+        os.kill(int(pid), signal.SIGTERM)
+        deadline = time.monotonic() + 3
+        while True:
+            state = subprocess.check_output(['ps', '-p', pid, '-o', 'stat='], text=True).strip()
+            if state.startswith('Z'):
+                return
+            self.assertLess(time.monotonic(), deadline, 'fake worker did not become a zombie')
+            time.sleep(.01)
+
+    def test_zombie_is_exited_and_cannot_own_hook(self):
+        pid, = self.unreaped_workers()
+        self.make_zombie(pid)
+        status = self.cli('status')
+        self.assertNotIn('RUNNING', status)
+        self.assertIn('Exited', status)
+        self.assertIn('exit code unknown', status)
+        self.assertEqual(self.option('state'), 'unknown')
+        self.assertEqual(self.option('exit_time'), '')
+        result = subprocess.run([str(BIN), 'hook', 'codex', 'userPromptSubmit'], env=self.env, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('originating pane', result.stderr)
+        self.assertNotIn('WORKING', self.cli('status'))
+
+    def test_queued_hook_rejects_zombie_and_keeps_historical_review(self):
+        pid, = self.unreaped_workers()
+        self.cli('hook', 'codex', 'stop')
+        since = self.option('attention_since')
+        with self.paused_cli('scan') as (scan, release):
+            with self.queued_hook() as hook:
+                self.make_zombie(pid)
+                release.touch()
+                _, error = scan.communicate(timeout=5)
+                self.assertEqual(scan.returncode, 0, error)
+                _, error = hook.communicate(timeout=5)
+                self.assertNotEqual(hook.returncode, 0)
+                self.assertIn('originating pane', error)
+        status = self.cli('status')
+        self.assertIn('REVIEW', status)
+        self.assertIn('Exited', status)
+        self.assertNotIn('Running process', status)
+        self.assertEqual(self.option('source'), 'hook')
+        self.assertEqual(self.option('attention_since'), since)
+        for name in ('exit_code', 'exit_signal', 'exit_time'):
+            self.assertEqual(self.option(name), '')
+
+    def test_zombie_does_not_make_live_worker_ambiguous(self):
+        zombie, live = sorted(self.unreaped_workers(2))
+        self.make_zombie(zombie)
+        self.cli('hook', 'codex', 'stop')
+        since = self.option('attention_since')
+        binding = self.tmux('show-option', '-pqv', '-t', self.pane, '@drudwyn_p_identity')
+        self.assertEqual(binding.split(':')[1], live)
+        status = self.cli('status')
+        self.assertIn('REVIEW', status)
+        self.assertIn('Running process', status)
+        self.assertNotIn('Ambiguous', status)
+        self.assertEqual(self.option('source'), 'hook')
+        self.assertEqual(self.option('attention_since'), since)
+        # Once both have exited, retain only the receipt bound to the last
+        # observed worker, even with an older zombie still present.
+        self.make_zombie(live)
+        status = self.cli('status')
+        self.assertIn('REVIEW', status)
+        self.assertIn('Exited', status)
+        self.assertNotIn('Running process', status)
+        self.assertEqual(self.tmux('show-option', '-pqv', '-t', self.pane, '@drudwyn_p_identity'), binding)
+        self.assertEqual(self.option('attention_since'), since)
 
     def test_queued_hook_rejects_same_pane_replacement(self):
         self.cli('scan')
