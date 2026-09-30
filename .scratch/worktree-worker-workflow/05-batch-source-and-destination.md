@@ -105,3 +105,51 @@ The configured direct destination must exist locally; setup explains missing
 refs/checkouts rather than fetching or guessing. Creating a new batch is the
 explicit route to change source/destination. Setup does not integrate or verify
 work. `main` remains `eaf2446`.
+
+## Review correction — 2026-09-30
+
+Corrected the independent review's Spec P2 finding from `976caa7`: the final
+raw tmux record field lost a trailing semicolon during `set-option`, or trailing
+whitespace during load. Destination creation succeeded while `batch show`
+reported a different checkout.
+
+- Added the command regression first; it failed on the original implementation
+  after creating a checkout ending in `;`. Encoded all seven live batch fields
+  as versioned hex so tmux parsing and output trimming preserve literal bytes.
+  No dependency, durable state, or shared tmux-helper behavior was changed.
+- The public setup/show/select/worker seam now covers semicolon, ASCII-space,
+  Unicode nonbreaking-space, and tmux-format-looking checkout suffixes, plus
+  literal semicolon, Unicode, and dollar-sign source/destination refs. Workers
+  inherit the pinned source and exact batch association in every case.
+- Older raw records, unknown versions, malformed hex, invalid UTF-8, wrong field
+  counts, empty fields, and encoded controls fail explicitly before worker
+  allocation. Missing records retain the existing unknown/lost outcome. Usage
+  guidance explains setting up again using the existing destination checkout.
+
+Validation: the initial unprivileged test attempt was blocked by the local tmux
+socket sandbox; authorized disposable-server runs produced the red regression
+and subsequent green results. Final `cargo fmt --check`, `cargo test --locked`
+(38 passed), focused `bash tests/batch_test.sh` and
+`python3 tests/batch_ui_test.py`, and full `bash tests/run.sh` passed. The full
+suite includes the new literal/invalid-record checks, real Cockpit interaction,
+29 real-client navigation/session tests, 13 navigator tests (one existing skip),
+10 settings tests, lifecycle/start-failure/privacy/packaging checks.
+`git diff --check` passed.
+
+Builder check: preserved ticket 05's source/destination separation, pinned
+commit semantics, redaction, explicit missing associations, and live-only data
+boundary. Only batch record transport, its public command regressions, usage,
+and this receipt changed. This corrects the review finding; a fresh independent
+review follows the atomic correction commit in the coordinating session.
+`main` remains `eaf2446`.
+
+Outstanding launcher regression handed to ticket 06 (not fixed by this ticket):
+with a valid selected batch, run
+`tmux-drudwyn workspace start --repo "$repo" --worktree-root "$tmp/workers" 'suffix-worker-literal-$value' sleep 90`
+on the disposable fixture where `value` is unset. The linked checkout is created
+at the literal `$tmp/workers/suffix-worker-literal-$value`, but launch fails with
+`Coordinator requires a Git checkout; retained worktree ... on branch suffix-worker-literal-$value; inspect window ...`.
+The literal dollar-sign worker path is not preserved through the launcher shell.
+Batch literal-value tests use ordinary numbered worker names to keep this
+correction scoped to metadata transport; their source/destination refs still
+include the literal `$value`.

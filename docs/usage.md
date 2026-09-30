@@ -350,3 +350,6 @@ All associations live only in tmux options. If that metadata is lost, the batch
 is unknown and must be selected or set up again; Drudwyn does not infer it from
 a shared repository. Git checkouts and branches survive. Setup does not merge,
 verify, promote, or remove work; those remain separate actions.
+Malformed or older live batch records also require explicit setup and selection;
+reuse the existing destination branch/checkout when setting up again. Literal
+refs and checkout paths, including semicolon and space suffixes, are preserved.

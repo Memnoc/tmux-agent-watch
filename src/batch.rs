@@ -256,6 +256,8 @@ pub fn create(reviewed: &Preview) -> Result<Batch, Error> {
         destination_commit: fresh.destination_commit,
         checkout: fresh.checkout,
     };
+    // Encode every field so tmux command parsing and output whitespace trimming
+    // cannot change a literal ref or path (notably trailing ';' and spaces).
     let record = [
         &batch.coordinator,
         &batch.repository,
@@ -265,7 +267,14 @@ pub fn create(reviewed: &Preview) -> Result<Batch, Error> {
         &batch.destination_commit,
         batch.checkout.to_str().unwrap(),
     ]
-    .join("\n");
+    .map(|field| {
+        field
+            .bytes()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    })
+    .join(":");
+    let record = format!("v1:{record}");
     tmux(&["set-option", "-t", &batch.project, &format!("@drudwyn_batch_{key}"), &record]).map_err(|error| invalid(format!("Batch metadata failed: {error}; destination checkout retained at {}. Select the existing destination when retrying", batch.checkout.display())))?;
     Ok(batch)
 }
@@ -289,24 +298,45 @@ pub fn load(id: &str) -> Result<Batch, Error> {
         project,
         &format!("@drudwyn_batch_{key}"),
     ])?;
-    let fields: Vec<_> = value.lines().collect();
-    if fields.len() != 7 {
+    if value.is_empty() {
         return Err(invalid(
             "Batch metadata unknown or lost; reselect source and destination explicitly",
         ));
     }
+    let malformed = || {
+        invalid("Batch metadata malformed or outdated; reselect source and destination explicitly")
+    };
+    let encoded = value.strip_prefix("v1:").ok_or_else(malformed)?;
+    let fields = encoded
+        .split(':')
+        .map(|field| {
+            if field.len() % 2 != 0 || !field.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(malformed());
+            }
+            let bytes = (0..field.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&field[i..i + 2], 16).map_err(|_| malformed()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let field = String::from_utf8(bytes).map_err(|_| malformed())?;
+            safe(&field).map_err(|_| malformed())?;
+            Ok(field)
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    if fields.len() != 7 {
+        return Err(malformed());
+    }
     Ok(Batch {
         id: id.into(),
         project: project.into(),
-        coordinator: fields[0].into(),
-        repository: fields[1].into(),
+        coordinator: fields[0].clone(),
+        repository: fields[1].clone(),
         source: StartPoint {
-            reference: fields[2].into(),
-            commit: fields[3].into(),
+            reference: fields[2].clone(),
+            commit: fields[3].clone(),
         },
-        destination: fields[4].into(),
-        destination_commit: fields[5].into(),
-        checkout: fields[6].into(),
+        destination: fields[4].clone(),
+        destination_commit: fields[5].clone(),
+        checkout: PathBuf::from(&fields[6]),
     })
 }
 

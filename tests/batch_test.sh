@@ -86,6 +86,48 @@ git -C "$repo" tag local-source "$initial"
 if "$BIN" batch setup --repo "$repo" --session "$session" --integration assemble --reuse-existing --checkout "$repo" >"$TMP_DIR/error" 2>&1; then exit 1; fi
 grep -Fq 'already checked out elsewhere' "$TMP_DIR/error"
 printf 'ok: stale previews, local refs, branch/path collisions and dirty destinations guarded\n'
+# Destination suffixes and literal refs survive setup, reload, and worker association.
+literal_case=0
+for suffix in ';' ' ' 'é ' '#{session_name};'; do
+  literal_case=$((literal_case + 1))
+  case "$suffix" in
+    ';') label='literal;' ;;
+    ' ') label='literal-space' ;;
+    'é ') label='literal-é' ;;
+    *) label='literal-$value' ;;
+  esac
+  checkout="$TMP_DIR/checkout$suffix"
+  git -C "$repo" tag "$label" "$initial"
+  literal="$("$BIN" batch setup --repo "$repo" --session "$session" --source "$label" --integration "$label" --checkout "$checkout" --yes --expect-source "$initial" --expect-destination "$moved" | sed -n 's/^Batch: //p')"
+  [ "$(git -C "$checkout" branch --show-current)" = "$label" ]
+  "$BIN" batch show "$literal" > "$TMP_DIR/literal"
+  grep -Fxq "Checkout: $checkout" "$TMP_DIR/literal"
+  grep -Fxq "Source: $label $initial" "$TMP_DIR/literal"
+  grep -Fxq "Destination: $label $moved (at setup)" "$TMP_DIR/literal"
+  "$BIN" batch select "$literal" --window "$coordinator" >/dev/null
+  worker="suffix-worker-$literal_case"
+  "$BIN" workspace start --repo "$repo" --worktree-root "$TMP_DIR/workers" "$worker" sleep 90 >/dev/null
+  [ "$(git -C "$TMP_DIR/workers/$worker" rev-parse HEAD)" = "$initial" ]
+  worker_window="$(tmux list-windows -t "$session" -F '#{window_id} #{window_name}' | awk -v n="$worker" '$2 == n { print $1 }')"
+  [ "$(tmux show-option -wqv -t "$worker_window" @drudwyn_batch)" = "$literal" ]
+done
+"$BIN" batch select "$second" --window "$coordinator" >/dev/null
+printf 'ok: literal refs and checkout suffixes survive live batch reload and association\n'
+# Old raw records cannot be trusted after lossy transport; malformed encodings
+# must fail before a selected worker can be allocated.
+option="@drudwyn_batch_${second#*/}"
+record="$(tmux show-option -qv -t "$session" "$option")"
+old_record="$(printf '%s\n' "$coordinator" "$repo/.git" planning "$moved" assemble "$initial" "$TMP_DIR/assemble")"
+for malformed in "$old_record" 'v2:40' 'v1:40' 'v1:4' 'v1:gg' 'v1:ff' 'v1:40:41:42:43:44:45:' 'v1:40:41:42:43:44:45:0a'; do
+  tmux set-option -t "$session" "$option" "$malformed"
+  if "$BIN" batch show "$second" >"$TMP_DIR/error" 2>&1; then exit 1; fi
+  grep -Fq 'metadata malformed or outdated; reselect source and destination explicitly' "$TMP_DIR/error"
+  if "$BIN" workspace start --repo "$repo" --worktree-root "$TMP_DIR/workers" malformed sleep 90 >"$TMP_DIR/error" 2>&1; then exit 1; fi
+  grep -Fq 'metadata malformed or outdated' "$TMP_DIR/error"
+  [ ! -e "$TMP_DIR/workers/malformed" ]
+done
+tmux set-option -t "$session" "$option" "$record"
+printf 'ok: old and malformed records require explicit reselection before launch\n'
 # Loss is unknown, not a guess based on shared repository or last-created batch.
 tmux set-option -u -t "$session" "@drudwyn_batch_${second#*/}"
 if "$BIN" workspace start --repo "$repo" --worktree-root "$TMP_DIR/workers" lost sleep 90 >"$TMP_DIR/error" 2>&1; then exit 1; fi
