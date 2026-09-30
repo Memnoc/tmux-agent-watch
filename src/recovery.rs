@@ -93,6 +93,12 @@ pub(crate) fn selected_checkout(window: &str, pane: &str) -> Result<PathBuf, Err
         }
         fs::read_link(format!("/proc/{}/cwd", f[2])).unwrap_or_else(|_| PathBuf::from(f[8]))
     };
+    if !path.is_absolute() {
+        return Err(Error::Invalid(
+            "Selected pane has no absolute checkout identity; explicitly select a repository"
+                .into(),
+        ));
+    }
     let path = path.canonicalize().map_err(|_| {
         Error::Invalid(
             "Selected pane checkout is unavailable; no display-path unescaping attempted".into(),

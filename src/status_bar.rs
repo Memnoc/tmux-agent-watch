@@ -214,31 +214,73 @@ fn role(w: &Workspace) -> &str {
         "SH"
     }
 }
-fn state(w: &Workspace) -> &str {
-    if w.process == "exited" {
-        if inventory::has_failure(w) {
-            "EXIT FAIL"
-        } else {
-            "EXIT"
-        }
-    } else {
-        match w.lifecycle {
-            Lifecycle::Working => "WORK",
-            Lifecycle::Running => "RUN",
-            Lifecycle::Starting => "START",
-            Lifecycle::Waiting => "INPUT",
-            Lifecycle::Review => "REVIEW",
-            Lifecycle::Failed => "FAIL",
-            Lifecycle::Unknown => {
-                if w.is_agent() {
-                    "?"
-                } else {
-                    ""
-                }
-            }
-        }
+fn activity(w: &Workspace) -> &str {
+    match w.lifecycle {
+        Lifecycle::Working => "WORK",
+        Lifecycle::Running => "RUN",
+        Lifecycle::Starting => "START",
+        Lifecycle::Waiting => "INPUT",
+        Lifecycle::Review => "REVIEW",
+        Lifecycle::Failed => "FAIL",
+        Lifecycle::Unknown if w.is_agent() => "?",
+        Lifecycle::Unknown => "",
     }
 }
+fn exit(w: &Workspace) -> String {
+    if let Some(signal) = &w.exit_signal {
+        format!("SIG {signal}")
+    } else {
+        w.exit_code
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "?".into())
+    }
+}
+fn state(w: &Workspace) -> String {
+    if w.process == "exited" {
+        let attention = if w.lifecycle.needs_attention() {
+            format!("{} / ", activity(w))
+        } else {
+            String::new()
+        };
+        format!("{attention}EXIT {}", exit(w))
+    } else {
+        activity(w).into()
+    }
+}
+fn context_state(w: &Workspace, compact: bool) -> String {
+    if w.process != "exited" {
+        return if compact {
+            state(w)
+        } else {
+            format!("{} ({})", state(w), w.evidence.label())
+        };
+    }
+    if compact {
+        let attention = match w.lifecycle {
+            Lifecycle::Review => "REV/",
+            Lifecycle::Waiting => "IN/",
+            Lifecycle::Failed => "FAIL/",
+            _ => "",
+        };
+        let receipt = if w.exit_signal.is_some() {
+            "SIG".into()
+        } else {
+            exit(w)
+        };
+        return format!("{attention}X{receipt}");
+    }
+    if w.lifecycle.needs_attention() {
+        format!(
+            "{} ({}) / EXIT {}",
+            activity(w),
+            w.evidence.label(),
+            exit(w)
+        )
+    } else {
+        state(w)
+    }
+}
+
 fn range(target: &str, text: &str) -> String {
     format!("#[range=user|{target}]{text}#[norange]")
 }
@@ -333,9 +375,10 @@ fn tabs(rows: &[Tab], current: &str, session: &str, width: usize, style: &Style)
                     badge
                 } else {
                     format!(
-                        "#[bg={},fg={},bold]{badge}",
+                        "#[bg={},fg={},bold]{}",
                         style.color(inventory::attention_state(row.workspace)),
-                        hex(style.theme.base)
+                        hex(style.theme.base),
+                        escape(&badge)
                     )
                 };
                 out.push_str(&range(
@@ -405,21 +448,25 @@ fn context(workspaces: &[Workspace], current: &str, width: usize, style: &Style)
                 selected_branch(w).unwrap_or_else(|| "ref ?".into())
             };
             let full = format!(
-                "{} {name} · {reference} · {} ({})",
+                "{} {name} · {reference} · {}",
                 role(w),
-                state(w),
-                w.evidence.label()
+                context_state(w, false)
             );
             if cells(&full) <= available {
                 full
             } else if available >= 20 {
-                cut(&format!("{} {name} · {}", role(w), state(w)), available)
+                let status = context_state(w, false);
+                if cells(&status) <= available {
+                    status
+                } else {
+                    cut(&context_state(w, true), available)
+                }
             } else {
                 cut(
-                    if state(w).is_empty() {
-                        role(w)
+                    &if state(w).is_empty() {
+                        role(w).into()
                     } else {
-                        state(w)
+                        context_state(w, true)
                     },
                     available,
                 )
@@ -435,17 +482,10 @@ fn context(workspaces: &[Workspace], current: &str, width: usize, style: &Style)
     )
 }
 fn selected_branch(w: &Workspace) -> Option<String> {
-    let pid = tmux(&[
-        "display-message",
-        "-p",
-        "-t",
-        &w.identity.pane_id,
-        "#{pane_pid}",
-    ])
-    .ok()?;
-    let path = std::fs::read_link(format!("/proc/{pid}/cwd"))
-        .ok()
-        .or_else(|| Some(w.checkout.working_directory.clone()))?;
+    // Presentation cwd may be escaped or empty after exit. Reuse the stable
+    // pane/known-checkout resolver; never let an empty path mean our own cwd.
+    let path =
+        crate::recovery::selected_checkout(&w.identity.window_id, &w.identity.pane_id).ok()?;
     let output = Command::new("git")
         .arg("-C")
         .arg(path)

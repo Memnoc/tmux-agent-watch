@@ -23,6 +23,94 @@ class StatusATest(IndependentNavigation):
         session, window = self.selection(self.clients[0]).split(':')
         return self.command('status-bar', '--session', session, '--window', window, '--width', str(width), '--row', row, client=self.clients[0]).stdout
 
+    def exited_worker(self, event, code, managed=False):
+        # Gate exit until hook evidence has been attributed to this fake child.
+        fake = Path(self.tmp.name) / 'fake-worker/codex'
+        gate = Path(self.tmp.name) / ('exit-' + str(time.monotonic_ns()))
+        script = (shlex.quote(str(fake)) + ' 300 & agent=$!; '
+                  'while [ ! -e ' + shlex.quote(str(gate)) + ' ]; do sleep .02; done; '
+                  'kill "$agent"; wait "$agent"; ' +
+                  ('sleep 300' if code is None else f'sleep 1 & exit {code}'))
+        if managed:
+            root = Path(self.tmp.name) / 'worktrees $literal'
+            result = self.command('workspace', 'start', '--repo', str(self.repo),
+                                  '--base', 'main', '--worktree-root', str(root),
+                                  'status-worker', 'sh', '-c', script, client=self.clients[0])
+            self.worker = re.search(r'window (@[0-9]+)', result.stderr)[1]
+            checkout = Path(result.stdout.strip())
+            self.assertIn('$literal', str(checkout))
+            self.assertEqual(self.tmux('show', '-wqv', '-t', self.worker,
+                                      '@drudwyn_launch_checkout'), os.fsencode(checkout).hex())
+        else:
+            self.tmux('set', '-w', '-t', self.worker, 'remain-on-exit', 'on')
+            self.tmux('respawn-pane', '-k', '-t', self.worker, '-c', str(self.repo), 'sh', '-c', script)
+        deadline = time.monotonic() + 4
+        while True:
+            try:
+                self.worker_hook(event)
+                break
+            except subprocess.CalledProcessError:
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(.02)
+        gate.touch()
+        while True:
+            native = self.tmux('display-message', '-p', '-t', self.worker, '#{pane_dead_status}')
+            status = self.command('status', client=self.clients[0]).stdout
+            worker = next((row for row in status.splitlines() if row.startswith(self.worker+'\t')), '')
+            if 'Exited' in worker and (code is None or native == str(code)):
+                break
+            self.assertLess(time.monotonic(), deadline, worker)
+            time.sleep(.02)
+        self.assertIn('exit code ' + ('unknown' if code is None else str(code)), worker)
+        self.command('navigate', '--window', self.worker, client=self.clients[0])
+        self.tmux('set', '-g', '@drudwyn-visible-tabs', '1')
+
+    def test_correction_retained_attention_and_exit_in_actual_rows(self):
+        self.install()
+        for event, label, compact, code in [('stop', 'REVIEW', 'REV', 23),
+                                           ('permissionRequest', 'INPUT', 'IN', 0),
+                                           ('permissionRequest', 'INPUT', 'IN', None)]:
+            self.exited_worker(event, code)
+            exit_label = '?' if code is None else str(code)
+            for width in [160, 48]:
+                self.resize_client(self.clients[0], width)
+                screen, data = self.converged(self.clients[0], width)
+                top, bottom = screen.lines()[-2:]
+                self.assertIn(label + ' / EXIT ' + exit_label, top)
+                self.assertRegex(top, r'  '+label+r' / EXIT '+re.escape(exit_label)+r'  ')
+                if width == 160:
+                    self.assertIn(label+' (hook) / EXIT '+exit_label, bottom)
+                else:
+                    self.assertIn(compact+'/X'+exit_label, bottom)
+                self.assertNotIn('DONE', top+bottom)
+                self.assertIn('FAIL '+('1' if code == 23 else '0'), bottom)
+                path = Path(f'/tmp/drudwyn-ticket10-correction-{label}-{exit_label.replace("?", "unknown")}-{width}')
+                path.with_suffix('.txt').write_text(top+'\n'+bottom+'\n')
+                path.with_suffix('.ansi').write_bytes(data)
+
+    def test_correction_stopped_branch_uses_bound_checkout_or_unknown(self):
+        ordinary = self.worker
+        self.exited_worker('stop', 23, managed=True)
+        self.install()
+        self.resize_client(self.clients[0], 160)
+        screen, _ = self.converged(self.clients[0], 160)
+        self.assertIn('· status-worker ·', screen.lines()[-1])
+        Path('/tmp/drudwyn-ticket10-correction-bound-checkout.txt').write_text('\n'.join(screen.lines()[-2:])+'\n')
+        pane = self.tmux('display-message', '-p', '-t', self.worker, '#{pane_id}')
+        # Loss of checkout evidence must not expose the renderer's own branch.
+        for value in ['', 'not-hex', os.fsencode('relative').hex()]:
+            self.tmux('set', '-w', '-t', self.worker, '@drudwyn_launch_checkout', value)
+            screen, _ = self.converged(self.clients[0], 160)
+            self.assertIn('· ref ? ·', screen.lines()[-1])
+            self.assertNotIn('work/worktree-worker-workflow', screen.lines()[-1])
+        self.assertEqual(self.tmux('display-message', '-p', '-t', pane, '#{pane_current_path}'), '')
+        # An ordinary stopped agent has no authoritative checkout association.
+        self.worker = ordinary
+        self.exited_worker('stop', 23)
+        screen, _ = self.converged(self.clients[0], 160)
+        self.assertIn('· ref ? ·', screen.lines()[-1])
+        self.assertNotIn('work/worktree-worker-workflow', screen.lines()[-1])
+
     def test_caps_all_local_windows_and_global_hidden_attention(self):
         for i in range(5):
             self.tmux('new-window', '-d', '-t', 'project', '-n', f'shell-{i}', '-c', '/tmp', 'bash', '--noprofile', '--norc')

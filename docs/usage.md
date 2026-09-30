@@ -40,6 +40,12 @@ Selecting or inspecting a worker does not clear attention. Switching active
 splits does not change which agent owns the evidence. A new agent process does
 not inherit an old process's handoff. Compact labels use RUN, WORK, START, INPUT,
 REVIEW, and FAIL with the same meanings.
+Status tabs retain attention alongside the exit receipt, for example
+`REVIEW / EXIT 23`; selected context attributes the retained attention separately
+as `REVIEW (hook) / EXIT 23`. At narrow widths, `REV/X23` and `IN/X0` abbreviate
+Review/Input and process exit; `X?` means the exit code is unknown. Zero is not
+completion. A stopped worker's branch comes from its validated live checkout
+association; without that identity the context shows `ref ?`.
 
 Only fixed operational metadata, branch, and Git counts are shown. The default
 Rust implementation never reads prompts, responses, or terminal scrollback.

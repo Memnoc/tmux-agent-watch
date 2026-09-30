@@ -167,3 +167,69 @@ captures were refreshed by the passing suite. No implementation changes followed
 this successful frozen run. Implementation, tests, guidance and this verified
 receipt are committed together; independent review remains pending. `main`
 remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+## Review correction — pending independent re-review
+
+Independent review of `2220f3f..78cd0d6` found two P2 defects. Both were reproduced
+with `/tmp/drudwyn-review10-exit-label.py` and new public-command/actual-terminal
+regressions before correction:
+
+1. Local status replaced retained Review/Input with EXIT, although global totals
+   still retained attention. Tabs now show attention and process receipt together,
+   such as `REVIEW / EXIT 23`. Selected context attributes attention separately,
+   `REVIEW (hook) / EXIT 23`; narrow context uses `REV/X23` or `IN/X0`/`IN/X?`.
+   Zero remains process exit only, unknown stays unknown, and no completion or
+   new hook evidence is inferred. Global count/category semantics are unchanged.
+2. An empty stopped-pane cwd passed to `git -C` used the renderer's repository
+   and exposed an unrelated branch. Selected context now uses the existing
+   stable-pane, lossless checkout resolver. It validates pane/launch identity
+   and known checkout bytes; stopped ordinary panes without that association
+   show `ref ?`. The shared resolver explicitly rejects nonabsolute/empty paths
+   before canonicalization. No fallback to invoking cwd or blanket display-path
+   unescaping is permitted. This adds no global Git details or process scan;
+   the context still performs at most one selected-branch Git query.
+
+Two new status tests failed independently on the old implementation and now
+pass. They exercise retained Review with native nonzero exit23, Input with
+native zero exit, and Input with an exited/reaped child whose exit receipt is
+unknown (the parent shell remains live in that last case). Converged actual
+160/48-column rows assert full tab labels/padding, separately attributed context,
+compact context, failure totals and absence of a completion claim. The branch
+case launches a managed worker through the public command into a literal-dollar
+checkout, then checks stopped binding, missing/malformed/relative metadata,
+and a separate ordinary stopped pane without a checkout association. It never
+uses installed agents. Source fixture still asserts fake `codex` resolves to
+system `sleep`.
+
+Captures were inspected:
+`/tmp/drudwyn-ticket10-correction-{REVIEW-23,INPUT-0,INPUT-unknown}-{48,160}.{txt,ansi}`
+and `/tmp/drudwyn-ticket10-correction-bound-checkout.txt`. Red evidence:
+`/tmp/drudwyn-ticket10-correction-original-red.log` and
+`/tmp/drudwyn-ticket10-correction-tests-red.log`. Focused green evidence:
+`/tmp/drudwyn-ticket10-correction-focused.log`,
+`/tmp/drudwyn-ticket10-correction-status.log` (11 cases), and
+`/tmp/drudwyn-ticket10-correction-recovery.log` (17 cases, including literal
+unmanaged cwd, vanished stable pane and coordinator orphan/concurrency cases).
+
+Sequential builder Standards/Spec audit checked privacy, stable identity,
+empty-path rejection, label escaping, distinct attention/exit evidence, count
+parity, narrow cells, unchanged lifecycle synchronization and ticket10 scope.
+No implementation changes are planned after the frozen final gates. Existing
+Linux/tmux3.4 runtime limits apply; non-Linux runtime remains untested. No
+integration behavior or ticket11 edits are included. Independent re-review
+remains pending; this receipt does not self-clear either finding.
+
+
+### Correction frozen-code gates
+
+`cargo fmt --check`, `git diff --check`, `cargo test --locked` (41), and complete
+`bash tests/run.sh` passed without a gate restart. The suite includes status11,
+global11, recovery17, launch15, activity36, real clients29, navigator13 (one
+existing optional Resurrect skip), settings10, and all shell/help/privacy/
+package/release checks. Logs:
+`/tmp/drudwyn-ticket10-correction-final-rust.log` and
+`/tmp/drudwyn-ticket10-correction-final-suite.log`. Actual correction captures
+were refreshed by this passing run. No implementation changes followed the
+successful run. This correction commit is the fixed re-review target after
+`78cd0d6b360050a0f32a3725c32ac5a47112086e`; independent re-review remains pending.
+`main` remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
