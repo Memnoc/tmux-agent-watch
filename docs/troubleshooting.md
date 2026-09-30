@@ -93,6 +93,19 @@ configuration after loading Resurrect, then press `s` inside either navigator.
 Read the footer for the result. Saving covers all sessions, and killing an item
 does not automatically save. See [session persistence](usage.md#session-persistence).
 
+## Worker launch fails
+
+Read the launch error for the retained worktree path, branch, and window ID when
+known. Files and commits are preserved after a worker may have started; metadata
+attachment failure can leave the worker running. Inspect that window before
+retrying. If it has exited, inspect the retained checkout in a shell. A repeated
+start with the same branch/path is refused to protect existing work.
+
+An immediate zero exit is also a failed launch: it does not prove a task was
+received or completed. When tmux retains a dead pane, the error includes its
+known exit status. Otherwise the historical exit status may be unavailable.
+See [failed worker starts](usage.md#failed-worker-starts-rust-v2).
+
 ## Worktree finish is refused
 
 Finish accepts a linked worktree that is clean and integrated into the configured

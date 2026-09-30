@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-
-case "${1:-}" in
-  new-window)
-    printf '@99\n'
-    ;;
-  set-option)
-    exit 1
-    ;;
-  kill-window)
-    ;;
-  *)
-    exit 1
-    ;;
-esac
+# Inject only the command failure; all window/process behavior remains real tmux.
+if [ "${1:-}" = set-option ]; then
+  printf 'injected metadata attachment failure\n' >&2
+  exit 1
+fi
+exec "${DRUDWYN_TEST_TMUX:?}" "$@"

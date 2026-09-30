@@ -17,7 +17,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use thiserror::Error;
 
@@ -374,7 +374,14 @@ fn event_loop(
 
 fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     let area = frame.area();
-    let footer_height = if app.filtering || app.error.is_some() || !app.filter.is_empty() {
+    let footer_height = if let Some(error) = &app.error {
+        let width = frame.area().width.max(1) as usize;
+        // Leave room for word wrapping so retained launch resources are visible.
+        let lines = (error.chars().count() + 10).div_ceil((width / 2).max(1));
+        (lines as u16 + 2)
+            .min(frame.area().height.saturating_sub(5))
+            .max(3)
+    } else if app.filtering || !app.filter.is_empty() {
         3
     } else {
         2
@@ -860,11 +867,32 @@ fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         return;
     }
 
-    let (label, message, tone) = if let Some(error) = &app.error {
-        ("ERROR", error.as_str(), FooterTone::Error)
-    } else {
-        ("FILTER", app.filter.as_str(), FooterTone::Info)
-    };
+    if let Some(error) = &app.error {
+        let message = if app.config.redact_labels {
+            if error.starts_with("launch failed:") {
+                "launch failed; retained resources [redacted]. Disable label redaction to inspect recovery details."
+            } else {
+                "Operation failed; details hidden by label redaction."
+            }
+        } else {
+            error.as_str()
+        };
+        frame.render_widget(
+            Paragraph::new(vec![
+                ui::action_line(
+                    &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
+                    app.theme,
+                ),
+                Line::from(format!(" ERROR  {message}")),
+            ])
+            .style(Style::default().fg(app.theme.love))
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::TOP)),
+            area,
+        );
+        return;
+    }
+    let (label, message, tone) = ("FILTER", app.filter.as_str(), FooterTone::Info);
     ui::render_footer(
         frame,
         area,
@@ -902,6 +930,30 @@ mod tests {
             evidence: EvidenceSource::Hook,
             state_since: Some(1),
             attention_since: None,
+        }
+    }
+
+    #[test]
+    fn launch_failure_displays_retained_identity_and_respects_redaction() {
+        let mut app = App::new(vec![], Variant::Moon, Config::default());
+        app.error = Some("launch failed: tmux operation failed: injected metadata attachment failure; retained worktree /private/repository/worktrees/worker-files on branch work/private-worker. Inspect the retained checkout before retrying".into());
+        for redacted in [false, true] {
+            app.config.redact_labels = redacted;
+            let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+            terminal.draw(|frame| render(frame, &app)).unwrap();
+            let content = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(content.contains("launch failed"));
+            assert_eq!(
+                content.contains("/private/repository/worktrees/worker-files"),
+                !redacted
+            );
+            assert_eq!(content.contains("work/private-worker"), !redacted);
         }
     }
 

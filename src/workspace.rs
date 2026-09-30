@@ -162,28 +162,58 @@ pub fn start(request: Start) -> Result<Started, Error> {
         request.command
     };
     let slug = request.branch.replace('/', "-");
-    let window = tmux(
-        Command::new("tmux")
-            .args([
-                "new-window",
-                "-d",
-                "-P",
-                "-F",
-                "#{window_id}",
-                "-n",
-                &slug,
-                "-c",
-            ])
-            .arg(&target)
-            .args(command),
-    );
-    let window = match window {
-        Ok(value) => value,
+    let window = Command::new("tmux")
+        .args([
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{window_id}",
+            "-n",
+            &slug,
+            "-c",
+        ])
+        .arg(&target)
+        .args(command)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let child = match window {
+        Ok(child) => child,
         Err(error) => {
-            rollback_start(&repo, &target, &request.branch, None);
-            return Err(error);
+            // The tmux executable never started, so no worker could use this
+            // allocation. Even here, only remove an unchanged, clean checkout.
+            if remove_unused_start(&repo, &target, &request.branch, &commit) {
+                return Err(Error::Io(error));
+            }
+            return Err(retained_start_error(error, &target, &request.branch, None));
         }
     };
+    // Once tmux starts, even an error can follow creation of a worker. Never
+    // kill its window or remove its checkout on an uncertain command result.
+    let output = child
+        .wait_with_output()
+        .map_err(|error| retained_start_error(error, &target, &request.branch, None))?;
+    if !output.status.success() {
+        return Err(retained_start_error(
+            String::from_utf8_lossy(&output.stderr).trim(),
+            &target,
+            &request.branch,
+            None,
+        ));
+    }
+    let window = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if !window.starts_with('@')
+        || window[1..].is_empty()
+        || !window[1..].bytes().all(|c| c.is_ascii_digit())
+    {
+        return Err(retained_start_error(
+            "tmux did not return a window identity",
+            &target,
+            &request.branch,
+            None,
+        ));
+    }
     let initialize = || -> Result<(), Error> {
         for (name, value) in [
             ("@drudwyn_branch", request.branch.as_str()),
@@ -203,16 +233,30 @@ pub fn start(request: Start) -> Result<Started, Error> {
             "-p",
             "-t",
             &window,
-            "#{window_id}",
+            "#{window_id}\t#{pane_dead}\t#{pane_dead_status}",
         ]))?;
-        if live != window {
+        let mut fields = live.split('\t');
+        if fields.next() != Some(window.as_str()) {
             return Err(Error::Tmux("agent window exited during startup".into()));
+        }
+        if fields.next() != Some("0") {
+            let status = fields
+                .next()
+                .filter(|value| !value.is_empty())
+                .unwrap_or("unknown");
+            return Err(Error::Tmux(format!(
+                "agent exited during startup (exit status {status}); exit is not task completion"
+            )));
         }
         Ok(())
     };
     if let Err(error) = initialize() {
-        rollback_start(&repo, &target, &request.branch, Some(&window));
-        return Err(error);
+        return Err(retained_start_error(
+            error,
+            &target,
+            &request.branch,
+            Some(&window),
+        ));
     }
     Ok(Started {
         path: target,
@@ -220,23 +264,55 @@ pub fn start(request: Start) -> Result<Started, Error> {
     })
 }
 
-fn rollback_start(repo: &Path, target: &Path, branch: &str, window: Option<&str>) {
-    if let Some(window) = window {
-        let _ = Command::new("tmux")
-            .args(["kill-window", "-t", window])
-            .status();
+fn retained_start_error(
+    error: impl std::fmt::Display,
+    target: &Path,
+    branch: &str,
+    window: Option<&str>,
+) -> Error {
+    let window = window
+        .map(|id| format!("; inspect window {id} if it still exists"))
+        .unwrap_or_default();
+    Error::Invalid(format!(
+        "launch failed: {error}; retained worktree {} on branch {branch}{window}. Inspect the retained checkout before retrying; use a new branch/path for a separate worker",
+        target.display()
+    ))
+}
+
+fn remove_unused_start(repo: &Path, target: &Path, branch: &str, commit: &str) -> bool {
+    if git(target, &["rev-parse", "HEAD"]).ok().as_deref() != Some(commit)
+        || git(
+            target,
+            &[
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--ignored",
+            ],
+        )
+        .ok()
+        .as_deref()
+            != Some("")
+    {
+        return false;
     }
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["worktree", "remove", "--force"])
-        .arg(target)
-        .status();
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["branch", "-D", branch])
-        .status();
+    if git_ok(
+        Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["worktree", "remove"])
+            .arg(target),
+    )
+    .is_err()
+    {
+        return false;
+    }
+    // Compare-and-delete avoids deleting a branch whose tip changed meanwhile.
+    git(
+        repo,
+        &["update-ref", "-d", &format!("refs/heads/{branch}"), commit],
+    )
+    .is_ok()
 }
 
 pub fn deliver_task(window_id: &str, task: &str) -> Result<(), Error> {

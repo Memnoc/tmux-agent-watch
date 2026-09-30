@@ -190,30 +190,31 @@ metadata_failure_bin="$TMP_DIR/metadata-failure-bin"
 mkdir "$metadata_failure_bin"
 cp "$ROOT/tests/fixtures/tmux_metadata_failure.sh" "$metadata_failure_bin/tmux"
 chmod +x "$metadata_failure_bin/tmux"
-if PATH="$metadata_failure_bin:$PATH" "$real_binary" workspace start \
-  --repo "$repo" --worktree-root "$worktree_root" metadata/failure /bin/true \
+if TMUX="$socket_path,$server_pid,0" DRUDWYN_TEST_TMUX="$(command -v tmux)" \
+  PATH="$metadata_failure_bin:$PATH" "$real_binary" workspace start \
+  --repo "$repo" --worktree-root "$worktree_root" metadata/failure sleep 30 \
   >/dev/null 2>&1; then
   printf 'not ok: v2 start unexpectedly succeeded after metadata attachment failed\n'
   exit 1
 fi
-[ ! -e "$worktree_root/metadata-failure" ] &&
-  ! git -C "$repo" show-ref --verify --quiet refs/heads/metadata/failure || {
-  printf 'not ok: failed v2 start leaked its worktree or branch\n'
+[ -d "$worktree_root/metadata-failure" ] &&
+  git -C "$repo" show-ref --verify --quiet refs/heads/metadata/failure || {
+  printf 'not ok: failed v2 start discarded its worktree or branch\n'
   exit 1
 }
-printf 'ok: failed metadata attachment rolls back its worktree and branch\n'
+printf 'ok: failed metadata attachment retains its worktree and branch\n'
 
 TMUX="$socket_path,$server_pid,0" DRUDWYN_V2_BIN="$real_binary" \
   DRUDWYN_WORKTREE_ROOT="$worktree_root" "$ROOT/scripts/worktree-new.sh" \
   --repo "$repo" work/exits-immediately false >/dev/null 2>&1 || true
 sleep 0.2
-if git -C "$repo" show-ref --verify --quiet refs/heads/work/exits-immediately ||
-  [ -e "$worktree_root/work-exits-immediately" ] ||
+if ! git -C "$repo" show-ref --verify --quiet refs/heads/work/exits-immediately ||
+  [ ! -d "$worktree_root/work-exits-immediately" ] ||
   tmux -L "$SOCKET" list-windows -a -F '#{window_name}' | grep -Fxq work-exits-immediately; then
-  printf 'not ok: failed v2 start left a window, branch, or linked worktree behind\n'
+  printf 'not ok: failed v2 start lost retained work or left an unexpected live window\n'
   exit 1
 fi
-printf 'ok: failed v2 start rolls back its branch and linked worktree\n'
+printf 'ok: failed v2 start retains its branch and linked worktree\n'
 
 git -C "$repo" switch -qc ux/pilot
 printf 'pilot\n' > "$repo/PILOT.md"

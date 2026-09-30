@@ -165,3 +165,18 @@ scripts/worktree-new.sh --from-current feature/dependent codex
 
 Without either flag, the CLI uses the configured base. These choices apply to
 the default Rust implementation; the legacy fallback retains its existing behavior.
+
+### Failed worker starts (Rust v2)
+
+A failed start reports the retained worktree path and branch. Once tmux may have
+started a worker, Drudwyn preserves its checkout, commits, untracked files, and
+any surviving window, even if attaching workspace metadata fails. Inspect the
+reported window when it still exists, or open the retained directory in a shell.
+The launch error in Cockpit wraps to show recovery details; label redaction hides
+them until you disable it.
+
+Retrying the same branch or path reports a collision without overwriting work
+or starting another worker. To launch a separate worker, choose a new branch and
+path. Drudwyn only removes a clean, unchanged allocation automatically when the
+tmux executable could not start at all. An immediate process exit, including
+exit code zero, is a failed launch rather than evidence of task completion.
