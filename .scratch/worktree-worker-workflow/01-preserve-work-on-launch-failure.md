@@ -58,8 +58,12 @@ coordinating session.
   terminal, typed a task, and launched a controlled worker that wrote a file and
   exited 7. Captured rendered output showed launch failure and retained
   worktree/branch; the worker's untracked file survived.
-- Crosscheck: the coordinating session will run a fresh reviewer on this commit;
-  no review result is claimed in this builder receipt.
+- Crosscheck: a fresh reviewer checked implementation commit `9720c51` against
+  `80382f1` on 2026-09-30. Standards: 0 findings; Spec: 0 findings; no severe
+  findings or judgement calls. The reviewer independently passed formatting,
+  all 33 Rust tests, the focused real Git/tmux launch-failure suite, and diff
+  whitespace checks. Full-suite and actual UI results above are the builder's
+  receipts; the reviewer inspected those rather than repeating those runs.
 - Limits: startup still uses the existing 150 ms observation frame. Later exits,
   persistent exit evidence, delivery, and recovery actions belong to subsequent
   tickets. A vanished pane cannot supply a historical exit code. These fixes
