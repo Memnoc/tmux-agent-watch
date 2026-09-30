@@ -115,3 +115,32 @@ servers and repositories under `/tmp`; `main` remains `eaf2446`.
   available, literal-input handling, duplicate errors, and privacy. A fresh
   independent review follows this correction commit in the coordinating session.
   No later ticket, specification, or `main` change is included.
+
+## Independent re-review receipt — 2026-09-30
+
+- Reviewed correction `06db30e...533305a`, with the complete ticket change
+  `825be67...533305a` as context. Applied the crosscheck Standards and Spec axes
+  sequentially in a fresh reviewer session against this ticket, its approved
+  specification, `CONTRIBUTING.md`, domain/architecture guidance, and the privacy
+  boundary.
+- **Standards: 0 findings.** The normalization is confined to the initial exact
+  tmux target. Creation retains the literal input; navigation, error cleanup,
+  and policy restoration retain stable session IDs. The correction adds no
+  content inspection, persistence, or network behavior. No actionable baseline
+  code smell or documented-standard violation was found.
+- **Spec: 0 findings.** The original P2 backslash-name failure is resolved.
+  Names with and without trailing semicolons succeed under both inherited
+  cleanup policies; duplicate rejection, requester-only attachment, existing
+  sessions/windows/panes/processes, literal directory input, and inherited
+  policy restoration are covered. Usage accurately describes tmux's native
+  stored spelling, and the correction introduces no new targeting behavior
+  outside the required initial name lookup.
+- Independently ran `cargo build --locked --offline`, all 12 focused New Session
+  real two-client tests (`python3 tests/independent_navigation_test.py -k
+  new_session -v`), `cargo fmt --check`, `cargo test --locked --offline`
+  (35 Rust tests), and `git diff --check`: all passed. The initial sandbox run
+  could not create local tmux sockets; the authorized isolated rerun passed on
+  tmux 3.4 using disposable servers and repositories under `/tmp`.
+- The builder's complete-suite result above was inspected, not rerun for this
+  focused correction review. No residual finding requires a broader rerun.
+  This receipt is the only reviewer change; `main` remains `eaf2446`.
