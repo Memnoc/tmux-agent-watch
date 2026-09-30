@@ -78,6 +78,45 @@ terminal narrows; labels collapse before information collides.
 | `prefix + Space` | Toggle the optional legacy sidebar             |
 | `prefix + A`     | Recreate a stuck legacy sidebar                |
 
+### Independent terminal views
+
+Drudwyn's navigators, Cockpit Open, status-tab clicks, sidebar clicks, and
+attention shortcut route to the terminal that invoked them. When another client
+is attached to the destination session, Drudwyn creates a grouped tmux session
+view with independent window selection. The windows, panes, worker processes,
+files, and branches remain shared; worker totals count each window once.
+
+Views are created only when needed and reused while that client stays in the
+project. Tmux assigns the view name; `@drudwyn_view_of` identifies its original
+session by ID. Drudwyn shows the shared project name and hides these extra views
+from its session list. User-created grouped sessions remain visible and are
+never treated as disposable views. Switching away or detaching removes an unused
+application view through tmux's `destroy-unattached` option. Other sessions and
+clients retain their linked windows. The original project session is not removed.
+If you deliberately kill that original session, remaining attached views keep
+its windows until their last session closes.
+
+Native tmux navigation still follows tmux's normal session semantics: clients
+attached to the same session share selection. The first Drudwyn navigation
+separates their selections when necessary. This does not give separate pane
+layouts or independent input into the same worker process.
+
+For scripts, use stable IDs and an explicit client (listed by `tmux list-clients
+-F '#{client_name}'`):
+
+```sh
+tmux-drudwyn navigate --client /dev/pts/3 --window '@12'
+tmux-drudwyn navigate --client /dev/pts/3 --session '$2'
+```
+
+`DRUDWYN_CLIENT` is also accepted. Without an explicit client, Drudwyn proceeds
+only if the invoking pane's memberships identify exactly one attached client
+(or only one client exists when called outside a pane). Ambiguous or detached
+clients and vanished targets produce errors without choosing a replacement by
+window index. You can supply both `--session` and `--window` to require a specific
+membership; otherwise navigation prefers the requesting client's membership,
+then an original session over application views.
+
 Inside either navigator, these shortcuts act on the selected item:
 
 | Key | Action |

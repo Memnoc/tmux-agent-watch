@@ -18,7 +18,7 @@ tmux -L "$SOCKET" -f /dev/null new-session -d -s v2
 tmux -L "$SOCKET" set-option -g @drudwyn-hud off
 tmux -L "$SOCKET" run-shell "$ROOT/tmux-drudwyn.tmux"
 
-binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "P" && /scripts\/v2.sh cockpit/')"
+binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "P" && /scripts\/navigation-popup.sh.* cockpit/')"
 [ -n "$binding" ] || {
   printf 'not ok: v2 cockpit binding was not installed by default\n'
   exit 1

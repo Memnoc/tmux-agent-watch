@@ -26,16 +26,19 @@ case "${1:-}" in
     ;;
   navigator)
     theme="$(tmux show-option -gqv @drudwyn-theme 2>/dev/null || true)"
-    exec "$binary" navigator --theme "${theme:-moon}"
+    shift
+    exec "$binary" navigator --theme "${theme:-moon}" "$@"
     ;;
   sessions)
     theme="$(tmux show-option -gqv @drudwyn-theme 2>/dev/null || true)"
-    exec "$binary" sessions --theme "${theme:-moon}"
+    shift
+    exec "$binary" sessions --theme "${theme:-moon}" "$@"
     ;;
   settings)
     theme="$(tmux show-option -gqv @drudwyn-theme 2>/dev/null || true)"
     exec "$binary" settings --theme "${theme:-moon}"
     ;;
+  navigate) shift; exec "$binary" navigate "$@" ;;
   status) exec "$binary" status ;;
   scan) exec "$binary" scan ;;
   hud) exec "$binary" hud "$2" "$3" "$4" --theme "${5:-moon}" ;;

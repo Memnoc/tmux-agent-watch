@@ -280,11 +280,10 @@ fn event_loop(
                             {
                                 app.error = Some(error.to_string());
                             } else {
-                                Command::new("tmux")
-                                    .args(["select-window", "-t", &started.window_id])
-                                    .status()
-                                    .ok();
-                                return Ok(());
+                                match crate::navigation::open(Some(&started.window_id), None) {
+                                    Ok(()) => return Ok(()),
+                                    Err(error) => app.error = Some(format!("Open failed: {error}")),
+                                }
                             }
                         }
                         Err(error) => app.error = Some(error.to_string()),
@@ -353,18 +352,10 @@ fn event_loop(
             }
             KeyCode::Enter => {
                 if let Some(workspace) = app.selected_workspace() {
-                    let switched = Command::new("tmux")
-                        .args(["switch-client", "-t", &workspace.identity.session])
-                        .status()
-                        .is_ok_and(|status| status.success());
-                    let selected = Command::new("tmux")
-                        .args(["select-window", "-t", &workspace.identity.window_id])
-                        .status()
-                        .is_ok_and(|status| status.success());
-                    if switched && selected {
-                        return Ok(());
+                    match crate::navigation::open(Some(&workspace.identity.window_id), None) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => app.error = Some(format!("Open failed: {error}")),
                     }
-                    app.error = Some("Could not jump to that workspace".into());
                 }
             }
             _ => {}
@@ -913,6 +904,7 @@ mod tests {
         Workspace {
             identity: WorkspaceIdentity {
                 session: "dev".into(),
+                sessions: vec!["dev".into()],
                 window_id: "@1".into(),
                 window_name: "agent".into(),
                 pane_id: "%1".into(),

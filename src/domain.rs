@@ -116,6 +116,8 @@ impl GitState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceIdentity {
     pub session: String,
+    /// All live session memberships, including independent terminal views.
+    pub sessions: Vec<String>,
     pub window_id: String,
     pub window_name: String,
     pub pane_id: String,

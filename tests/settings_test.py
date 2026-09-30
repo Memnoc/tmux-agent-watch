@@ -92,9 +92,9 @@ class SettingsTest(unittest.TestCase):
         targets = [
             ("a", "next-attention.sh"), ("Space", "sidebar-resize.sh"),
             ("A", "sidebar-restart.sh"), ("W", "cockpit --start"),
-            ("X", "worktree-finish.sh"), ("P", "v2.sh cockpit"),
-            ("w", "v2.sh navigator"), ("C-w", "choose-tree -Zw"),
-            ("s", "v2.sh sessions"), ("S", "choose-tree -Zs"),
+            ("X", "worktree-finish.sh"), ("P", "navigation-popup.sh #{q:client_name} cockpit"),
+            ("w", "navigation-popup.sh #{q:client_name} navigator"), ("C-w", "choose-tree -Zw"),
+            ("s", "navigation-popup.sh #{q:client_name} sessions"), ("S", "choose-tree -Zs"),
             ("H", "help.sh"), ("O", "settings.sh"),
         ]
         self.launch()

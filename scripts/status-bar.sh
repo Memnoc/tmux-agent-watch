@@ -289,16 +289,16 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
         [ "$label_limit" -ge 3 ] || label_limit=3
         short_name="$(printf '%s' "$name" | cut -c1-"$label_limit")"
         if [ "$window_id" = "$current" ]; then
-          item="#[range=window|${index}]#[bg=default,fg=${love},bold]● #[bg=${color},fg=${badge_fg},bold] ${row_agent_icon} ${index} ${short_name} ${state_label} #[default]#[norange]"
+          item="#[range=user|${window_id}]#[bg=default,fg=${love},bold]● #[bg=${color},fg=${badge_fg},bold] ${row_agent_icon} ${index} ${short_name} ${state_label} #[default]#[norange]"
         else
-          item="#[range=window|${index}]#[bg=${color},fg=${badge_fg},bold] ${row_agent_icon} ${index} ${short_name} ${state_label} #[default]#[norange]"
+          item="#[range=user|${window_id}]#[bg=${color},fg=${badge_fg},bold] ${row_agent_icon} ${index} ${short_name} ${state_label} #[default]#[norange]"
         fi
       elif [ "$window_id" = "$current" ]; then
         number_colour="$color"; [ "$colour_numbers" != off ] || number_colour="$text"
-        item="#[range=window|${index}]#[bg=default,fg=${love},bold]● #[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${color}]${short_name}#[norange]"
+        item="#[range=user|${window_id}]#[bg=default,fg=${love},bold]● #[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${color}]${short_name}#[norange]"
       else
         number_colour="$color"; [ "$colour_numbers" != off ] || number_colour="$subtle"
-        item="#[range=window|${index}]#[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${subtle}]${short_name}#[norange]"
+        item="#[range=user|${window_id}]#[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${subtle}]${short_name}#[norange]"
       fi
       right="${right}  ${item}"
     else
@@ -308,13 +308,13 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
     left_count=$((left_count + 1))
     if [ "$left_count" -le "$left_limit" ] || [ "$window_id" = "$current" ]; then
       if [ "$window_id" = "$current" ]; then
-        item="#[range=window|${index}]#[fg=${rose}]│#[bg=${surface},fg=${text},bold] ${index} ${short_name} #[bg=default,fg=${rose}]│#[norange]"
+        item="#[range=user|${window_id}]#[fg=${rose}]│#[bg=${surface},fg=${text},bold] ${index} ${short_name} #[bg=default,fg=${rose}]│#[norange]"
       else
         if [ "$inactive_name_limit" -eq 0 ]; then
-          item="#[range=window|${index}]#[fg=${muted}]${index}#[norange]"
+          item="#[range=user|${window_id}]#[fg=${muted}]${index}#[norange]"
         else
           compact_name="$(printf '%s' "$name" | cut -c1-"$inactive_name_limit")"
-          item="#[range=window|${index}]#[fg=${muted}]${index} ${compact_name}#[norange]"
+          item="#[range=user|${window_id}]#[fg=${muted}]${index} ${compact_name}#[norange]"
         fi
       fi
       left="${left}  ${item}"

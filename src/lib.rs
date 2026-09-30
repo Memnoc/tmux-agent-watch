@@ -6,6 +6,7 @@ pub mod discovery;
 pub mod domain;
 mod icons;
 pub mod lifecycle;
+pub mod navigation;
 pub mod navigator;
 mod persistence;
 pub mod session_navigator;

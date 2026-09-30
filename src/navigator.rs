@@ -203,7 +203,7 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
 }
 
 pub fn run(variant: Variant) -> io::Result<()> {
-    let current = tmux_output(&["display-message", "-p", "#{window_id}"])?;
+    let current = crate::navigation::context("#{window_id}")?;
     let agent_icon = crate::icons::agent_icon();
     let windows = discover()?;
     let selected = windows
@@ -257,14 +257,9 @@ fn event_loop(
                     .get(app.selected)
                     .and_then(|index| app.windows.get(*index))
                 {
-                    let _ = Command::new("tmux")
-                        .args(["switch-client", "-t", &item.session])
-                        .status();
-                    let status = Command::new("tmux")
-                        .args(["select-window", "-t", &item.id])
-                        .status()?;
-                    if status.success() {
-                        return Ok(());
+                    match crate::navigation::open(Some(&item.id), None) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => app.notice = Some(format!("Jump failed: {error}")),
                     }
                 }
             }
@@ -516,6 +511,14 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
 fn discover() -> io::Result<Vec<Window>> {
     let output = tmux_output(&["list-windows", "-a", "-F", FORMAT])?;
     let mut windows = parse_windows(&output);
+    let aliases = crate::navigation::view_names()?;
+    for window in &mut windows {
+        if let Some(name) = aliases.get(&window.session) {
+            window.session = name.clone();
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    windows.retain(|window| seen.insert(window.id.clone()));
     windows.sort_by_key(|item| {
         let group = if item.managed { 1 } else { 0 };
         let priority = match item.lifecycle {

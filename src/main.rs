@@ -15,12 +15,22 @@ use tmux_drudwyn::{
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// Explicit attached tmux client name (or DRUDWYN_CLIENT).
+    #[arg(long, global = true)]
+    client: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Print the live, content-blind workspace model.
     Status,
+    /// Navigate by stable window/session ID in the requesting terminal only.
+    Navigate {
+        #[arg(long, required_unless_present = "session")]
+        window: Option<String>,
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Refresh live lifecycle metadata without reading terminal content.
     Scan,
     /// Receive a content-blind lifecycle event from an agent integration.
@@ -148,7 +158,16 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(client) = cli.client {
+        // The executable is single-threaded before any UI or discovery starts.
+        unsafe {
+            std::env::set_var("DRUDWYN_CLIENT", client);
+        }
+    }
     match cli.command {
+        Command::Navigate { window, session } => {
+            tmux_drudwyn::navigation::open(window.as_deref(), session.as_deref())?
+        }
         Command::Status => {
             let config = Config::load_tmux()?;
             for workspace in discovery::discover()? {

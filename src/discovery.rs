@@ -42,7 +42,14 @@ pub fn discover_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
             String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         ));
     }
-    parse_windows(&String::from_utf8_lossy(&output.stdout))
+    let mut workspaces = parse_windows(&String::from_utf8_lossy(&output.stdout))?;
+    let aliases = crate::navigation::view_names()?;
+    for workspace in &mut workspaces {
+        if let Some(name) = aliases.get(&workspace.identity.session) {
+            workspace.identity.session = name.clone();
+        }
+    }
+    Ok(workspaces)
 }
 
 pub fn parse_windows(input: &str) -> Result<Vec<Workspace>, DiscoveryError> {
@@ -54,8 +61,22 @@ pub fn parse_windows(input: &str) -> Result<Vec<Workspace>, DiscoveryError> {
     workspaces.retain(|workspace| {
         workspace.agent != AgentKind::Unknown || workspace.lifecycle != Lifecycle::Unknown
     });
-    workspaces.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
-    Ok(workspaces)
+    let mut unique: Vec<Workspace> = Vec::new();
+    for workspace in workspaces {
+        if let Some(existing) = unique
+            .iter_mut()
+            .find(|item| item.identity.window_id == workspace.identity.window_id)
+        {
+            existing
+                .identity
+                .sessions
+                .extend(workspace.identity.sessions);
+        } else {
+            unique.push(workspace);
+        }
+    }
+    unique.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+    Ok(unique)
 }
 
 fn parse_window(line: &str) -> Result<Workspace, DiscoveryError> {
@@ -69,6 +90,7 @@ fn parse_window(line: &str) -> Result<Workspace, DiscoveryError> {
     Ok(Workspace {
         identity: WorkspaceIdentity {
             session: fields[0].into(),
+            sessions: vec![fields[0].into()],
             window_id: fields[1].into(),
             window_name: fields[2].into(),
             pane_id: fields[3].into(),

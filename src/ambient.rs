@@ -11,9 +11,13 @@ pub struct SidebarFrame {
 }
 
 pub fn hud_fleet(workspaces: &[Workspace], session: &str, theme: Theme, _redact: bool) -> String {
-    let scoped = workspaces
-        .iter()
-        .filter(|workspace| workspace.identity.session == session);
+    let scoped = workspaces.iter().filter(|workspace| {
+        workspace
+            .identity
+            .sessions
+            .iter()
+            .any(|member| member == session)
+    });
     let (mut total, mut working, mut waiting, mut review, mut failed) = (0, 0, 0, 0, 0);
     for workspace in scoped {
         total += 1;
@@ -83,9 +87,13 @@ pub fn sidebar(
     theme: Theme,
     redact: bool,
 ) -> SidebarFrame {
-    let scoped = workspaces
-        .iter()
-        .filter(|workspace| workspace.identity.session == session);
+    let scoped = workspaces.iter().filter(|workspace| {
+        workspace
+            .identity
+            .sessions
+            .iter()
+            .any(|member| member == session)
+    });
     let mut rows = scoped.collect::<Vec<_>>();
     rows.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
     let mut text = String::new();
@@ -228,6 +236,7 @@ mod tests {
         Workspace {
             identity: WorkspaceIdentity {
                 session: "dev".into(),
+                sessions: vec!["dev".into()],
                 window_id: "@1".into(),
                 window_name: "api".into(),
                 pane_id: "%1".into(),

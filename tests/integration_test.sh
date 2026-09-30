@@ -27,14 +27,14 @@ case "$hud_fleet" in *'scripts/status-bar.sh'*) ;; *) printf 'not ok: clustered 
 case "$hud_fleet" in *'scripts/status-separator.sh'*) ;; *) printf 'not ok: terminal separator is missing\n'; exit 1 ;; esac
 printf 'ok: clustered bar and terminal separator are installed\n'
 
-navigator_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "w" && /scripts\/v2.sh navigator/')"
+navigator_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "w" && /scripts\/navigation-popup.sh.* navigator/')"
 native_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "C-w" && /choose-tree -Zw/')"
 [ -n "$navigator_binding" ] && [ -n "$native_binding" ] || {
   printf 'not ok: grouped and native navigator bindings are not both available\n'; exit 1;
 }
 printf 'ok: grouped navigation preserves the native chooser fallback\n'
 
-session_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "s" && /scripts\/v2.sh sessions/')"
+session_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "s" && /scripts\/navigation-popup.sh.* sessions/')"
 native_session_binding="$(tmux -L "$SOCKET" list-keys -T prefix | awk '$4 == "S" && /choose-tree -Zs/')"
 [ -n "$session_binding" ] && [ -n "$native_session_binding" ] || {
   printf 'not ok: compact and native session navigator bindings are not both available\n'; exit 1;

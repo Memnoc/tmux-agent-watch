@@ -69,7 +69,7 @@ else
   bash "$PLUGIN_DIR/scripts/hud-install.sh" --disable
 fi
 
-tmux bind-key "$(option @drudwyn-next-key a)" run-shell "$PLUGIN_DIR/scripts/next-attention.sh"
+tmux bind-key "$(option @drudwyn-next-key a)" run-shell "$PLUGIN_DIR/scripts/next-attention.sh #{q:client_name}"
 tmux bind-key "$(option @drudwyn-sidebar-key Space)" run-shell "$PLUGIN_DIR/scripts/sidebar-resize.sh"
 tmux bind-key "$(option @drudwyn-restart-key A)" run-shell "$PLUGIN_DIR/scripts/sidebar-restart.sh"
 tmux bind-key "$(option @drudwyn-finish-key X)" display-popup -EE -w 70% -h 30% \
@@ -79,27 +79,30 @@ tmux bind-key "$(option @drudwyn-help-key H)" display-popup -E -w 72 -h 24 \
 tmux bind-key "$(option @drudwyn-options-key O)" display-popup -EE -w 96 -h 30 \
   "$PLUGIN_DIR/scripts/settings.sh"
 if [ "$(option @drudwyn-v2 on)" = on ]; then
-  tmux bind-key "$(option @drudwyn-worktree-key W)" display-popup -EE -w 96 -h 20 \
-    -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/v2.sh cockpit --start"
-  tmux bind-key "$(option @drudwyn-cockpit-key P)" display-popup -EE -w 96 -h 28 \
-    -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/v2.sh cockpit"
+  tmux bind-key "$(option @drudwyn-worktree-key W)" run-shell \
+    "$PLUGIN_DIR/scripts/navigation-popup.sh #{q:client_name} cockpit --start"
+  tmux bind-key "$(option @drudwyn-cockpit-key P)" run-shell \
+    "$PLUGIN_DIR/scripts/navigation-popup.sh #{q:client_name} cockpit"
 else
   tmux bind-key "$(option @drudwyn-worktree-key W)" command-prompt -p 'Branch:' \
     "run-shell '$PLUGIN_DIR/scripts/worktree-new.sh --repo \"#{pane_current_path}\" \"%%\"'"
   tmux bind-key "$(option @drudwyn-cockpit-key P)" display-popup -EE -w 78 -h 26 \
     -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/cockpit.sh"
 fi
-tmux bind-key "$(option @drudwyn-navigator-key w)" display-popup -EE -w 96 -h 24 \
-  -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/v2.sh navigator"
+tmux bind-key "$(option @drudwyn-navigator-key w)" run-shell \
+    "$PLUGIN_DIR/scripts/navigation-popup.sh #{q:client_name} navigator"
 tmux bind-key "$(option @drudwyn-native-navigator-key C-w)" choose-tree -Zw
-tmux bind-key "$(option @drudwyn-session-key s)" display-popup -EE -w 96 -h 18 \
-  -d '#{pane_current_path}' "$PLUGIN_DIR/scripts/v2.sh sessions"
+tmux bind-key "$(option @drudwyn-session-key s)" run-shell \
+    "$PLUGIN_DIR/scripts/navigation-popup.sh #{q:client_name} sessions"
 tmux bind-key "$(option @drudwyn-native-session-key S)" choose-tree -Zs
 tmux bind-key '{' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -U"
 tmux bind-key '}' run-shell "$PLUGIN_DIR/scripts/safe-swap.sh -D"
 tmux bind-key -n MouseDown1Pane if-shell -F '#{==:#{@drudwyn_sidebar},1}' \
-  "run-shell '$PLUGIN_DIR/scripts/sidebar-click.sh #{pane_id} #{mouse_y}'" \
+  "run-shell '$PLUGIN_DIR/scripts/sidebar-click.sh #{pane_id} #{mouse_y} #{q:client_name}'" \
   'select-pane -t ='
+tmux bind-key -n MouseDown1Status if-shell -F '#{mouse_status_range}' \
+  "run-shell '$PLUGIN_DIR/scripts/status-click.sh #{q:mouse_status_range} #{q:client_name}'" \
+  'select-window -t ='
 tmux bind-key -n WheelUpPane if-shell -F '#{==:#{@drudwyn_sidebar},1}' \
   'run-shell ":"' \
   'if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" "send-keys -M" "copy-mode -e"'

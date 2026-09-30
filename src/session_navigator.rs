@@ -184,7 +184,9 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
 }
 
 pub fn run(variant: Variant) -> io::Result<()> {
-    let current = tmux_output(&["display-message", "-p", "#{session_name}"])?;
+    let current = crate::navigation::context("#{session_name}")?;
+    let aliases = crate::navigation::view_names()?;
+    let current = aliases.get(&current).cloned().unwrap_or(current);
     let sessions = discover()?;
     let selected = sessions
         .iter()
@@ -238,11 +240,9 @@ fn event_loop(
                     .get(app.selected)
                     .and_then(|index| app.sessions.get(*index))
                 {
-                    let status = Command::new("tmux")
-                        .args(["switch-client", "-t", &session.name])
-                        .status()?;
-                    if status.success() {
-                        return Ok(());
+                    match crate::navigation::open(None, Some(&session.id)) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => app.notice = Some(format!("Switch failed: {error}")),
                     }
                 }
             }
@@ -467,6 +467,16 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
 fn discover() -> io::Result<Vec<Session>> {
     let output = tmux_output(&["list-sessions", "-F", FORMAT])?;
     let mut sessions = parse_sessions(&output);
+    let aliases = crate::navigation::view_names()?;
+    let views = sessions.clone();
+    sessions.retain(|session| !aliases.contains_key(&session.name));
+    for view in views {
+        if let Some(anchor) = aliases.get(&view.name) {
+            if let Some(session) = sessions.iter_mut().find(|session| &session.name == anchor) {
+                session.attached += view.attached;
+            }
+        }
+    }
     sessions.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(sessions)
 }
