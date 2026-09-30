@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done — exited descendant ownership P2 correction pending fresh independent review
+**Status:** done — reaped-child attention P2 correction pending fresh independent review
 
 **What to build:** Users can distinguish a running process, reported task
 activity, attention requests, and an agent that exited, across current surfaces.
@@ -357,4 +357,65 @@ Runtime validation remains Linux/tmux 3.4; macOS was not exercised.
 
 Fresh independent Standards/Spec review remains required; no crosscheck
 clearance is claimed. `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+## Independent re-review reaped-child P2 correction — 2026-09-30
+
+Review of `d1ed39d` reproduced lost attention after a parent reaped its exited
+child. `PYTHONDONTWRITEBYTECODE=1 python3 /tmp/drudwyn-rereview07d-reaped.py`
+first showed Review/hook with Exited and a nonempty attention timestamp. After
+`waitpid`, with the same live parent and no replacement, status became empty
+and the attention timestamp was cleared. The committed
+`Activity.test_reaped_child_keeps_observed_exit_and_review` regression failed
+before the correction with `REVIEW` missing from empty status.
+
+The cause was the reconciliation fallback treating disappearance from `ps` as
+permission to clear the pane's captured evidence. Agent binding now additionally
+retains the pane root's process birth time as live, non-content tmux metadata.
+When the bound child disappears and that root PID/birth still matches, its
+record projects Exited. Review, Needs input, and Failed keep their source and
+attention timestamp; prior Working/Running becomes Unknown activity. Child
+exit code, signal, and time remain unknown. No completed-task or successful-exit
+receipt is inferred. This also covers a child that exits and is reaped between
+scans, without Drudwyn observing an intermediate zombie.
+
+A live replacement takes precedence and starts without the predecessor's
+handoff. New supported events then apply to that replacement's own binding.
+A changed pane root or lost pane invalidates the previous record. Queued hooks
+also compare root birth across guard acquisition. All writes retain the existing
+serialized mutation guard; the added field uses only the process birth metadata
+already allowed by the privacy boundary. No process arguments, environment,
+terminal content, task content, file history, or durable record is introduced.
+
+Compatibility: an older live record whose agent PID/birth still matches gains
+the root birth without resetting valid attention. A dedicated regression first
+failed when that migration reset Review to Running, then passed after the
+migration preserved the handoff. Already-reaped older records lacking root birth
+cannot establish the root lifetime retrospectively; unavailable history remains
+unknown rather than being reconstructed. Native retained dead-pane behavior is
+unchanged.
+
+Five additional public CLI/tmux cases cover observed zombie-to-reaped retention,
+reaping between scans with repeated real Cockpit/navigator inspection,
+non-attention activity becoming Unknown with no Running/Working fleet count,
+same-parent replacement and newer activity supersession, and the older-live-record
+upgrade. The original independent reproduction now retains the same Review/hook
+and attention timestamp after reaping. Fixtures use disposable tmux servers,
+resolution-checked sleep executables, and explicit process/marker boundaries.
+
+Frozen-code validation passed: `cargo fmt --check`, all 41 Rust tests via
+`cargo test --locked --offline`, all 36 focused activity cases, and the complete
+`bash tests/run.sh` suite (exit 0). The full run includes 36 activity cases,
+15 delivery cases, 29 independent-navigation cases, 10 settings cases, privacy,
+packaging, and release checks; the navigator retains its one existing optional
+skip. Logs are `/tmp/drudwyn-ticket07-reaped-activity-final.log`,
+`/tmp/drudwyn-ticket07-reaped-rust.log`, and
+`/tmp/drudwyn-ticket07-reaped-full-suite-final.log`. An earlier successful full
+run overlapped the compatibility correction and is not counted as frozen-code
+validation. `git diff --check` passed. No probe, Python cache, or debug
+instrumentation is committed. Runtime evidence remains Linux/tmux 3.4 only;
+macOS was not exercised.
+
+Fresh independent Standards/Spec review remains required; this correction does
+not claim crosscheck clearance. `main` remains
 `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.

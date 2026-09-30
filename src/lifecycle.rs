@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::domain::{AgentKind, Lifecycle};
 
 const SEPARATOR: char = '\u{241f}';
-const PANE_FORMAT: &str = "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_current_command}␟#{pane_dead}␟#{pane_dead_status}␟#{pane_dead_time}␟#{@drudwyn_p_identity}␟#{@drudwyn_p_agent}␟#{@drudwyn_p_state}␟#{@drudwyn_p_source}␟#{@drudwyn_p_since}␟#{@drudwyn_p_attention_since}␟#{@drudwyn_launch_pane}␟#{@drudwyn_launch_pid}␟#{pane_dead_signal}␟#{@drudwyn_launch_stage}";
+const PANE_FORMAT: &str = "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_current_command}␟#{pane_dead}␟#{pane_dead_status}␟#{pane_dead_time}␟#{@drudwyn_p_identity}␟#{@drudwyn_p_agent}␟#{@drudwyn_p_state}␟#{@drudwyn_p_source}␟#{@drudwyn_p_since}␟#{@drudwyn_p_attention_since}␟#{@drudwyn_launch_pane}␟#{@drudwyn_launch_pid}␟#{pane_dead_signal}␟#{@drudwyn_launch_stage}␟#{@drudwyn_p_root_birth}";
 
 #[derive(Debug, Error)]
 pub enum LifecycleError {
@@ -143,7 +143,7 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
     let mut seen = std::collections::HashSet::new();
     for line in output.lines().filter(|line| !line.is_empty()) {
         let fields = line.split(SEPARATOR).collect::<Vec<_>>();
-        if fields.len() == 17 && seen.insert(fields[1]) {
+        if fields.len() == 18 && seen.insert(fields[1]) {
             windows.entry(fields[0]).or_default().push(fields);
         }
     }
@@ -172,19 +172,28 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
             } else {
                 None
             };
+            let root_birth = all.iter().find(|p| p.pid == f[2]).map(|p| p.birth.as_str());
             let retained = f[7].split(':').next() == Some(f[2]) && !f[7].is_empty();
             let launched = f[1] == f[13] && f[2] == f[14];
             if let Some(process) = live {
                 let identity = format!("{}:{}:{}", f[2], process.pid, process.birth);
-                if f[7] != identity {
+                if f[7] != identity || (!f[17].is_empty() && root_birth != Some(f[17])) {
                     pane_state(
                         guard,
                         f[1],
                         Lifecycle::Running,
                         "process",
                         "",
-                        Some((&identity, process.agent.unwrap().command())),
+                        Some((
+                            &identity,
+                            process.agent.unwrap().command(),
+                            root_birth.unwrap_or(""),
+                        )),
                     )?;
+                } else if f[17].is_empty() {
+                    // Older live bindings still prove the current agent's
+                    // PID/birth. Add the root lifetime without erasing attention.
+                    pane_options(guard, f[1], &[("root_birth", root_birth.unwrap_or(""))])?;
                 }
                 candidates.push((f, "running"));
             } else if f[4] == "1"
@@ -208,8 +217,24 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                         state,
                         "process",
                         if retained { f[9] } else { "" },
-                        (!retained).then_some((&identity, agent)),
+                        (!retained).then_some((&identity, agent, "")),
                     )?;
+                }
+                candidates.push((f, "exited"));
+            } else if agents.is_empty()
+                && retained
+                && !f[17].is_empty()
+                && root_birth == Some(f[17])
+                && AgentKind::from_command(f[8]).is_some()
+                && !all
+                    .iter()
+                    .any(|p| f[7] == format!("{}:{}:{}", f[2], p.pid, p.birth))
+            {
+                // The observed child disappeared while its pane root survived.
+                // Reaping removes ps evidence, not the unresolved handoff. Its
+                // exit receipt remains unknown; a live replacement wins above.
+                if !matches!(f[9], "done" | "needs_input" | "failed") {
+                    pane_state(guard, f[1], Lifecycle::Unknown, "process", f[9], None)?;
                 }
                 candidates.push((f, "exited"));
             } else if let Some(process) = exited.filter(|_| agents.is_empty()) {
@@ -224,7 +249,11 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                         Lifecycle::Unknown,
                         "process",
                         if retained { f[9] } else { "" },
-                        Some((&identity, process.agent.unwrap().command())),
+                        Some((
+                            &identity,
+                            process.agent.unwrap().command(),
+                            root_birth.unwrap_or(""),
+                        )),
                     )?;
                 }
                 candidates.push((f, "exited"));
@@ -260,6 +289,7 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                     f[1],
                     &[
                         ("identity", ""),
+                        ("root_birth", ""),
                         ("agent", ""),
                         ("state", ""),
                         ("source", ""),
@@ -336,6 +366,7 @@ pub fn starting(pane: &str, pid: &str, agent: Option<AgentKind>) -> Result<(), L
             Some((
                 &format!("{pid}:launch"),
                 agent.map(|a| a.command()).unwrap_or(""),
+                "",
             )),
         )?;
     }
@@ -351,7 +382,7 @@ pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
     let observed = observe_hook_target(&pane, agent)?;
     let guard = LifecycleGuard::acquire()?;
     let current = observe_hook_target(&pane, agent)?;
-    if observed.identity != current.identity {
+    if observed.identity != current.identity || observed.root_birth != current.root_birth {
         return Err(LifecycleError::ChangedAgent);
     }
     pane_state(
@@ -360,20 +391,21 @@ pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
         lifecycle,
         "hook",
         &current.previous_state,
-        Some((&current.identity, agent.command())),
+        Some((&current.identity, agent.command(), &current.root_birth)),
     )?;
     reconcile(&guard)
 }
 
 struct HookTarget {
     identity: String,
+    root_birth: String,
     previous_state: String,
 }
 
 fn observe_hook_target(pane: &str, agent: AgentKind) -> Result<HookTarget, LifecycleError> {
     let record = tmux_output(&["display-message", "-p", "-t", pane, PANE_FORMAT])?;
     let f: Vec<_> = record.split(SEPARATOR).collect();
-    if f.len() != 17 || f[1] != pane || f[4] != "0" {
+    if f.len() != 18 || f[1] != pane || f[4] != "0" {
         return Err(LifecycleError::Unattributed);
     }
     let all = processes()?;
@@ -385,8 +417,20 @@ fn observe_hook_target(pane: &str, agent: AgentKind) -> Result<HookTarget, Lifec
         return Err(LifecycleError::Unattributed);
     }
     let identity = format!("{}:{}:{}", f[2], agents[0].pid, agents[0].birth);
+    let root_birth = all
+        .iter()
+        .find(|p| p.pid == f[2])
+        .ok_or(LifecycleError::Unattributed)?
+        .birth
+        .clone();
     Ok(HookTarget {
-        previous_state: if f[7] == identity { f[9] } else { "" }.to_owned(),
+        previous_state: if f[7] == identity && (f[17].is_empty() || f[17] == root_birth) {
+            f[9]
+        } else {
+            ""
+        }
+        .to_owned(),
+        root_birth,
         identity,
     })
 }
@@ -418,7 +462,7 @@ fn pane_state(
     lifecycle: Lifecycle,
     source: &str,
     previous: &str,
-    binding: Option<(&str, &str)>,
+    binding: Option<(&str, &str, &str)>,
 ) -> Result<(), LifecycleError> {
     let state = match lifecycle {
         Lifecycle::Starting => "starting",
@@ -447,8 +491,12 @@ fn pane_state(
         ));
     }
     options.extend([("state", state), ("source", source)]);
-    if let Some((identity, agent)) = binding {
-        options.extend([("agent", agent), ("identity", identity)]);
+    if let Some((identity, agent, root_birth)) = binding {
+        options.extend([
+            ("agent", agent),
+            ("root_birth", root_birth),
+            ("identity", identity),
+        ]);
     }
     pane_options(guard, pane, &options)
 }

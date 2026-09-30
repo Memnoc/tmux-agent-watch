@@ -109,6 +109,123 @@ class Activity(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, 'fake worker did not become a zombie')
             time.sleep(.01)
 
+    def reaping_worker(self):
+        parent = self.path / 'reaping-parent.py'
+        reap = self.path / 'reap'
+        parent.write_text('import os, time\nfrom pathlib import Path\n'
+                          'pid = os.fork()\n'
+                          f'if pid == 0: os.execl({str(self.fake)!r}, "codex", "300")\n'
+                          f'while not Path({str(reap)!r}).exists(): time.sleep(.01)\n'
+                          'os.waitpid(pid, 0)\n'
+                          f'while not Path({str(self.path / "restart")!r}).exists(): time.sleep(.01)\n'
+                          'if os.fork() == 0:\n'
+                          f'    os.execl({str(self.fake)!r}, "codex", "300")\n'
+                          'time.sleep(300)\n')
+        self.tmux('respawn-pane', '-k', '-t', self.pane, '/usr/bin/python3', str(parent))
+        pid, = self.wait_fake_agents(1)
+        return pid, reap
+
+    def reap_worker(self, pid, marker):
+        marker.touch()
+        deadline = time.monotonic() + 3
+        while subprocess.run(['ps', '-p', pid, '-o', 'stat='], capture_output=True).returncode == 0:
+            self.assertLess(time.monotonic(), deadline, 'fake worker was not reaped')
+            time.sleep(.01)
+
+    def test_reaped_child_keeps_observed_exit_and_review(self):
+        pid, reap = self.reaping_worker()
+        self.cli('hook', 'codex', 'stop')
+        since = self.option('attention_since')
+        self.make_zombie(pid)
+        self.assertIn('Exited', self.cli('status'))
+        self.reap_worker(pid, reap)
+        for _ in range(3):
+            status = self.cli('status')
+            self.assertIn('REVIEW', status)
+            self.assertIn('Exited', status)
+            self.assertIn('exit code unknown', status)
+            self.assertNotIn('Running process', status)
+            self.assertEqual(self.option('attention_since'), since)
+            self.assertEqual(self.option('source'), 'hook')
+            for name in ('exit_code', 'exit_signal', 'exit_time'):
+                self.assertEqual(self.option(name), '')
+
+    def test_live_preupgrade_handoff_survives_binding_upgrade_and_reaping(self):
+        pid, reap = self.reaping_worker()
+        self.cli('hook', 'codex', 'stop')
+        since = self.option('attention_since')
+        # Older live tmux records have agent PID/birth but no root birth.
+        self.tmux('set-option', '-pu', '-t', self.pane, '@drudwyn_p_root_birth')
+        self.assertIn('REVIEW', self.cli('status'))
+        self.assertEqual(self.option('attention_since'), since)
+        os.kill(int(pid), signal.SIGTERM)
+        self.reap_worker(pid, reap)
+        status = self.cli('status')
+        self.assertIn('REVIEW', status)
+        self.assertIn('Exited', status)
+        self.assertEqual(self.option('attention_since'), since)
+
+    def test_child_reaped_between_scans_keeps_attention_through_inspection(self):
+        pid, reap = self.reaping_worker()
+        self.cli('hook', 'codex', 'permissionRequest')
+        since = self.option('attention_since')
+        os.kill(int(pid), signal.SIGTERM)
+        self.reap_worker(pid, reap)
+        self.assertIn('Exited', self.cli('status'))
+        for command in ('cockpit', 'navigator'):
+            ui = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', str(BIN), command)
+            self.tmux('resize-window', '-t', ui, '-x', '160', '-y', '40')
+            deadline = time.monotonic() + 5
+            while True:
+                output = self.tmux('capture-pane', '-p', '-t', ui)
+                if 'NEEDS INPUT' in output and 'hook' in output:
+                    break
+                self.assertLess(time.monotonic(), deadline, 'retained attention missing from UI')
+                time.sleep(.03)
+            self.tmux('send-keys', '-t', ui, 'j', 'k', 'Escape')
+            status = self.cli('status')
+            self.assertIn('NEEDS INPUT', status)
+            self.assertIn('Exited', status)
+            self.assertNotIn('Running process', status)
+            self.assertEqual(self.option('attention_since'), since)
+
+    def test_reaped_working_child_becomes_unknown_without_completion(self):
+        pid, reap = self.reaping_worker()
+        self.cli('hook', 'codex', 'userPromptSubmit')
+        os.kill(int(pid), signal.SIGTERM)
+        self.reap_worker(pid, reap)
+        status = self.cli('status')
+        self.assertIn('UNKNOWN', status)
+        self.assertIn('Exited', status)
+        self.assertIn('exit code unknown', status)
+        self.assertNotIn('WORKING', status)
+        self.assertNotIn('REVIEW', status)
+        self.assertEqual(self.option('attention_since'), '')
+        self.assertNotIn('WORKING', self.cli('hud', 'fleet', 'activity', self.window))
+        self.assertNotIn('RUNNING', self.cli('hud', 'fleet', 'activity', self.window))
+
+    def test_replacement_supersedes_reaped_child_attention(self):
+        pid, reap = self.reaping_worker()
+        root = self.tmux('display-message', '-p', '-t', self.pane, '#{pane_pid}')
+        self.cli('hook', 'codex', 'stop')
+        os.kill(int(pid), signal.SIGTERM)
+        self.reap_worker(pid, reap)
+        self.assertIn('REVIEW', self.cli('status'))
+        (self.path / 'restart').touch()
+        replacement, = self.wait_fake_agents(1)
+        self.assertNotEqual(replacement, pid)
+        self.assertEqual(self.tmux('display-message', '-p', '-t', self.pane, '#{pane_pid}'), root)
+        status = self.cli('status')
+        self.assertIn('RUNNING', status)
+        self.assertNotIn('REVIEW', status)
+        self.assertNotIn('Exited', status)
+        self.assertEqual(self.option('attention_since'), '')
+        self.cli('hook', 'codex', 'userPromptSubmit')
+        self.assertIn('WORKING', self.cli('status'))
+        self.tmux('respawn-pane', '-k', '-t', self.pane, 'sleep', '300')
+        self.cli('scan')
+        self.assertEqual(self.option('state'), '')
+
     def test_zombie_is_exited_and_cannot_own_hook(self):
         pid, = self.unreaped_workers()
         self.make_zombie(pid)
