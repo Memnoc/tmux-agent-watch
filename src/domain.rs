@@ -42,6 +42,7 @@ impl AgentKind {
 pub enum Lifecycle {
     Starting,
     Working,
+    Running,
     Waiting,
     Review,
     Failed,
@@ -54,6 +55,7 @@ impl Lifecycle {
         match value {
             "starting" => Self::Starting,
             "working" => Self::Working,
+            "running" => Self::Running,
             "needs_input" | "waiting" => Self::Waiting,
             "done" | "review" => Self::Review,
             "failed" => Self::Failed,
@@ -65,7 +67,8 @@ impl Lifecycle {
         match self {
             Self::Starting => "STARTING",
             Self::Working => "WORKING",
-            Self::Waiting => "WAITING",
+            Self::Running => "RUNNING",
+            Self::Waiting => "NEEDS INPUT",
             Self::Review => "REVIEW",
             Self::Failed => "FAILED",
             Self::Unknown => "UNKNOWN",
@@ -81,6 +84,7 @@ impl Lifecycle {
 pub enum EvidenceSource {
     Hook,
     Process,
+    Launch,
     #[default]
     Unknown,
 }
@@ -89,8 +93,17 @@ impl EvidenceSource {
     pub fn from_tmux(value: &str) -> Self {
         match value {
             "hook" => Self::Hook,
+            "launch" => Self::Launch,
             "observer" | "process" => Self::Process,
             _ => Self::Unknown,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Hook => "hook",
+            Self::Process => "process",
+            Self::Launch => "launch",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -145,11 +158,40 @@ pub struct Workspace {
     pub evidence: EvidenceSource,
     pub state_since: Option<u64>,
     pub attention_since: Option<u64>,
+    pub process: String,
+    pub exit_code: Option<i32>,
+    pub exit_signal: Option<String>,
+    pub exit_time: Option<u64>,
 }
 
 impl Workspace {
+    pub fn process_label(&self) -> String {
+        match self.process.as_str() {
+            "running" => "Running process".into(),
+            "starting" => "Launch in progress".into(),
+            "ambiguous" => "Ambiguous: multiple agents; ownership unknown".into(),
+            "exited" => format!(
+                "Exited{} · exit code {} · signal {} · time {} (not task completion)",
+                if self.exit_code.is_some_and(|c| c != 0) || self.exit_signal.is_some() {
+                    " (FAILED)"
+                } else {
+                    ""
+                },
+                self.exit_code
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".into()),
+                self.exit_signal.as_deref().unwrap_or("none/unknown"),
+                self.exit_time
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "unknown".into())
+            ),
+            _ => "Process/exit unknown".into(),
+        }
+    }
     pub fn is_agent(&self) -> bool {
-        self.agent != AgentKind::Unknown || self.lifecycle != Lifecycle::Unknown
+        self.agent != AgentKind::Unknown
+            || self.lifecycle != Lifecycle::Unknown
+            || !self.process.is_empty()
     }
 
     pub fn role(&self) -> &'static str {

@@ -12,7 +12,7 @@ const FIELD_SEPARATOR: char = '\u{241f}';
 
 // Intentionally excludes @drudwyn_message and pane content. This format is
 // part of the project's content-blind privacy boundary.
-const WINDOW_FORMAT: &str = "#{session_name}␟#{window_id}␟#{window_name}␟#{pane_id}␟#{pane_current_path}␟#{pane_current_command}␟#{@drudwyn_state}␟#{@drudwyn_source}␟#{@drudwyn_since}␟#{@drudwyn_attention_since}␟#{@drudwyn_repo}␟#{@drudwyn_worktree}␟#{@drudwyn_branch}␟#{@drudwyn_git_status}";
+const WINDOW_FORMAT: &str = "#{session_name}␟#{window_id}␟#{window_name}␟#{pane_id}␟#{pane_current_path}␟#{pane_current_command}␟#{@drudwyn_state}␟#{@drudwyn_source}␟#{@drudwyn_since}␟#{@drudwyn_attention_since}␟#{@drudwyn_repo}␟#{@drudwyn_worktree}␟#{@drudwyn_branch}␟#{@drudwyn_git_status}␟#{@drudwyn_activity_pane}␟#{@drudwyn_agent}␟#{@drudwyn_process}␟#{@drudwyn_exit_code}␟#{@drudwyn_exit_time}␟#{@drudwyn_exit_signal}";
 
 #[derive(Debug, Error)]
 pub enum DiscoveryError {
@@ -20,7 +20,7 @@ pub enum DiscoveryError {
     Spawn(#[from] std::io::Error),
     #[error("tmux discovery failed: {0}")]
     Tmux(String),
-    #[error("invalid tmux record: expected 14 fields, found {found}")]
+    #[error("invalid tmux record: expected 14 or 20 fields, found {found}")]
     Record { found: usize },
 }
 
@@ -34,8 +34,9 @@ pub fn discover() -> Result<Vec<Workspace>, DiscoveryError> {
 }
 
 pub fn discover_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
+    crate::lifecycle::scan().map_err(|e| DiscoveryError::Tmux(e.to_string()))?;
     let output = Command::new("tmux")
-        .args(["list-windows", "-a", "-F", WINDOW_FORMAT])
+        .args(["list-panes", "-a", "-F", WINDOW_FORMAT])
         .output()?;
     if !output.status.success() {
         return Err(DiscoveryError::Tmux(
@@ -94,9 +95,18 @@ pub fn parse_windows(input: &str) -> Result<Vec<Workspace>, DiscoveryError> {
 }
 
 fn parse_all_windows(input: &str) -> Result<Vec<Workspace>, DiscoveryError> {
+    let mut selected = std::collections::HashSet::new();
     let workspaces = input
         .lines()
         .filter(|line| !line.is_empty())
+        .filter(|line| {
+            let f: Vec<_> = line.split(FIELD_SEPARATOR).collect();
+            f.len() < 20 || f[14].is_empty() || f[3] == f[14]
+        })
+        .filter(|line| {
+            let f: Vec<_> = line.split(FIELD_SEPARATOR).collect();
+            f.len() < 2 || selected.insert((f[0].to_owned(), f[1].to_owned()))
+        })
         .map(parse_window)
         .collect::<Result<Vec<_>, _>>()?;
     let mut unique: Vec<Workspace> = Vec::new();
@@ -119,7 +129,7 @@ fn parse_all_windows(input: &str) -> Result<Vec<Workspace>, DiscoveryError> {
 
 fn parse_window(line: &str) -> Result<Workspace, DiscoveryError> {
     let fields = line.split(FIELD_SEPARATOR).collect::<Vec<_>>();
-    if fields.len() != 14 {
+    if fields.len() != 14 && fields.len() != 20 {
         return Err(DiscoveryError::Record {
             found: fields.len(),
         });
@@ -144,11 +154,20 @@ fn parse_window(line: &str) -> Result<Workspace, DiscoveryError> {
         project: None,
         coordinator: None,
         coordinator_available: false,
-        agent: AgentKind::from_command(fields[5]).unwrap_or(AgentKind::Unknown),
+        agent: AgentKind::from_command(if fields.len() == 20 {
+            fields[15]
+        } else {
+            fields[5]
+        })
+        .unwrap_or(AgentKind::Unknown),
         lifecycle: Lifecycle::from_tmux(fields[6]),
         evidence: EvidenceSource::from_tmux(fields[7]),
         state_since: fields[8].parse().ok(),
         attention_since: fields[9].parse().ok(),
+        process: fields.get(16).unwrap_or(&"").to_string(),
+        exit_code: fields.get(17).and_then(|v| v.parse().ok()),
+        exit_time: fields.get(18).and_then(|v| v.parse().ok()),
+        exit_signal: fields.get(19).and_then(|v| optional_string(v)),
     })
 }
 

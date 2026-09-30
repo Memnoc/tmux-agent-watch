@@ -3,9 +3,14 @@
 [Documentation](README.md) · [Project home](../README.md)
 
 Agent process detection works without setup. The default Rust scanner reports
-a detected live process as working; it cannot tell when that process needs input
+a detected live process as **Running**; it cannot tell when that process needs input
 or has finished a turn. Configure lifecycle hooks below to enable the `! INPUT`,
-`REVIEW`, and `! FAIL` badges. Hooks take precedence over process detection.
+`REVIEW`, and `! FAIL` badges. **Working** requires a supported activity hook.
+Hooks are bound to the originating pane and observed agent process lifetime;
+inspection and ordinary scans preserve attention until a newer event replaces it.
+A replacement process starts without its predecessor's activity evidence.
+Multiple agents in one window show Unknown ownership instead of selecting the
+active pane arbitrarily. Hooks from an unrelated shell are rejected.
 
 | Agent              | Integration                                  | Without it           |
 | ------------------ | -------------------------------------------- | -------------------- |

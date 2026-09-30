@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::domain::{AgentKind, Lifecycle};
 
 const SEPARATOR: char = '\u{241f}';
-const PANE_FORMAT: &str = "#{window_id}␟#{pane_id}␟#{pane_current_command}␟#{pane_dead}␟#{@drudwyn_state}␟#{@drudwyn_source}";
+const PANE_FORMAT: &str = "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_current_command}␟#{pane_dead}␟#{pane_dead_status}␟#{pane_dead_time}␟#{@drudwyn_p_identity}␟#{@drudwyn_p_agent}␟#{@drudwyn_p_state}␟#{@drudwyn_p_source}␟#{@drudwyn_p_since}␟#{@drudwyn_p_attention_since}␟#{@drudwyn_launch_pane}␟#{@drudwyn_launch_pid}␟#{pane_dead_signal}␟#{@drudwyn_launch_stage}";
 
 #[derive(Debug, Error)]
 pub enum LifecycleError {
@@ -20,57 +20,292 @@ pub enum LifecycleError {
     Tmux,
     #[error("TMUX_PANE is not available")]
     MissingPane,
+    #[error("Lifecycle event has no unique matching live agent in its originating pane")]
+    Unattributed,
     #[error("unsupported lifecycle event: {0}")]
     UnsupportedEvent(String),
 }
 
+// Only executable names, process ancestry and birth times are observed. In
+// particular, never request argv, environment, or terminal output from ps.
+struct Process {
+    pid: String,
+    parent: String,
+    birth: String,
+    agent: Option<AgentKind>,
+}
+fn processes() -> Result<Vec<Process>, LifecycleError> {
+    let output = Command::new("ps")
+        .args(["-eo", "pid=,ppid=,lstart=,comm="])
+        .output()?;
+    if !output.status.success() {
+        return Err(LifecycleError::Tmux);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let f: Vec<_> = line.split_whitespace().collect();
+            (f.len() >= 8).then(|| Process {
+                pid: f[0].into(),
+                parent: f[1].into(),
+                birth: f[2..7].join("-"),
+                agent: AgentKind::from_command(f[7]),
+            })
+        })
+        .collect())
+}
+fn belongs_to(process: &Process, root: &str, all: &[Process]) -> bool {
+    let mut current = process;
+    for _ in 0..128 {
+        if current.pid == root {
+            return true;
+        }
+        let Some(parent) = all.iter().find(|p| p.pid == current.parent) else {
+            return false;
+        };
+        if parent.pid == current.pid {
+            return false;
+        }
+        current = parent;
+    }
+    false
+}
+
 pub fn scan() -> Result<(), LifecycleError> {
     let output = tmux_output(&["list-panes", "-a", "-F", PANE_FORMAT])?;
+    let all = processes()?;
     let mut windows = BTreeMap::<&str, Vec<Vec<&str>>>::new();
+    let mut seen = std::collections::HashSet::new();
     for line in output.lines().filter(|line| !line.is_empty()) {
         let fields = line.split(SEPARATOR).collect::<Vec<_>>();
-        if fields.len() != 6 {
+        if fields.len() == 17 && seen.insert(fields[1]) {
+            windows.entry(fields[0]).or_default().push(fields);
+        }
+    }
+    for (window, panes) in windows {
+        let mut candidates = Vec::new();
+        let mut ambiguous = false;
+        for f in &panes {
+            let agents: Vec<_> = all
+                .iter()
+                .filter(|p| p.agent.is_some() && belongs_to(p, f[2], &all))
+                .collect();
+            if agents.len() > 1 {
+                ambiguous = true;
+            }
+            let live = if f[4] == "0" && agents.len() == 1 {
+                agents.first().copied()
+            } else {
+                None
+            };
+            let retained = f[7].split(':').next() == Some(f[2]) && !f[7].is_empty();
+            let launched = f[1] == f[13] && f[2] == f[14];
+            if let Some(process) = live {
+                let identity = format!("{}:{}:{}", f[2], process.pid, process.birth);
+                if f[7] != identity {
+                    pane_option(f[1], "identity", &identity)?;
+                    pane_option(f[1], "agent", process.agent.unwrap().command())?;
+                    pane_state(f[1], Lifecycle::Running, "process", "")?;
+                }
+                candidates.push((f, "running"));
+            } else if f[4] == "1"
+                && (retained || launched || AgentKind::from_command(f[3]).is_some())
+            {
+                if !retained {
+                    pane_option(f[1], "identity", &format!("{}:exited", f[2]))?;
+                    pane_option(
+                        f[1],
+                        "agent",
+                        AgentKind::from_command(f[3])
+                            .map(|a| a.command())
+                            .unwrap_or(""),
+                    )?;
+                }
+                // A surviving dead pane is tmux's authoritative exit receipt.
+                // Keep a hook handoff visible alongside its separate exit.
+                if !matches!(f[9], "done" | "needs_input" | "failed") || !retained {
+                    let state = if (!f[5].is_empty() && f[5] != "0") || !f[15].is_empty() {
+                        Lifecycle::Failed
+                    } else {
+                        Lifecycle::Unknown
+                    };
+                    pane_state(f[1], state, "process", if retained { f[9] } else { "" })?;
+                }
+                candidates.push((f, "exited"));
+            } else if launched && f[4] == "0" && f[7].ends_with(":launch") {
+                let state = if f[16] == "starting" {
+                    Lifecycle::Starting
+                } else {
+                    Lifecycle::Running
+                };
+                pane_state(
+                    f[1],
+                    state,
+                    if f[16] == "starting" {
+                        "launch"
+                    } else {
+                        "process"
+                    },
+                    f[9],
+                )?;
+                candidates.push((
+                    f,
+                    if f[16] == "starting" {
+                        "starting"
+                    } else {
+                        "running"
+                    },
+                ));
+            } else if agents.len() <= 1 {
+                for key in [
+                    "identity",
+                    "agent",
+                    "state",
+                    "source",
+                    "since",
+                    "attention_since",
+                ] {
+                    pane_option(f[1], key, "")?;
+                }
+            }
+        }
+        // Multiple independent agents have no window-level owner. Do not let
+        // pane order or the active pane choose which worker gets represented.
+        if ambiguous || candidates.len() > 1 {
+            clear(window)?;
+            set_option(window, "@drudwyn_state", "unknown")?;
+            set_option(window, "@drudwyn_process", "ambiguous")?;
             continue;
         }
-        windows.entry(fields[0]).or_default().push(fields);
-    }
-    // Lifecycle metadata belongs to a window. Reconcile all its panes before
-    // publishing it, so a shell/editor split cannot temporarily erase an agent.
-    for (window_id, panes) in windows {
-        let agent_pane = panes
-            .iter()
-            .filter_map(|fields| AgentKind::from_command(fields[2]).map(|agent| (fields, agent)))
-            .max_by_key(|(fields, _)| fields[3] != "1");
-        let Some((fields, agent)) = agent_pane else {
-            let previous = &panes[0];
-            if !previous[4].is_empty() && previous[5] != "hook" {
-                clear(window_id)?;
-            }
+        let Some((f, process_state)) = candidates.first() else {
+            clear(window)?;
             continue;
         };
-
-        // Remove content retained by v1 as soon as v2 observes a workspace.
-        set_option(window_id, "@drudwyn_agent", agent.command())?;
-        set_option(window_id, "@drudwyn_message", "")?;
-        if fields[3] == "1" {
-            set_state(window_id, Lifecycle::Failed, "process")?;
-        } else if fields[4].is_empty() || fields[5] != "hook" {
-            set_state(window_id, Lifecycle::Working, "process")?;
+        for key in ["agent", "state", "source", "since", "attention_since"] {
+            let value = tmux_output(&[
+                "show-option",
+                "-pqv",
+                "-t",
+                f[1],
+                &format!("@drudwyn_p_{key}"),
+            ])?;
+            set_option(window, &format!("@drudwyn_{key}"), &value)?;
         }
+        set_option(window, "@drudwyn_activity_pane", f[1])?;
+        set_option(window, "@drudwyn_process", process_state)?;
+        set_option(
+            window,
+            "@drudwyn_exit_code",
+            if *process_state == "exited" { f[5] } else { "" },
+        )?;
+        set_option(
+            window,
+            "@drudwyn_exit_time",
+            if *process_state == "exited" { f[6] } else { "" },
+        )?;
+        set_option(
+            window,
+            "@drudwyn_exit_signal",
+            if *process_state == "exited" {
+                f[15]
+            } else {
+                ""
+            },
+        )?;
+        set_option(window, "@drudwyn_message", "")?;
+        let state = tmux_output(&["show-option", "-wqv", "-t", window, "@drudwyn_state"])?;
+        write_style(window, Lifecycle::from_tmux(&state))?;
     }
     Ok(())
+}
+
+pub fn starting(pane: &str, pid: &str, agent: Option<AgentKind>) -> Result<(), LifecycleError> {
+    let window = tmux_output(&["display-message", "-p", "-t", pane, "#{window_id}"])?;
+    set_option(&window, "@drudwyn_launch_stage", "starting")?;
+    let identity = tmux_output(&["show-option", "-pqv", "-t", pane, "@drudwyn_p_identity"])?;
+    // A worker may report a hook before new-window returns. Never overwrite
+    // that stronger evidence with the coordinator's startup bookkeeping.
+    if identity.split(':').next() != Some(pid) {
+        pane_option(pane, "identity", &format!("{pid}:launch"))?;
+        pane_option(pane, "agent", agent.map(|a| a.command()).unwrap_or(""))?;
+        pane_state(pane, Lifecycle::Starting, "launch", "")?;
+    }
+    scan()
 }
 
 pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
     let lifecycle = map_event(agent, event)
         .ok_or_else(|| LifecycleError::UnsupportedEvent(event.to_owned()))?;
     let pane = env::var("TMUX_PANE").map_err(|_| LifecycleError::MissingPane)?;
-    let window_id = tmux_output(&["display-message", "-p", "-t", &pane, "#{window_id}"])?;
-    if window_id.is_empty() {
-        return Ok(());
+    let record = tmux_output(&["display-message", "-p", "-t", &pane, PANE_FORMAT])?;
+    let f: Vec<_> = record.split(SEPARATOR).collect();
+    if f.len() != 17 || f[1] != pane || f[4] != "0" {
+        return Err(LifecycleError::Unattributed);
     }
-    set_option(&window_id, "@drudwyn_agent", agent.command())?;
-    set_state(&window_id, lifecycle, "hook")
+    let all = processes()?;
+    let agents: Vec<_> = all
+        .iter()
+        .filter(|p| p.agent.is_some() && belongs_to(p, f[2], &all))
+        .collect();
+    if agents.len() != 1 || agents[0].agent != Some(agent) {
+        return Err(LifecycleError::Unattributed);
+    }
+    let identity = format!("{}:{}:{}", f[2], agents[0].pid, agents[0].birth);
+    pane_option(&pane, "identity", &identity)?;
+    pane_option(&pane, "agent", agent.command())?;
+    pane_state(
+        &pane,
+        lifecycle,
+        "hook",
+        if f[7] == identity { f[9] } else { "" },
+    )?;
+    scan()
+}
+
+fn pane_option(pane: &str, name: &str, value: &str) -> Result<(), LifecycleError> {
+    tmux_status(&[
+        "set-option",
+        "-pq",
+        "-t",
+        pane,
+        &format!("@drudwyn_p_{name}"),
+        value,
+    ])
+}
+fn pane_state(
+    pane: &str,
+    lifecycle: Lifecycle,
+    source: &str,
+    previous: &str,
+) -> Result<(), LifecycleError> {
+    let state = match lifecycle {
+        Lifecycle::Starting => "starting",
+        Lifecycle::Running => "running",
+        Lifecycle::Working => "working",
+        Lifecycle::Waiting => "needs_input",
+        Lifecycle::Review => "done",
+        Lifecycle::Failed => "failed",
+        Lifecycle::Unknown => "unknown",
+    };
+    if previous != state {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string();
+        pane_option(pane, "since", &now)?;
+        pane_option(
+            pane,
+            "attention_since",
+            if lifecycle.needs_attention() {
+                &now
+            } else {
+                ""
+            },
+        )?;
+    }
+    pane_option(pane, "state", state)?;
+    pane_option(pane, "source", source)
 }
 
 pub fn map_event(agent: AgentKind, event: &str) -> Option<Lifecycle> {
@@ -91,35 +326,6 @@ pub fn map_event(agent: AgentKind, event: &str) -> Option<Lifecycle> {
     }
 }
 
-fn set_state(window_id: &str, lifecycle: Lifecycle, source: &str) -> Result<(), LifecycleError> {
-    let state = match lifecycle {
-        Lifecycle::Starting => "starting",
-        Lifecycle::Working => "working",
-        Lifecycle::Waiting => "needs_input",
-        Lifecycle::Review => "done",
-        Lifecycle::Failed => "failed",
-        Lifecycle::Unknown => "",
-    };
-    let previous = tmux_output(&["show-option", "-wqv", "-t", window_id, "@drudwyn_state"])?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        .to_string();
-    if previous != state {
-        set_option(window_id, "@drudwyn_since", &now)?;
-        if lifecycle.needs_attention() {
-            set_option(window_id, "@drudwyn_attention_since", &now)?;
-        } else {
-            set_option(window_id, "@drudwyn_attention_since", "")?;
-        }
-    }
-    set_option(window_id, "@drudwyn_state", state)?;
-    set_option(window_id, "@drudwyn_source", source)?;
-    set_option(window_id, "@drudwyn_message", "")?;
-    write_style(window_id, lifecycle)
-}
-
 /// Repaint existing markers without altering lifecycle evidence or timestamps.
 pub fn refresh_styles() -> Result<(), LifecycleError> {
     let windows = tmux_output(&["list-windows", "-a", "-F", "#{window_id}␟#{@drudwyn_state}"])?;
@@ -137,7 +343,7 @@ fn write_style(window_id: &str, lifecycle: Lifecycle) -> Result<(), LifecycleErr
     let theme = tmux_output(&["show-option", "-gqv", "@drudwyn-theme"])?;
     let dawn = theme == "dawn";
     let (name, fallback) = match lifecycle {
-        Lifecycle::Working | Lifecycle::Starting => {
+        Lifecycle::Running | Lifecycle::Working | Lifecycle::Starting => {
             ("working", if dawn { "#56949f" } else { "#9ccfd8" })
         }
         Lifecycle::Waiting => ("needs-input", if dawn { "#ea9d34" } else { "#f6c177" }),
@@ -152,7 +358,10 @@ fn write_style(window_id: &str, lifecycle: Lifecycle) -> Result<(), LifecycleErr
             },
         ),
         Lifecycle::Failed => ("failed", if dawn { "#b4637a" } else { "#eb6f92" }),
-        Lifecycle::Unknown => return Ok(()),
+        Lifecycle::Unknown => {
+            set_option(window_id, "@drudwyn_marker", "")?;
+            return set_option(window_id, "@drudwyn_window_style", "");
+        }
     };
     let configured_color =
         tmux_output(&["show-option", "-gqv", &format!("@drudwyn-{name}-color")])?;
@@ -188,6 +397,11 @@ fn clear(window_id: &str) -> Result<(), LifecycleError> {
         "@drudwyn_marker",
         "@drudwyn_window_style",
         "@drudwyn_agent",
+        "@drudwyn_activity_pane",
+        "@drudwyn_process",
+        "@drudwyn_exit_code",
+        "@drudwyn_exit_time",
+        "@drudwyn_exit_signal",
     ] {
         set_option(window_id, option, "")?;
     }

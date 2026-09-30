@@ -18,11 +18,14 @@ pub fn hud_fleet(workspaces: &[Workspace], session: &str, theme: Theme, _redact:
             .iter()
             .any(|member| member == session)
     });
-    let (mut total, mut working, mut waiting, mut review, mut failed) = (0, 0, 0, 0, 0);
+    let (mut total, mut working, mut running, mut starting, mut waiting, mut review, mut failed) =
+        (0, 0, 0, 0, 0, 0, 0);
     for workspace in scoped.filter(|w| w.is_agent()) {
         total += 1;
         match workspace.lifecycle {
-            Lifecycle::Starting | Lifecycle::Working => working += 1,
+            Lifecycle::Working => working += 1,
+            Lifecycle::Running => running += 1,
+            Lifecycle::Starting => starting += 1,
             Lifecycle::Waiting => waiting += 1,
             Lifecycle::Review => review += 1,
             Lifecycle::Failed => failed += 1,
@@ -33,11 +36,15 @@ pub fn hud_fleet(workspaces: &[Workspace], session: &str, theme: Theme, _redact:
     let (color, label, count) = if failed > 0 {
         (theme.love, "FAILED", failed)
     } else if waiting > 0 {
-        (theme.gold, "WAITING", waiting)
+        (theme.gold, "NEEDS INPUT", waiting)
     } else if review > 0 {
         (theme.pine, "REVIEW", review)
     } else if working > 0 {
         (theme.rose, "WORKING", working)
+    } else if running > 0 {
+        (theme.rose, "RUNNING", running)
+    } else if starting > 0 {
+        (theme.rose, "STARTING", starting)
     } else {
         (theme.muted, "COCKPIT", total)
     };
@@ -75,7 +82,12 @@ pub fn hud_selected(
         hex(color),
         workspace.lifecycle.label(),
         hex(theme.muted),
-        age(workspace.state_since),
+        format!(
+            "{} · {} · {}",
+            age(workspace.state_since),
+            workspace.evidence.label(),
+            workspace.process_label()
+        ),
     )
 }
 
@@ -161,7 +173,21 @@ pub fn sidebar(
                 "    \x1b[38;2;{}m{} · {}\x1b[0m\n\n",
                 rgb(color),
                 workspace.lifecycle.label(),
-                age(workspace.state_since)
+                format!(
+                    "{} · {}",
+                    workspace.evidence.label(),
+                    match workspace.process.as_str() {
+                        "exited" => format!(
+                            "EXIT {}",
+                            workspace
+                                .exit_code
+                                .map(|c| c.to_string())
+                                .unwrap_or_else(|| "?".into())
+                        ),
+                        "ambiguous" => "ownership?".into(),
+                        _ => age(workspace.state_since),
+                    }
+                )
             ));
             map_row(&mut click_map, row, &workspace.identity.window_id);
             row += 2;
@@ -204,7 +230,7 @@ fn state_color(state: Lifecycle, theme: Theme) -> ratatui::style::Color {
         Lifecycle::Waiting => theme.gold,
         Lifecycle::Review => theme.pine,
         Lifecycle::Failed => theme.love,
-        Lifecycle::Starting | Lifecycle::Working => theme.rose,
+        Lifecycle::Running | Lifecycle::Starting | Lifecycle::Working => theme.rose,
         Lifecycle::Unknown => theme.muted,
     }
 }
@@ -257,16 +283,36 @@ mod tests {
             evidence: EvidenceSource::Hook,
             state_since: None,
             attention_since: None,
+            process: "running".into(),
+            exit_code: None,
+            exit_signal: None,
+            exit_time: None,
         }
+    }
+
+    #[test]
+    fn narrow_sidebar_keeps_review_and_exit_in_one_metadata_row() {
+        let mut worker = item(Lifecycle::Review);
+        worker.process = "exited".into();
+        worker.exit_code = Some(23);
+        let frame = sidebar(
+            &[worker],
+            "dev",
+            "@1",
+            true,
+            Theme::rose_pine(Variant::Moon),
+            false,
+        );
+        assert!(frame.text.contains("REVIEW · hook · EXIT 23"));
     }
 
     #[test]
     fn ambient_surfaces_use_fixed_metadata_only() {
         let theme = Theme::rose_pine(Variant::Moon);
         let workspaces = vec![item(Lifecycle::Waiting)];
-        assert!(hud_fleet(&workspaces, "dev", theme, false).contains("WAITING 1"));
+        assert!(hud_fleet(&workspaces, "dev", theme, false).contains("NEEDS INPUT 1"));
         let frame = sidebar(&workspaces, "dev", "@1", true, theme, false);
-        assert!(frame.text.contains("WAITING"));
+        assert!(frame.text.contains("NEEDS INPUT"));
         assert!(frame.click_map.contains("@1"));
     }
 

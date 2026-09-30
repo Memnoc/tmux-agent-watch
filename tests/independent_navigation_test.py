@@ -27,15 +27,30 @@ class IndependentNavigation(unittest.TestCase):
         subprocess.run(['git', '-C', str(self.repo), '-c', 'user.name=Test', '-c',
                         'user.email=test@example.invalid', 'commit', '-qm', 'initial', '--allow-empty'], check=True)
         self.tmux('-f', '/dev/null', 'new-session', '-d', '-s', 'project', '-c', str(self.repo))
+        # Keep the requested cwd stable while testing newly created shells.
+        self.tmux('set-option', '-g', 'default-command', 'bash --noprofile --norc')
         self.addCleanup(lambda: self.tmux('kill-server', check=False))
         self.home = self.tmux('display-message', '-p', '-t', 'project', '#{window_id}')
-        self.worker = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', 'project', '-n', 'worker', '-c', str(self.repo))
-        self.tmux('set-option', '-w', '-t', self.worker, '@drudwyn_state', 'review')
+        fake_bin = Path(self.tmp.name) / 'fake-worker'
+        fake_bin.mkdir()
+        fake_agent = fake_bin / 'codex'
+        fake_agent.symlink_to(shutil.which('sleep'))
+        self.assertEqual(fake_agent.resolve(), Path(shutil.which('sleep')).resolve())
+        self.worker = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', 'project', '-n', 'worker', '-c', str(self.repo), str(fake_agent), '300')
         self.env = {**os.environ, 'TMUX': f'{self.socket},{self.tmux("display-message", "-p", "#{pid}")},0'}
         self.env.pop('TMUX_PANE', None)
+        worker_pid = self.tmux('display-message', '-p', '-t', self.worker, '#{pane_pid}')
+        executable = Path('/proc') / worker_pid / 'exe'
+        if executable.exists():
+            self.assertEqual(executable.resolve(), Path(shutil.which('sleep')).resolve())
+        self.worker_hook('stop')
         self.client_output = {}
         self.client_fds = {}
         self.clients = [self.attach(), self.attach()]
+
+    def worker_hook(self, event):
+        pane = self.tmux('display-message', '-p', '-t', self.worker, '#{pane_id}')
+        subprocess.run([str(BIN), 'hook', 'codex', event], env={**self.env, 'TMUX_PANE': pane}, text=True, capture_output=True, check=True)
 
     def tmux(self, *args, check=True):
         return subprocess.run(['tmux', '-S', self.socket, *args], text=True,
@@ -457,7 +472,7 @@ class IndependentNavigation(unittest.TestCase):
             self.assertEqual(self.selection(self.clients[1]), other)
         self.ui('cockpit', self.tmux('display-message', '-p', '-t', self.home, '#{window_name}'),
                 expected='Coordinator shell')
-        self.tmux('set-option', '-w', '-t', self.worker, '@drudwyn_state', 'working')
+        self.worker_hook('userPromptSubmit')
         self.assertIn('WORKING 1', self.command('hud', 'fleet', 'project', self.home).stdout)
 
     def test_same_named_projects_redaction_and_external_agents(self):

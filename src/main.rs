@@ -348,7 +348,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 let label = workspace.lifecycle.label();
                 let name = workspace.identity.window_name.as_str();
                 println!(
-                    "{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\tevidence {}\t{}",
                     workspace.identity.window_id,
                     label,
                     workspace.role(),
@@ -356,7 +356,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         "Workspace"
                     } else {
                         name
-                    }
+                    },
+                    workspace.agent.label(),
+                    workspace.evidence.label(),
+                    workspace.process_label()
                 );
             }
         }

@@ -173,10 +173,13 @@ EOF
 
   attention=0
   case "$state" in
+    running) agent_label='RUN'; agent_color="$working_colour" ;;
+    starting) agent_label='START'; agent_color="$working_colour" ;;
     working) agent_label='WORK'; agent_color="$working_colour" ;;
     needs_input) agent_label='! INPUT'; agent_color="$waiting_colour"; badge_fg='#191724'; attention=1 ;;
     done) agent_label='REVIEW'; agent_color="$review_colour"; badge_fg='#faf4ed'; attention=1 ;;
     failed) agent_label='! FAIL'; agent_color="$failed_colour"; badge_fg='#191724'; attention=1 ;;
+    unknown) agent_label='UNKNOWN'; agent_color="$iris" ;;
     *) agent_label=''; agent_color="$iris" ;;
   esac
   if [ -n "$agent_label" ]; then
@@ -191,7 +194,7 @@ EOF
 }
 
 rows="$(tmux list-windows -t "$session" \
-  -F '#{window_index}|#{window_id}|#{window_name}|#{window_active}|#{@drudwyn_state}|#{@drudwyn_branch}|#{@drudwyn_repo}|#{@drudwyn_git_status}|#{pane_current_path}|#{@drudwyn_since}|#{@drudwyn_context_repo}|#{@drudwyn_agent}|#{pane_current_command}' \
+  -F '#{window_index}|#{window_id}|#{window_name}|#{window_active}|#{@drudwyn_state}|#{@drudwyn_branch}|#{@drudwyn_repo}|#{@drudwyn_git_status}|#{pane_current_path}|#{@drudwyn_since}|#{@drudwyn_context_repo}|#{@drudwyn_agent}|#{pane_current_command}|#{@drudwyn_source}|#{@drudwyn_process}|#{@drudwyn_exit_code}' \
   2>/dev/null || true)"
 current_is_agent="$(printf '%s\n' "$rows" | awk -F'|' -v id="$current" '$2 == id && $5 != "" { print 1; exit }')"
 
@@ -220,7 +223,7 @@ current_branch=''
 current_repo=''
 current_agent_icon="$agent_icon"
 
-while IFS='|' read -r index window_id name _active state branch repo git_status path since context_repo agent_kind command; do
+while IFS='|' read -r index window_id name _active state branch repo git_status path since context_repo agent_kind command evidence process exit_code; do
   [ -n "$window_id" ] || continue
   if [ "$redact" = on ]; then name=Workspace; branch=private; fi
   short_name="$(printf '%s' "$name" | cut -c1-"$agent_name_limit")"
@@ -239,11 +242,13 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
       context="$(git_context "$repo" "$branch" "$state" "$width")"
     elif [ -n "$state" ]; then
       case "$state" in
+        running) state_label='RUNNING'; state_detail='process'; context_color="$working_colour" ;;
+        starting) state_label='STARTING'; state_detail='launch'; context_color="$working_colour" ;;
         working) state_label='WORKING'; state_detail='active'; context_color="$working_colour" ;;
         needs_input) state_label='! INPUT'; state_detail='needs you'; context_color="$waiting_colour" ;;
-        done) state_label='REVIEW'; state_detail='ready'; context_color="$review_colour" ;;
+        done) state_label='REVIEW'; state_detail='inspect'; context_color="$review_colour" ;;
         failed) state_label='FAILED'; state_detail='stopped'; context_color="$failed_colour" ;;
-        *) state_label='AGENT'; state_detail='active'; context_color="$iris" ;;
+        *) state_label='UNKNOWN'; state_detail='unknown'; context_color="$iris" ;;
       esac
       age="$(age_label "$since")"
       branch_context=''
@@ -267,6 +272,14 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
     fi
   fi
 
+  if [ "$window_id" = "$current" ] && [ "$agent" = 1 ]; then
+    context="${context} #[fg=${muted}]${evidence:-unknown}#[default]"
+    case "$process" in
+      exited) context="${context} EXIT ${exit_code:-?}" ;;
+      ambiguous) context="${context} ambiguous ownership" ;;
+    esac
+  fi
+
   if [ "$agent" = 1 ]; then
     right_count=$((right_count + 1))
     show_agent=0
@@ -281,8 +294,12 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
         failed) color="$failed_colour"; badge_fg='#191724'; attention=1; state_label='! FAIL' ;;
         needs_input) color="$waiting_colour"; badge_fg='#191724'; attention=1; state_label='! INPUT' ;;
         done) color="$review_colour"; badge_fg='#faf4ed'; attention=1; state_label='REVIEW' ;;
-        *) color="$working_colour" ;;
+        running) color="$working_colour"; state_label='RUN' ;;
+        starting) color="$working_colour"; state_label='START' ;;
+        working) color="$working_colour"; state_label='WORK' ;;
+        *) color="$iris"; state_label='UNKNOWN' ;;
       esac
+      [ "$process" != exited ] || state_label="${state_label} EXIT ${exit_code:-?}"
       if [ "$attention" = 1 ]; then
         # Keep the state readable without growing every badge by a full label.
         label_limit=$((agent_name_limit - ${#state_label} - 1))
@@ -295,10 +312,10 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
         fi
       elif [ "$window_id" = "$current" ]; then
         number_colour="$color"; [ "$colour_numbers" != off ] || number_colour="$text"
-        item="#[range=user|${window_id}]#[bg=default,fg=${love},bold]● #[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${color}]${short_name}#[norange]"
+        item="#[range=user|${window_id}]#[bg=default,fg=${love},bold]● #[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${color}]${short_name} ${state_label}#[norange]"
       else
         number_colour="$color"; [ "$colour_numbers" != off ] || number_colour="$subtle"
-        item="#[range=user|${window_id}]#[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${subtle}]${short_name}#[norange]"
+        item="#[range=user|${window_id}]#[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${subtle}]${short_name} ${state_label}#[norange]"
       fi
       right="${right}  ${item}"
     else

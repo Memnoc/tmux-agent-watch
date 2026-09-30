@@ -3,6 +3,7 @@
 from pathlib import Path
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -57,9 +58,17 @@ class SettingsTest(unittest.TestCase):
 
     def agent(self):
         window = self.tmux("display-message", "-p", "-t", "test:0", "#{window_id}")
-        for key, value in [("state", "needs_input"), ("source", "hook"),
-                           ("agent", "codex"), ("since", "100")]:
-            self.tmux("set-option", "-w", "-t", window, "@drudwyn_" + key, value)
+        fake = Path(self.directory.name) / "codex"
+        fake.symlink_to(shutil.which("sleep"))
+        self.assertEqual(fake.resolve(), Path(shutil.which("sleep")).resolve())
+        self.tmux("respawn-pane", "-k", "-t", window, str(fake), "300")
+        pane = self.tmux("display-message", "-p", "-t", window, "#{pane_id}")
+        pid = self.tmux("display-message", "-p", "-t", pane, "#{pane_pid}")
+        executable = Path('/proc') / pid / 'exe'
+        if executable.exists():
+            self.assertEqual(executable.resolve(), Path(shutil.which('sleep')).resolve())
+        subprocess.run([str(ROOT / "target/debug/tmux-drudwyn"), "hook", "codex", "permissionRequest"], env={**self.env, "TMUX_PANE": pane}, check=True, capture_output=True)
+        self.state_since = self.tmux("show-option", "-wqv", "-t", window, "@drudwyn_since")
         return window
 
     def bar(self, window, width=160):
@@ -122,7 +131,7 @@ class SettingsTest(unittest.TestCase):
         self.wait_text("Applied Waiting symbol")
         self.assertEqual(self.tmux("show-option", "-wqv", "-t", window, "@drudwyn_marker"),
                          "#[fg=#123456]!#[default]")
-        self.assertEqual(self.tmux("show-option", "-wqv", "-t", window, "@drudwyn_since"), "100")
+        self.assertEqual(self.tmux("show-option", "-wqv", "-t", window, "@drudwyn_since"), self.state_since)
         self.assertEqual(self.tmux("show-option", "-wqv", "-t", window, "@drudwyn_source"), "hook")
 
     def test_theme_previews_and_descriptions_follow_selection(self):

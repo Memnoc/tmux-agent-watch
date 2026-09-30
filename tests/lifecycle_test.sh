@@ -13,6 +13,7 @@ cargo build --offline --manifest-path "$ROOT/Cargo.toml" >/dev/null
 binary="$ROOT/target/debug/tmux-drudwyn"
 ln -s "$(command -v sleep)" "$TMP_DIR/codex"
 ln -s "$(command -v sleep)" "$TMP_DIR/nvim"
+[ "$(readlink -f "$TMP_DIR/codex")" = "$(readlink -f "$(command -v sleep)")" ]
 tmux -L "$SOCKET" -f /dev/null new-session -d -s lifecycle -n AOC-TS "$TMP_DIR/codex 300"
 agent_pane="$(tmux -L "$SOCKET" display-message -p -t lifecycle:0 '#{pane_id}')"
 window="$(tmux -L "$SOCKET" display-message -p -t lifecycle:0 '#{window_id}')"
@@ -24,6 +25,9 @@ tmux set-option -g @drudwyn-icon-mode safe
 # Every scan must keep the live agent in the right-hand status cluster.
 for scan in 1 2 3; do
   "$binary" scan
+  [ "$(tmux show-option -wqv -t "$window" @drudwyn_state)" = running ] || {
+    echo "not ok: process presence must be Running, not Working"; exit 1;
+  }
   bar="$(bash "$ROOT/scripts/status-bar.sh" lifecycle "$window" 177)"
   right="${bar##*'#[align=right]'}"
   if ! printf '%s' "$right" | grep -Fq AOC-TS; then
@@ -36,10 +40,10 @@ printf 'ok: an ordinary split pane cannot remove a live agent from the status ba
 # Match AOC-TS's actual order: editor first, agent second. A transient clear
 # followed by reclassification also resets the lifecycle timestamp.
 tmux swap-pane -s "$agent_pane" -t "$helper_pane"
-tmux set-option -wq -t "$window" @drudwyn_since 100
+since="$(tmux show-option -wqv -t "$window" @drudwyn_since)"
 for scan in 1 2 3; do
   "$binary" scan
-  [ "$(tmux show-option -wqv -t "$window" @drudwyn_since)" = 100 ] || {
+  [ "$(tmux show-option -wqv -t "$window" @drudwyn_since)" = "$since" ] || {
     printf 'not ok: editor-first scanning cleared and recreated the agent state\n'
     exit 1
   }

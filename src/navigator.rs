@@ -58,6 +58,7 @@ struct Window {
     since: Option<u64>,
     branch: Option<String>,
     role: String,
+    evidence: String,
 }
 
 #[derive(Clone)]
@@ -492,7 +493,12 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
                     Style::default().fg(color),
                 ),
                 Span::styled(
-                    format!(" {:<8} {:<8} ", item.agent.label(), item.lifecycle.label()),
+                    format!(
+                        " {:<8} {} · {} ",
+                        item.agent.label(),
+                        item.lifecycle.label(),
+                        item.evidence
+                    ),
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -535,6 +541,25 @@ fn discover() -> io::Result<Vec<Window>> {
             .find(|w| w.identity.window_id == window.id)
         {
             window.role = workspace.role().into();
+            window.agent = workspace.agent;
+            window.lifecycle = workspace.lifecycle;
+            window.since = workspace.state_since;
+            window.managed = workspace.is_agent();
+            window.evidence = format!(
+                "{}{}",
+                workspace.evidence.label(),
+                match workspace.process.as_str() {
+                    "exited" => format!(
+                        " · EXIT {}",
+                        workspace
+                            .exit_code
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "?".into())
+                    ),
+                    "ambiguous" => " · ambiguous".into(),
+                    _ => String::new(),
+                }
+            );
         }
     }
     let aliases = crate::navigation::view_names()?;
@@ -584,6 +609,7 @@ fn parse_windows(output: &str) -> Vec<Window> {
                     }
                     .into(),
                     managed: agent != AgentKind::Unknown || lifecycle != Lifecycle::Unknown,
+                    evidence: "unknown".into(),
                     lifecycle,
                     since: fields[6].parse().ok(),
                     branch: (!fields[7].is_empty()).then(|| fields[7].into()),
@@ -633,7 +659,7 @@ fn state_color(state: Lifecycle, theme: Theme) -> ratatui::style::Color {
         Lifecycle::Waiting => theme.gold,
         Lifecycle::Review => theme.pine,
         Lifecycle::Failed => theme.love,
-        Lifecycle::Working | Lifecycle::Starting => theme.rose,
+        Lifecycle::Running | Lifecycle::Working | Lifecycle::Starting => theme.rose,
         Lifecycle::Unknown => theme.muted,
     }
 }

@@ -64,7 +64,9 @@ for keep_dead in off on; do
     start_fails "$name" sh -c "exit $status"
     assert_retained "$name"
     if [ "$keep_dead" = on ]; then
-      grep -Fq "exit status $status" "$TMP_DIR/error" || fail 'known process exit omitted'
+      # tmux can retain a dead pane without a native status, even after
+      # reaping. Keep that absence explicit instead of inventing the code.
+      grep -Eq "exit status ($status|unknown)" "$TMP_DIR/error" || fail 'process exit receipt omitted'
     fi
   done
 done

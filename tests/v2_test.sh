@@ -96,7 +96,7 @@ TMUX="$socket_path,$server_pid,0" DRUDWYN_V2_BIN="$real_binary" "$ROOT/scripts/v
 state="$(tmux -L "$SOCKET" show-option -wqv -t "$agent_window" @drudwyn_state)"
 message="$(tmux -L "$SOCKET" show-option -wqv -t "$agent_window" @drudwyn_message)"
 agent="$(tmux -L "$SOCKET" show-option -wqv -t "$agent_window" @drudwyn_agent)"
-[ "$state" = working ] && [ -z "$message" ] && [ "$agent" = codex ] || {
+[ "$state" = running ] && [ -z "$message" ] && [ "$agent" = codex ] || {
   printf 'not ok: v2 scan did not classify the process and erase legacy content\n'
   exit 1
 }
@@ -125,7 +125,7 @@ tmux -L "$SOCKET" set-option -wq -t "$agent_window" @drudwyn_state needs_input
 
 fleet="$(TMUX="$socket_path,$server_pid,0" DRUDWYN_V2_BIN="$real_binary" \
   "$ROOT/scripts/v2.sh" hud fleet v2 "$agent_window" moon)"
-printf '%s' "$fleet" | grep -Fq 'WAITING 1' || {
+printf '%s' "$fleet" | grep -Fq 'NEEDS INPUT 1' || {
   printf 'not ok: v2 HUD did not project the live fleet\n'
   exit 1
 }
@@ -149,7 +149,7 @@ sidebar="$(TMUX="$socket_path,$server_pid,0" DRUDWYN_V2_BIN="$real_binary" \
   "$ROOT/scripts/v2.sh" sidebar v2 "$agent_window" --expanded --theme moon)"
 frame="${sidebar%$'\034'*}"
 click_map="${sidebar##*$'\034'}"
-printf '%s' "$frame" | grep -Fq 'WAITING' || {
+printf '%s' "$frame" | grep -Fq 'NEEDS INPUT' || {
   printf 'not ok: v2 sidebar did not render the fixed lifecycle label\n'
   exit 1
 }
@@ -206,12 +206,12 @@ printf 'ok: failed metadata attachment retains its worktree and branch\n'
 
 TMUX="$socket_path,$server_pid,0" DRUDWYN_V2_BIN="$real_binary" \
   DRUDWYN_WORKTREE_ROOT="$worktree_root" "$ROOT/scripts/worktree-new.sh" \
-  --repo "$repo" work/exits-immediately false >/dev/null 2>&1 || true
+  --repo "$repo" --name exits-immediately work/exits-immediately false >/dev/null 2>&1 || true
 sleep 0.2
 if ! git -C "$repo" show-ref --verify --quiet refs/heads/work/exits-immediately ||
   [ ! -d "$worktree_root/work-exits-immediately" ] ||
-  tmux -L "$SOCKET" list-windows -a -F '#{window_name}' | grep -Fxq work-exits-immediately; then
-  printf 'not ok: failed v2 start lost retained work or left an unexpected live window\n'
+  ! tmux -L "$SOCKET" list-windows -a -F '#{window_name}' | grep -Fxq exits-immediately; then
+  printf 'not ok: failed v2 start lost retained work or lost its inspectable exit window\n'
   exit 1
 fi
 printf 'ok: failed v2 start retains its branch and linked worktree\n'

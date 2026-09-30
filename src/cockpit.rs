@@ -1094,7 +1094,7 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             Lifecycle::Waiting => app.theme.gold,
             Lifecycle::Review => app.theme.pine,
             Lifecycle::Failed => app.theme.love,
-            Lifecycle::Working | Lifecycle::Starting => app.theme.rose,
+            Lifecycle::Running | Lifecycle::Working | Lifecycle::Starting => app.theme.rose,
             Lifecycle::Unknown => app.theme.muted,
         };
         let project = app.project_label(workspace);
@@ -1143,7 +1143,7 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         Lifecycle::Waiting => app.theme.gold,
         Lifecycle::Review => app.theme.pine,
         Lifecycle::Failed => app.theme.love,
-        Lifecycle::Working | Lifecycle::Starting => app.theme.rose,
+        Lifecycle::Running | Lifecycle::Working | Lifecycle::Starting => app.theme.rose,
         Lifecycle::Unknown => app.theme.muted,
     };
     let private = app.config.redact_labels;
@@ -1189,7 +1189,15 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 Style::default().fg(app.theme.muted),
             ),
         ]),
-        Line::from(""),
+        detail_line(
+            "EVIDENCE",
+            format!(
+                "{} · {}",
+                workspace.evidence.label(),
+                workspace.process_label()
+            ),
+            app.theme.muted,
+        ),
         detail_line("ROLE", workspace.role().into(), app.theme.muted),
         detail_line(
             "IDENTITY",
@@ -1214,6 +1222,42 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         detail_line("BRANCH", branch.to_owned(), app.theme.muted),
         detail_line("CHECKOUT", format!("{checkout} · {git}"), app.theme.muted),
     ];
+    if workspace.process == "exited" {
+        lines.insert(
+            2,
+            detail_line(
+                "RESULT",
+                format!(
+                    "exit code {} · signal {}",
+                    workspace
+                        .exit_code
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown".into()),
+                    workspace.exit_signal.as_deref().unwrap_or("unknown")
+                ),
+                app.theme.muted,
+            ),
+        );
+        lines.insert(
+            3,
+            detail_line(
+                "EXIT TIME",
+                workspace
+                    .exit_time
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "unknown".into()),
+                app.theme.muted,
+            ),
+        );
+        lines.insert(
+            4,
+            detail_line(
+                "EXIT",
+                "Not task completion; checks unknown".into(),
+                app.theme.muted,
+            ),
+        );
+    }
     lines.extend(
         app.batches
             .get(&workspace.identity.window_id)
@@ -1263,9 +1307,11 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     ));
     let next = match workspace.lifecycle {
         Lifecycle::Waiting => " Enter  open · input required",
-        Lifecycle::Review => " Enter  open · review changes",
+        Lifecycle::Review => " Enter  open · inspect; checks unknown",
         Lifecycle::Failed => " Enter  open · inspect failure",
-        Lifecycle::Working | Lifecycle::Starting => " Enter  open · agent active",
+        Lifecycle::Running | Lifecycle::Working | Lifecycle::Starting => {
+            " Enter  open · agent active"
+        }
         Lifecycle::Unknown => " Enter  open workspace",
     };
     lines.push(Line::styled(next, Style::default().fg(app.theme.text)));
@@ -1447,6 +1493,53 @@ mod tests {
             evidence: EvidenceSource::Hook,
             state_since: Some(1),
             attention_since: None,
+            process: "running".into(),
+            exit_code: None,
+            exit_signal: None,
+            exit_time: None,
+        }
+    }
+
+    #[test]
+    fn activity_evidence_and_exit_receipt_are_readable() {
+        for width in [80, 120, 160] {
+            for (state, source, process, code) in [
+                (Lifecycle::Running, EvidenceSource::Process, "running", None),
+                (Lifecycle::Working, EvidenceSource::Hook, "running", None),
+                (Lifecycle::Review, EvidenceSource::Hook, "exited", Some(23)),
+                (
+                    Lifecycle::Unknown,
+                    EvidenceSource::Process,
+                    "exited",
+                    Some(0),
+                ),
+            ] {
+                let mut worker = workspace("work/test", state);
+                worker.evidence = source;
+                worker.process = process.into();
+                worker.exit_code = code;
+                worker.exit_time = code.map(|_| 1234567890);
+                let app = App::new(vec![worker], Variant::Moon, Config::default());
+                let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+                terminal.draw(|frame| render(frame, &app)).unwrap();
+                let content = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|c| c.symbol())
+                    .collect::<String>();
+                assert!(content.contains(state.label()));
+                assert!(content.contains(source.label()));
+                if let Some(code) = code {
+                    assert!(
+                        content.contains(&format!("code {code}")),
+                        "missing exit code at {width}: {content}"
+                    );
+                    assert!(content.contains("1234567890"));
+                    assert!(content.contains("Not task completion"));
+                }
+            }
         }
     }
 
@@ -1550,6 +1643,7 @@ Checkout: /repo/assembled"
         let mut coordinator = workspace("private-plan", Lifecycle::Unknown);
         coordinator.identity.window_name = "private-name".into();
         coordinator.agent = AgentKind::Unknown;
+        coordinator.process.clear();
         coordinator.project = Some("$7".into());
         coordinator.coordinator = Some("@1".into());
         coordinator.coordinator_available = true;

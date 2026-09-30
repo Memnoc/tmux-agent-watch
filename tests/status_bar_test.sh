@@ -163,7 +163,8 @@ printf '%s' "$git_bar" | grep -Fq '2 files'
 printf '%s' "$git_bar" | grep -Fq '?1'
 printf 'ok: centre context reports tracked lines, files, and untracked files\n'
 
-tmux -L "$SOCKET" new-window -d -t bar -n ordinary -c "$repo"
+# User shell startup can temporarily change cwd; observe a controlled shell.
+tmux -L "$SOCKET" new-window -d -t bar -n ordinary -c "$repo" bash --noprofile --norc
 ordinary_window="$(tmux -L "$SOCKET" display-message -p -t bar:ordinary '#{window_id}')"
 ordinary_bar="$($ROOT/scripts/status-bar.sh bar "$ordinary_window" 160)"
 if ! printf '%s' "$ordinary_bar" | grep -Fq '+2'; then

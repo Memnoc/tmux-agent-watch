@@ -227,8 +227,14 @@ pub fn start(request: Start) -> Result<Started, Error> {
             "-c",
         ])
         .arg(tmux_argument(&target.to_string_lossy().replace('#', "##")))
-        // Multiple arguments bypass the shell even for a lone agent executable.
-        .arg("env")
+        // A fixed setup shell enables exit retention before exec. Worker
+        // arguments remain separate argv entries, never interpolated shell code.
+        .args([
+            "sh",
+            "-c",
+            "tmux set-option -p -t \"$TMUX_PANE\" remain-on-exit on; exec \"$@\"",
+            "drudwyn-launch",
+        ])
         .args(command.into_iter().map(|arg| tmux_argument(&arg)))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -282,6 +288,12 @@ pub fn start(request: Start) -> Result<Started, Error> {
         fields[2].to_owned(),
     );
     let initialize = || -> Result<(), Error> {
+        // Bind startup before any slower project or Git initialization. The
+        // launch wrapper retains even a process that exits before this point.
+        set_window(&window, "@drudwyn_launch_pane", &launch_pane)?;
+        set_window(&window, "@drudwyn_launch_pid", &launch_pid)?;
+        crate::lifecycle::starting(&launch_pane, &launch_pid, expected_agent)
+            .map_err(|error| Error::Invalid(error.to_string()))?;
         crate::coordinator::protect_name(&window)?;
         // A fast process may emit a rename escape before new-window returns.
         // Finish initialization with the requested name after blocking escapes;
@@ -369,9 +381,12 @@ pub fn start(request: Start) -> Result<Started, Error> {
             expected_agent.map(|a| a.command()).unwrap_or(&pane.command),
         )?;
         set_window(&window, "@drudwyn_delivery", "not_sent")?;
+        set_window(&window, "@drudwyn_launch_stage", "observed")?;
+        crate::lifecycle::scan().map_err(|error| Error::Invalid(error.to_string()))?;
         Ok(())
     };
     if let Err(error) = initialize() {
+        let _ = crate::lifecycle::scan();
         return Err(retained_start_error(
             error,
             &target,

@@ -18,15 +18,31 @@ See what is running, what needs attention, and where to act without leaving tmux
 
 <img src="images/design/status-bar-anatomy.png" alt="Annotated tmux status bar split into three zones: ordinary workspaces on the left, content-blind Git context in the centre, and lifecycle-colored agents on the right, with a variant showing the active-workspace highlight">
 
-| Color | State   | Meaning                  |
-| ----- | ------- | ------------------------ |
-| Blue  | Working | The agent is active      |
-| Gold  | Waiting | The agent needs input    |
-| Green | Review  | Work is ready to inspect |
-| Red   | Failed  | The agent or task failed |
+| State | Evidence |
+| ----- | -------- |
+| Starting | A worker launch is in progress |
+| Running | A process exists; task activity is unknown |
+| Working | A supported lifecycle hook reports activity |
+| Needs input | A supported hook requests interaction |
+| Review | A supported handoff calls for inspection; checks and integration remain separate |
+| Failed | An observed command failure, nonzero exit, or supported failure hook |
+| Unknown | Evidence is missing or ownership is ambiguous |
 
-Only lifecycle state, branch, and Git counts are shown. The default Rust
-implementation never reads prompts, responses, or terminal scrollback.
+`tmux-drudwyn status`, Cockpit details, and the ambient projections show the
+activity evidence source. Process exit is separate: an exit code of zero does
+not establish task completion. Managed launches retain their exited pane;
+known exit code, signal, and time remain inspectable while tmux retains them.
+An unresolved hook handoff remains visible alongside exit, including a nonzero
+exit marked Failed. Missing exit evidence stays unknown. Closing the pane or
+losing tmux metadata loses that receipt; Drudwyn keeps no durable history.
+
+Selecting or inspecting a worker does not clear attention. Switching active
+splits does not change which agent owns the evidence. A new agent process does
+not inherit an old process's handoff. Compact labels use RUN, WORK, START, INPUT,
+REVIEW, and FAIL with the same meanings.
+
+Only fixed operational metadata, branch, and Git counts are shown. The default
+Rust implementation never reads prompts, responses, or terminal scrollback.
 
 ### Find work, then act
 
