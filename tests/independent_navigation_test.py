@@ -206,6 +206,44 @@ class IndependentNavigation(unittest.TestCase):
         self.assertEqual(self.tmux('show-option', '-gv', 'destroy-unattached'), 'on')
         self.assertEqual(self.tmux('show-option', '-gv', 'default-command'), 'touch ' + shlex.quote(str(marker)))
 
+    def test_new_session_backslash_names_preserve_literal_input_and_cleanup_policy(self):
+        other = self.selection(self.clients[1])
+        windows = self.tmux('list-windows', '-a', '-F', '#{window_id}␟#{pane_id}␟#{pane_pid}')
+        directory = Path(self.tmp.name) / 'literal\\;'
+        directory.mkdir()
+        for cleanup in ['off', 'on']:
+            self.tmux('set-option', '-g', 'destroy-unattached', cleanup)
+            # These are tmux's native stored spellings, also produced by
+            # `tmux new-session -s` with the literal input names below.
+            for name, stored_name in [(r'slash\word', r'slash\\word'),
+                                      ('slash\\word;', 'slash\\\\word;')]:
+                with self.subTest(cleanup=cleanup, name=name):
+                    before = set(self.tmux('list-sessions', '-F', '#{session_id}').splitlines())
+                    result = self.command('session', 'new', '--name', name,
+                                          '--directory', str(directory), client=self.clients[0], check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    session = result.stdout.strip()
+                    self.assertEqual(set(self.tmux('list-sessions', '-F', '#{session_id}').splitlines()),
+                                     before | {session})
+                    self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{session_name}'), stored_name)
+                    self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{pane_current_path}'), str(directory))
+                    self.assertTrue(self.selection(self.clients[0]).startswith(session + ':'))
+                    self.assertEqual(self.selection(self.clients[1]), other)
+                    self.assertEqual(self.tmux('show-option', '-gv', 'destroy-unattached'), cleanup)
+                    self.assertEqual(self.tmux('show-option', '-v', '-t', session, 'destroy-unattached'), '')
+                    duplicate = self.command('session', 'new', '--name', name,
+                                             client=self.clients[0], check=False)
+                    self.assertNotEqual(duplicate.returncode, 0)
+                    self.assertIn('duplicate session', duplicate.stderr)
+                    self.assertEqual(set(self.tmux('list-sessions', '-F', '#{session_id}').splitlines()),
+                                     before | {session})
+                    self.assertTrue(self.selection(self.clients[0]).startswith(session + ':'))
+                    self.assertEqual(self.selection(self.clients[1]), other)
+                    for window in windows.splitlines():
+                        self.assertIn(window, self.tmux('list-windows', '-a', '-F', '#{window_id}␟#{pane_id}␟#{pane_pid}'))
+                    self.tmux('switch-client', '-c', self.clients[0], '-t', 'project')
+                    self.tmux('kill-session', '-t', session, check=False)
+
     def test_new_session_form_corrects_duplicate_name_and_bad_directory(self):
         pane = self.session_form()
         original = self.tmux('list-sessions', '-F', '#{session_id}')

@@ -141,7 +141,9 @@ changes fields, `Enter` advances from the name or creates from the directory,
 `Backspace` deletes, and `Esc` cancels. Errors retain the form for correction.
 The shell opens only in the requesting terminal and appears in both navigators.
 Names cannot be empty or contain dots, colons, control characters, or `␟`;
-spaces and shell metacharacters are accepted as literal data.
+spaces and shell metacharacters are accepted as literal data. Tmux applies its
+native session-name spelling: for example, a backslash is stored and displayed
+as two backslashes, just as with `tmux new-session -s`.
 
 The command equivalent prints the new stable session ID:
 

@@ -53,7 +53,10 @@ pub fn create(name: &str, directory: Option<&Path>) -> io::Result<String> {
         .ok_or_else(|| io::Error::other("Starting directory must be valid UTF-8"))?;
     // -c and -s are tmux formats; escape hashes as well as argv separators.
     let directory = argument(&directory.replace('#', "##"));
-    let exact_name = format!("={name}:");
+    // tmux stores backslashes doubled in session names. Match that native
+    // spelling only for this queued target; creation still receives the input
+    // name, and every later action uses the returned stable session ID.
+    let exact_name = format!("={}:", name.replace('\\', "\\\\"));
     let name = argument(&name.replace('#', "##"));
     let shell = tmux(&["show-option", "-gv", "default-shell"])?;
     let session = tmux(&[

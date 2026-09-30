@@ -84,3 +84,34 @@ recovery, and batch setup remain their separate actions/tickets. Explicit relati
 directories resolve from the command's working directory. Tmux and the configured
 shell still own user startup hooks/configuration. Tests used only disposable
 servers and repositories under `/tmp`; `main` remains `eaf2446`.
+
+## Review correction receipt — 2026-09-30
+
+- Reproduced the P2 review finding with the public New Session command and two
+  attached clients: names containing a literal backslash, with or without a
+  trailing semicolon, returned `no such session` under both inherited
+  `destroy-unattached` modes. The four-case regression went red before the fix.
+- A disposable native tmux probe confirmed that `new-session -s` stores each
+  backslash doubled. Its
+  [name normalization](https://github.com/tmux/tmux/blob/3.4/session.c#L221-L237)
+  explains why the queued raw-name cleanup target failed. The initial target now
+  uses that native stored spelling; creation still receives the user's name as
+  argument data, and all later navigation, restoration, and cleanup use the
+  returned stable session ID. No valid name is newly rejected. Usage documents
+  tmux's native spelling instead of promising byte-identical backend storage.
+- The regression checks both cleanup modes, backslash names with/without a
+  trailing semicolon, a directory ending in literal backslash-semicolon,
+  canonical stored names, duplicate rejection, exactly one new session,
+  requester attachment, the other terminal's unchanged selection, existing
+  windows/panes/processes, unchanged global cleanup policy, and restoration of
+  inherited session policy. All 12 focused New Session tests pass.
+- `cargo fmt --check`, `cargo test --locked` (35 Rust tests), and
+  `git diff --check` passed. Complete `bash tests/run.sh` passed on the final
+  code: 29 real two-client tests, 13 navigator tests (one existing optional
+  Resurrect skip), 10 settings tests, and all launcher, lifecycle, privacy,
+  packaging, and release checks. Fixtures used only disposable servers and
+  repositories under `/tmp`; local tmux sockets required sandbox escalation.
+- Builder self-review covered normalization, exact targeting before the ID is
+  available, literal-input handling, duplicate errors, and privacy. A fresh
+  independent review follows this correction commit in the coordinating session.
+  No later ticket, specification, or `main` change is included.
