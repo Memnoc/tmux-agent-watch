@@ -33,6 +33,7 @@ use crate::{
 const COCKPIT_NAVIGATION: &[(&str, &str)] = &[("j/k", "Move"), ("Enter", "Open")];
 const COCKPIT_ACTIONS: &[(&str, &str)] = &[
     ("n", "New"),
+    ("c", "Coordinator"),
     ("f", "Finish"),
     ("/", "Filter"),
     ("r", "Refresh"),
@@ -148,11 +149,7 @@ impl App {
         if self.config.redact_labels {
             "Workspace"
         } else {
-            workspace
-                .checkout
-                .branch
-                .as_deref()
-                .unwrap_or(&workspace.identity.window_name)
+            &workspace.identity.window_name
         }
     }
 
@@ -268,6 +265,7 @@ fn event_loop(
                     let slug = slug(&task_text);
                     app.task = None;
                     match workspace::start(Start {
+                        name: None,
                         repo: std::env::current_dir()?,
                         branch: format!("{}{slug}", app.config.branch_prefix),
                         start_point: point.commit,
@@ -344,6 +342,14 @@ fn event_loop(
                 }) =>
             {
                 app.finishing = true
+            }
+            KeyCode::Char('c') => {
+                if let Some(workspace) = app.selected_workspace() {
+                    match crate::coordinator::open_window(&workspace.identity.window_id) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => app.error = Some(error.to_string()),
+                    }
+                }
             }
             KeyCode::Char('r') => {
                 app.workspaces = discovery::discover()?;
@@ -542,7 +548,7 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 Line::from(Span::styled(
                     format!(
                         "{} live · {} need attention",
-                        app.workspaces.len(),
+                        app.workspaces.iter().filter(|w| w.is_agent()).count(),
                         attention
                     ),
                     Style::default().fg(app.theme.muted),
@@ -562,7 +568,7 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         Span::styled(
             format!(
                 "{} live · {} need attention",
-                app.workspaces.len(),
+                app.workspaces.iter().filter(|w| w.is_agent()).count(),
                 attention
             ),
             Style::default().fg(app.theme.muted),
@@ -610,6 +616,11 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                     .fg(state_color)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::raw(format!(
+                "{} {} · ",
+                workspace.role(),
+                workspace.identity.window_id
+            )),
             Span::styled(project.to_owned(), Style::default().fg(app.theme.text)),
             Span::styled(" · ", Style::default().fg(app.theme.muted)),
             Span::styled(branch.to_owned(), Style::default().fg(app.theme.text)),
@@ -684,6 +695,25 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             ),
         ]),
         Line::from(""),
+        detail_line("ROLE", workspace.role().into(), app.theme.muted),
+        detail_line(
+            "IDENTITY",
+            format!(
+                "{} · project {}",
+                workspace.identity.window_id,
+                workspace.project.as_deref().unwrap_or("unknown")
+            ),
+            app.theme.muted,
+        ),
+        detail_line(
+            "COORD",
+            match &workspace.coordinator {
+                Some(id) if workspace.coordinator_available => format!("{id} · c return"),
+                Some(id) => format!("{id} unavailable · recover with coordinator set"),
+                None => "unknown · coordinator set to associate".into(),
+            },
+            app.theme.muted,
+        ),
         detail_line("TMUX", format!("{session} · {window}"), app.theme.muted),
         detail_line("PATH", path, app.theme.muted),
         detail_line("BRANCH", branch.to_owned(), app.theme.muted),
@@ -917,11 +947,64 @@ mod tests {
                 git_state: GitState::Clean,
                 is_linked_worktree: false,
             },
+            project: None,
+            coordinator: None,
+            coordinator_available: false,
             agent: AgentKind::Codex,
             lifecycle: state,
             evidence: EvidenceSource::Hook,
             state_since: Some(1),
             attention_since: None,
+        }
+    }
+
+    #[test]
+    fn coordinator_details_keep_role_identity_recovery_and_redacted_names() {
+        let mut coordinator = workspace("private-plan", Lifecycle::Unknown);
+        coordinator.identity.window_name = "private-name".into();
+        coordinator.agent = AgentKind::Unknown;
+        coordinator.project = Some("$7".into());
+        coordinator.coordinator = Some("@1".into());
+        coordinator.coordinator_available = true;
+        let mut worker = workspace("private-worker", Lifecycle::Working);
+        worker.identity.window_id = "@2".into();
+        worker.project = Some("$7".into());
+        worker.coordinator = Some("@1".into());
+        worker.coordinator_available = false;
+        for redacted in [false, true] {
+            let mut app = App::new(
+                vec![coordinator.clone(), worker.clone()],
+                Variant::Moon,
+                Config::default(),
+            );
+            app.config.redact_labels = redacted;
+            for selected in [0, 1] {
+                app.selected = selected;
+                let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+                terminal.draw(|frame| render(frame, &app)).unwrap();
+                let content = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>();
+                assert!(
+                    content.contains("1 live"),
+                    "coordinator shell counted as an agent"
+                );
+                assert!(content.contains("project $7"));
+                if selected == 0 {
+                    assert!(content.contains("Coordinator shell"));
+                    assert!(content.contains("@1 · c return"));
+                } else {
+                    assert!(content.contains("@1 unavailable"));
+                    assert!(content.contains("recover with coordinator set"));
+                }
+                if redacted {
+                    assert!(!content.contains("private-"));
+                }
+            }
         }
     }
 

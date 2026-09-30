@@ -30,6 +30,7 @@ const SEP: char = '\u{241f}';
 const FORMAT: &str = "#{session_name}␟#{window_id}␟#{window_index}␟#{window_name}␟#{pane_current_command}␟#{@drudwyn_state}␟#{@drudwyn_since}␟#{@drudwyn_branch}";
 const NAVIGATION_ACTIONS: &[(&str, &str)] = &[("j/k", "Move"), ("Enter", "Jump")];
 const WORKSPACE_ACTIONS: &[(&str, &str)] = &[
+    ("c", "Coordinator"),
     ("r", "Rename"),
     ("x", "Kill"),
     ("s", "Save"),
@@ -56,6 +57,7 @@ struct Window {
     lifecycle: Lifecycle,
     since: Option<u64>,
     branch: Option<String>,
+    role: String,
 }
 
 #[derive(Clone)]
@@ -78,6 +80,7 @@ enum NavigationAction {
     Continue,
     Close,
     Jump,
+    Coordinator,
     Kill,
     Save,
     Rename,
@@ -188,6 +191,7 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
                 .map(|item| (item.id.clone(), item.name.clone()));
             NavigationAction::Continue
         }
+        KeyCode::Char('c') => NavigationAction::Coordinator,
         KeyCode::Char('s') => NavigationAction::Save,
         KeyCode::Char('x') => {
             app.pending_kill = app
@@ -260,6 +264,18 @@ fn event_loop(
                     match crate::navigation::open(Some(&item.id), None) {
                         Ok(()) => return Ok(()),
                         Err(error) => app.notice = Some(format!("Jump failed: {error}")),
+                    }
+                }
+            }
+            NavigationAction::Coordinator => {
+                if let Some(item) = app
+                    .visible
+                    .get(app.selected)
+                    .and_then(|i| app.windows.get(*i))
+                {
+                    match crate::coordinator::open_window(&item.id) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => app.notice = Some(error.to_string()),
                     }
                 }
             }
@@ -468,8 +484,9 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!(
-                        "   {agent_icon} {:<3} {:<18}",
-                        item.index,
+                        " {agent_icon} {} {} · {}",
+                        item.id,
+                        item.role,
                         truncate(&item.name, 18)
                     ),
                     Style::default().fg(color),
@@ -479,18 +496,18 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{}  {}", age(item.since), branch),
+                    format!("{} {}", age(item.since), branch),
                     Style::default().fg(app.theme.muted),
                 ),
             ]))
         } else {
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!("   {:<3} {:<22}", item.index, truncate(&item.name, 22)),
+                    format!(" {} {} · {}", item.id, item.role, truncate(&item.name, 22)),
                     Style::default().fg(app.theme.text),
                 ),
                 Span::styled(
-                    format!(" {:<14} {}", item.session, branch),
+                    format!(" {} {}", item.session, branch),
                     Style::default().fg(app.theme.muted),
                 ),
             ]))
@@ -511,6 +528,15 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
 fn discover() -> io::Result<Vec<Window>> {
     let output = tmux_output(&["list-windows", "-a", "-F", FORMAT])?;
     let mut windows = parse_windows(&output);
+    let workspaces = crate::discovery::discover().map_err(io::Error::other)?;
+    for window in &mut windows {
+        if let Some(workspace) = workspaces
+            .iter()
+            .find(|w| w.identity.window_id == window.id)
+        {
+            window.role = workspace.role().into();
+        }
+    }
     let aliases = crate::navigation::view_names()?;
     for window in &mut windows {
         if let Some(name) = aliases.get(&window.session) {
@@ -551,6 +577,12 @@ fn parse_windows(output: &str) -> Vec<Window> {
                     index: fields[2].into(),
                     name: fields[3].into(),
                     agent,
+                    role: if agent != AgentKind::Unknown || lifecycle != Lifecycle::Unknown {
+                        "Ordinary agent"
+                    } else {
+                        "Shell"
+                    }
+                    .into(),
                     managed: agent != AgentKind::Unknown || lifecycle != Lifecycle::Unknown,
                     lifecycle,
                     since: fields[6].parse().ok(),
@@ -609,6 +641,42 @@ fn state_color(state: Lifecycle, theme: Theme) -> ratatui::style::Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn roles_and_ids_remain_visible_at_narrow_width_with_redaction() {
+        for role in [
+            "Worktree worker",
+            "Ordinary agent",
+            "Coordinator agent",
+            "Coordinator shell",
+            "Shell",
+        ] {
+            for width in [48, 64, 80, 120, 160] {
+                let mut app = populated_app();
+                app.windows.truncate(1);
+                app.visible = vec![0];
+                app.windows[0].role = role.into();
+                app.windows[0].managed = true;
+                app.redact = true;
+                let mut terminal =
+                    Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
+                terminal.draw(|frame| render(frame, &app)).unwrap();
+                let content = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|c| c.symbol())
+                    .collect::<String>();
+                assert!(
+                    content.contains(role),
+                    "missing {role} at {width}: {content}"
+                );
+                assert!(content.contains("@1"));
+                assert!(!content.contains("first"));
+            }
+        }
+    }
 
     #[test]
     fn discovery_includes_shells_and_groups_lifecycle_owned_windows_as_agents() {

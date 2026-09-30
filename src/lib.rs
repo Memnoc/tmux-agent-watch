@@ -2,6 +2,7 @@ pub mod ambient;
 mod brand;
 pub mod cockpit;
 pub mod config;
+pub mod coordinator;
 pub mod discovery;
 pub mod domain;
 mod icons;

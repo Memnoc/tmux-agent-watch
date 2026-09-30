@@ -219,3 +219,8 @@ pub(crate) fn context(format: &str) -> io::Result<String> {
     }
     Ok(String::new())
 }
+
+/// Stable session selected by the requesting terminal.
+pub fn current_session() -> io::Result<String> {
+    context("#{session_id}")
+}

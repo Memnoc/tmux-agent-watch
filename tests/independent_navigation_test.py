@@ -89,7 +89,7 @@ class IndependentNavigation(unittest.TestCase):
         else: env.pop('DRUDWYN_CLIENT', None)
         return subprocess.run([str(BIN), *args], env=env, capture_output=True, text=True, check=check)
 
-    def ui(self, surface, query):
+    def ui(self, surface, query, action="Enter", expected=None):
         pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project',
                          shlex.join(['env', f'DRUDWYN_CLIENT={self.clients[0]}', str(BIN), surface]))
         def wait(text):
@@ -103,8 +103,138 @@ class IndependentNavigation(unittest.TestCase):
         time.sleep(.1)
         self.tmux('send-keys', '-t', pane, 'Escape')
         time.sleep(.1)
-        self.tmux('send-keys', '-t', pane, 'Enter')
+        if expected:
+            self.assertIn(expected, self.tmux('capture-pane', '-p', '-t', pane))
+        self.tmux('send-keys', '-t', pane, action)
         time.sleep(.3)
+
+    def test_coordinator_association_and_return_preserve_identity(self):
+        other = self.selection(self.clients[1])
+        result = self.command('coordinator', 'set', '--window', self.home,
+                              client=self.clients[0], check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.command('navigate', '--window', self.worker, client=self.clients[0])
+        self.command('coordinator', 'open', client=self.clients[0])
+        self.assertTrue(self.selection(self.clients[0]).endswith(':' + self.home))
+        self.assertEqual(self.selection(self.clients[1]), other)
+        self.assertIn('Coordinator shell', self.command('status').stdout)
+        self.assertEqual(subprocess.check_output(['git', '-C', str(self.repo), 'branch',
+                                                 '--show-current'], text=True).strip(), 'main')
+
+    def test_three_named_workers_preserve_coordinator_and_user_names(self):
+        self.tmux('set-option', '-g', 'allow-rename', 'on')
+        self.tmux('set-option', '-g', 'automatic-rename', 'on')
+        self.tmux('rename-window', '-t', self.home, 'planning')
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        self.tmux('send-keys', '-t', self.home, r"printf '\033kzsh\033\\'", 'Enter')
+        time.sleep(.1)
+        other = self.selection(self.clients[1])
+        for number in range(3):
+            name = 'worker-' + str(number)
+            result = self.command('workspace', 'start', '--repo', str(self.repo),
+                                  '--name', name, 'work/' + name, '--', 'sh', '-c',
+                                  r"printf '\033kzsh\033\\'; exec sleep 300",
+                                  client=self.clients[0], check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            windows = self.tmux('list-windows', '-t', 'project', '-F', '#{window_name}␟#{window_id}')
+            worker = dict(row.split('␟') for row in windows.splitlines())[name]
+            self.command('navigate', '--window', worker, client=self.clients[0])
+            self.assertIn('Worktree worker', self.command('status').stdout)
+            self.tmux('rename-window', '-t', worker, 'my-' + name)
+            self.command('scan')
+            self.assertEqual(self.tmux('display-message', '-p', '-t', worker, '#{window_name}'), 'my-' + name)
+            self.assertEqual(self.tmux('show-options', '-wqv', '-t', worker, 'allow-rename'), 'off')
+            self.command('coordinator', 'open', client=self.clients[0])
+            self.assertTrue(self.selection(self.clients[0]).endswith(':' + self.home))
+        self.assertEqual(self.selection(self.clients[1]), other)
+        self.assertEqual(self.tmux('display-message', '-p', '-t', self.home, '#{window_name}'), 'planning')
+        self.assertEqual(subprocess.check_output(['git', '-C', str(self.repo), 'branch', '--show-current'], text=True).strip(), 'main')
+        self.tmux('kill-window', '-t', self.home)
+        before = self.selection(self.clients[0])
+        result = self.command('coordinator', 'open', client=self.clients[0], check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Coordinator unavailable', result.stderr)
+        self.assertIn('recover', result.stderr)
+        self.assertEqual(self.selection(self.clients[0]), before)
+        replacement = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', 'project:0', '-n', 'planning', '-c', str(self.repo))
+        result = self.command('coordinator', 'open', client=self.clients[0], check=False)
+        self.assertIn('Coordinator unavailable', result.stderr)
+        self.ui('cockpit', 'my-worker-0', 'c', 'unavailable')
+        self.assertNotEqual(replacement, self.home)
+        self.command('coordinator', 'set', '--window', replacement, client=self.clients[0])
+        self.command('coordinator', 'open', client=self.clients[0])
+        self.assertTrue(self.selection(self.clients[0]).endswith(':' + replacement))
+
+    def test_coordinator_return_from_navigators_and_cockpit(self):
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        result = self.command('workspace', 'start', '--repo', str(self.repo), 'work/example',
+                              '--', 'sleep', '300', client=self.clients[0])
+        worker = self.tmux('list-windows', '-t', 'project', '-f', '#{==:#{window_name},work/example}', '-F', '#{window_id}')
+        other = self.selection(self.clients[1])
+        for surface, query, expected in [('navigator', 'work/example', 'Worktree worker'),
+                                         ('cockpit', 'work/example', 'Worktree worker'),
+                                         ('sessions', 'project', 'Coordinator')]:
+            self.command('navigate', '--window', worker, client=self.clients[0])
+            self.ui(surface, query, 'c', expected)
+            self.assertTrue(self.selection(self.clients[0]).endswith(':' + self.home), surface)
+            self.assertEqual(self.selection(self.clients[1]), other)
+        self.ui('cockpit', self.tmux('display-message', '-p', '-t', self.home, '#{window_name}'),
+                expected='Coordinator shell')
+        self.tmux('set-option', '-w', '-t', self.worker, '@drudwyn_state', 'working')
+        self.assertIn('WORKING 1', self.command('hud', 'fleet', 'project', self.home).stdout)
+
+    def test_same_named_projects_redaction_and_external_agents(self):
+        # Same basename and display labels cannot establish a project association.
+        twin = Path(self.tmp.name) / 'another' / 'repo'
+        subprocess.run(['git', 'init', '-q', '-b', 'main', str(twin)], check=True)
+        subprocess.run(['git', '-C', str(twin), '-c', 'user.name=Test', '-c',
+                        'user.email=test@example.invalid', 'commit', '-qm', 'initial', '--allow-empty'], check=True)
+        session = self.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'twin', '-c', str(twin))
+        twin_home = self.tmux('display-message', '-p', '-t', session, '#{window_id}')
+        for window in [self.home, twin_home]: self.tmux('rename-window', '-t', window, 'same-name')
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        self.command('coordinator', 'set', '--window', twin_home, '--session', session)
+        self.tmux('set-option', '-g', '@drudwyn-redact-labels', 'on')
+        status = self.command('status').stdout
+        self.assertNotIn('same-name', status)
+        self.assertNotIn(str(self.repo), status)
+        self.assertIn(self.home + '\t', status)
+        self.assertIn(twin_home + '\t', status)
+        other = self.selection(self.clients[1])
+        self.command('coordinator', 'open', '--session', session, client=self.clients[0])
+        self.assertTrue(self.selection(self.clients[0]).endswith(':' + twin_home))
+        self.command('coordinator', 'open', '--session', '$0', client=self.clients[0])
+        self.assertTrue(self.selection(self.clients[0]).endswith(':' + self.home))
+        self.assertEqual(self.selection(self.clients[1]), other)
+        self.ui('cockpit', 'worker', 'c', 'unknown')
+        self.assertTrue(self.selection(self.clients[0]).endswith(':' + self.home))
+        self.ui('navigator', 'same-name', expected='Coordinator shell')
+        self.assertTrue(self.selection(self.clients[0]).endswith(':' + self.home))
+
+    def test_coordinator_agent_and_linked_checkout_association(self):
+        agent = Path(self.tmp.name) / 'codex'
+        agent.symlink_to('/bin/sleep')
+        self.tmux('respawn-pane', '-k', '-t', self.home, str(agent), '300')
+        time.sleep(.1)
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        self.assertIn('Coordinator agent', self.command('status').stdout)
+        self.command('workspace', 'start', '--repo', str(self.repo), 'work/first', '--',
+                     'sleep', '300', client=self.clients[0])
+        linked = self.repo.parent / 'repo-worktrees' / 'work-first'
+        worker = self.tmux('list-windows', '-t', 'project', '-f', '#{==:#{window_name},work/first}', '-F', '#{window_id}')
+        self.command('navigate', '--window', worker, client=self.clients[0])
+        self.command('workspace', 'start', '--repo', str(linked), 'work/second', '--',
+                     'sleep', '300', client=self.clients[0])
+        self.ui('cockpit', 'work/second', 'c', 'c return')
+        self.assertTrue(self.selection(self.clients[0]).endswith(':' + self.home))
+
+    def test_coordinator_moved_out_of_project_is_unavailable(self):
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        self.command('workspace', 'start', '--repo', str(self.repo), 'work/lost', '--',
+                     'sleep', '300', client=self.clients[0])
+        self.tmux('new-session', '-d', '-s', 'elsewhere')
+        self.tmux('move-window', '-s', self.home, '-t', 'elsewhere:')
+        self.ui('cockpit', 'work/lost', 'c', 'unavailable')
 
     def test_normal_tmux_selection_is_shared(self):
         self.tmux('select-window', '-t', self.worker)

@@ -24,6 +24,11 @@ struct Cli {
 enum Command {
     /// Print the live, content-blind workspace model.
     Status,
+    /// Associate or return to the project coordinator.
+    Coordinator {
+        #[command(subcommand)]
+        command: CoordinatorCommand,
+    },
     /// Navigate by stable window/session ID in the requesting terminal only.
     Navigate {
         #[arg(long, required_unless_present = "session")]
@@ -82,6 +87,22 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum CoordinatorCommand {
+    /// Choose an existing shell or agent in this project. Preserve its name.
+    Set {
+        #[arg(long)]
+        window: String,
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Return in this terminal only; unavailable coordinators offer recovery.
+    Open {
+        #[arg(long)]
+        session: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum WorkspaceCommand {
     Start {
         #[arg(long, default_value = ".")]
@@ -94,6 +115,9 @@ enum WorkspaceCommand {
         /// Intentionally include the current checkout's commits.
         #[arg(long)]
         from_current: bool,
+        /// Deliberate short window name; defaults to the branch.
+        #[arg(long)]
+        name: Option<String>,
         branch: String,
         #[arg(trailing_var_arg = true)]
         command: Vec<String>,
@@ -165,6 +189,18 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     match cli.command {
+        Command::Coordinator { command } => match command {
+            CoordinatorCommand::Set { window, session } => {
+                tmux_drudwyn::coordinator::set(&window, session.as_deref())?
+            }
+            CoordinatorCommand::Open { session } => {
+                let session = match session {
+                    Some(session) => session,
+                    None => tmux_drudwyn::navigation::current_session()?,
+                };
+                tmux_drudwyn::coordinator::open_project(&session)?;
+            }
+        },
         Command::Navigate { window, session } => {
             tmux_drudwyn::navigation::open(window.as_deref(), session.as_deref())?
         }
@@ -172,15 +208,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let config = Config::load_tmux()?;
             for workspace in discovery::discover()? {
                 let label = workspace.lifecycle.label();
-                let name = workspace
-                    .checkout
-                    .branch
-                    .as_deref()
-                    .unwrap_or(&workspace.identity.window_name);
+                let name = workspace.identity.window_name.as_str();
                 println!(
-                    "{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}",
                     workspace.identity.window_id,
                     label,
+                    workspace.role(),
                     if config.redact_labels {
                         "Workspace"
                     } else {
@@ -239,6 +272,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 base,
                 from_current,
                 branch,
+                name,
                 command,
             } => {
                 let base = match base {
@@ -258,6 +292,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     workspace::start(Start {
                         repo,
                         branch,
+                        name,
                         start_point: point.commit,
                         root,
                         command

@@ -137,6 +137,9 @@ pub struct Checkout {
 pub struct Workspace {
     pub identity: WorkspaceIdentity,
     pub checkout: Checkout,
+    pub project: Option<String>,
+    pub coordinator: Option<String>,
+    pub coordinator_available: bool,
     pub agent: AgentKind,
     pub lifecycle: Lifecycle,
     pub evidence: EvidenceSource,
@@ -145,6 +148,26 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub fn is_agent(&self) -> bool {
+        self.agent != AgentKind::Unknown || self.lifecycle != Lifecycle::Unknown
+    }
+
+    pub fn role(&self) -> &'static str {
+        if self.coordinator.as_deref() == Some(self.identity.window_id.as_str()) {
+            if self.is_agent() {
+                "Coordinator agent"
+            } else {
+                "Coordinator shell"
+            }
+        } else if self.checkout.is_linked_worktree {
+            "Worktree worker"
+        } else if self.is_agent() {
+            "Ordinary agent"
+        } else {
+            "Shell"
+        }
+    }
+
     pub fn sort_key(&self) -> (u8, u64, &str, &str) {
         let group = if self.lifecycle.needs_attention() {
             0

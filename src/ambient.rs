@@ -19,7 +19,7 @@ pub fn hud_fleet(workspaces: &[Workspace], session: &str, theme: Theme, _redact:
             .any(|member| member == session)
     });
     let (mut total, mut working, mut waiting, mut review, mut failed) = (0, 0, 0, 0, 0);
-    for workspace in scoped {
+    for workspace in scoped.filter(|w| w.is_agent()) {
         total += 1;
         match workspace.lifecycle {
             Lifecycle::Starting | Lifecycle::Working => working += 1,
@@ -249,6 +249,9 @@ mod tests {
                 git_state: GitState::Clean,
                 is_linked_worktree: false,
             },
+            project: None,
+            coordinator: None,
+            coordinator_available: false,
             agent: AgentKind::Codex,
             lifecycle: state,
             evidence: EvidenceSource::Hook,

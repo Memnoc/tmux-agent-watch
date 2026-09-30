@@ -25,6 +25,7 @@ const SEP: char = '\u{241f}';
 const FORMAT: &str = "#{session_name}␟#{session_windows}␟#{session_attached}␟#{session_id}";
 const NAVIGATION_ACTIONS: &[(&str, &str)] = &[("j/k", "Move"), ("Enter", "Switch")];
 const SESSION_ACTIONS: &[(&str, &str)] = &[
+    ("c", "Coordinator"),
     ("r", "Rename"),
     ("x", "Kill"),
     ("s", "Save"),
@@ -68,6 +69,7 @@ enum NavigationAction {
     Continue,
     Close,
     Switch,
+    Coordinator,
     Kill,
     Save,
     Rename,
@@ -169,6 +171,7 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
                 .map(|item| (item.id.clone(), item.name.clone()));
             NavigationAction::Continue
         }
+        KeyCode::Char('c') => NavigationAction::Coordinator,
         KeyCode::Char('s') => NavigationAction::Save,
         KeyCode::Char('x') => {
             app.pending_kill = app
@@ -243,6 +246,18 @@ fn event_loop(
                     match crate::navigation::open(None, Some(&session.id)) {
                         Ok(()) => return Ok(()),
                         Err(error) => app.notice = Some(format!("Switch failed: {error}")),
+                    }
+                }
+            }
+            NavigationAction::Coordinator => {
+                if let Some(session) = app
+                    .visible
+                    .get(app.selected)
+                    .and_then(|i| app.sessions.get(*i))
+                {
+                    match crate::coordinator::open_project(&session.id) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => app.notice = Some(error.to_string()),
                     }
                 }
             }

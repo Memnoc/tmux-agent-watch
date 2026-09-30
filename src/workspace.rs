@@ -24,6 +24,7 @@ pub enum Error {
 pub struct Start {
     pub repo: PathBuf,
     pub branch: String,
+    pub name: Option<String>,
     pub start_point: String,
     pub root: Option<PathBuf>,
     pub command: Vec<String>,
@@ -147,6 +148,13 @@ pub fn start(request: Start) -> Result<Started, Error> {
             &format!("{}^{{commit}}", request.start_point),
         ],
     )?;
+    let project = crate::coordinator::launch_project(&source)?;
+    let name = request.name.as_deref().unwrap_or(&request.branch);
+    if name.trim().is_empty() || name.chars().any(char::is_control) {
+        return Err(Error::Invalid(
+            "worker name must be nonempty and contain no control characters".into(),
+        ));
+    }
     fs::create_dir_all(&root)?;
     git_ok(
         Command::new("git")
@@ -161,18 +169,13 @@ pub fn start(request: Start) -> Result<Started, Error> {
     } else {
         request.command
     };
-    let slug = request.branch.replace('/', "-");
-    let window = Command::new("tmux")
-        .args([
-            "new-window",
-            "-d",
-            "-P",
-            "-F",
-            "#{window_id}",
-            "-n",
-            &slug,
-            "-c",
-        ])
+    let mut launch = Command::new("tmux");
+    launch.arg("new-window");
+    if let Some(project) = &project {
+        launch.args(["-t", project]);
+    }
+    let window = launch
+        .args(["-d", "-P", "-F", "#{window_id}", "-n", name, "-c"])
         .arg(&target)
         .args(command)
         .stdout(Stdio::piped())
@@ -215,6 +218,21 @@ pub fn start(request: Start) -> Result<Started, Error> {
         ));
     }
     let initialize = || -> Result<(), Error> {
+        crate::coordinator::protect_name(&window)?;
+        // A fast process may emit a rename escape before new-window returns.
+        // Finish initialization with the requested name after blocking escapes;
+        // no refresh or scan rewrites subsequent deliberate user renames.
+        tmux_ok(Command::new("tmux").args(["rename-window", "-t", &window, "--", name]))?;
+        if let Some(project) = &project {
+            tmux_ok(Command::new("tmux").args([
+                "set-option",
+                "-wq",
+                "-t",
+                &window,
+                "@drudwyn_project",
+                project,
+            ]))?;
+        }
         for (name, value) in [
             ("@drudwyn_branch", request.branch.as_str()),
             ("@drudwyn_worktree", target.to_str().unwrap_or("")),

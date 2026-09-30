@@ -219,3 +219,46 @@ or starting another worker. To launch a separate worker, choose a new branch and
 path. Drudwyn only removes a clean, unchanged allocation automatically when the
 tmux executable could not start at all. An immediate process exit, including
 exit code zero, is a failed launch rather than evidence of task completion.
+
+### Project coordinator and worker names (Rust v2)
+
+Explicitly choose an existing shell or agent window as the project's coordinator.
+Use the stable window ID shown in the workspace navigator:
+
+```sh
+tmux-drudwyn coordinator set --window @12
+tmux-drudwyn workspace start --repo . --name api work/api codex
+tmux-drudwyn coordinator open
+```
+
+The commands infer the requesting terminal when unambiguous; pass `--client`
+when needed. `coordinator set` and `coordinator open` also accept `--session $ID`
+for an explicit project session. Quote a literal session ID, for example
+`--session '$3'`. Coordinator association preserves its checkout branch and
+current window name. The window can host a shell or an agent; coordinator shells
+remain reachable without inflating live-agent totals.
+
+New workers launched from that project inherit its explicit association only
+when their Git common directory matches. Linked checkouts share that identity;
+separate repositories with the same display name do not. This identifies a
+project and coordinator, not a worker batch or integration destination. Existing
+external agents keep an unknown association until explicitly selected as a
+coordinator; sharing a repository alone does not assign them to a project.
+
+Press `c` in the workspace navigator or Cockpit to return to the selected
+workspace's coordinator, or in the session navigator to open the selected
+project's coordinator. Navigation moves only the requesting client. Workspace
+rows show text roles and stable window IDs; Cockpit details show the project ID,
+coordinator availability, and unknown associations. Redaction hides labels while
+retaining IDs and roles for navigation.
+
+`workspace start --name` supplies a deliberate short window name; omitting it
+uses the branch. Managed windows disable process-driven automatic/escape-sequence
+renaming. Explicit later renames through tmux or the navigator remain authoritative.
+The coordinator's existing name is preserved when it is associated.
+
+If the coordinator disappears, return reports that it is unavailable instead of
+selecting a window that reused its name or index. Open a shell in the project
+checkout, then explicitly select it with `coordinator set --window ID` to recover
+the route. This does not restore an agent conversation. Associations live only
+in tmux and must be selected again after that metadata is lost.

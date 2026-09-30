@@ -42,7 +42,41 @@ pub fn discover_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
             String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         ));
     }
-    let mut workspaces = parse_windows(&String::from_utf8_lossy(&output.stdout))?;
+    let mut workspaces = parse_all_windows(&String::from_utf8_lossy(&output.stdout))?;
+    let projects = crate::navigation::tmux(&[
+        "list-sessions",
+        "-F",
+        "#{session_id}␟#{@drudwyn_coordinator}",
+    ])?;
+    let associations = crate::navigation::tmux(&[
+        "list-windows",
+        "-a",
+        "-F",
+        "#{window_id}␟#{@drudwyn_project}␟#{session_id}",
+    ])?;
+    let memberships: Vec<Vec<_>> = associations
+        .lines()
+        .map(|row| row.split('␟').collect())
+        .collect();
+    for workspace in &mut workspaces {
+        workspace.project = memberships
+            .iter()
+            .find(|row| row[0] == workspace.identity.window_id)
+            .and_then(|row| optional_string(row[1]));
+        workspace.coordinator = workspace.project.as_ref().and_then(|project| {
+            projects
+                .lines()
+                .filter_map(|r| r.split_once('␟'))
+                .find(|(id, _)| id == project)
+                .and_then(|(_, coordinator)| optional_string(coordinator))
+        });
+        workspace.coordinator_available = workspace.coordinator.as_ref().is_some_and(|id| {
+            memberships
+                .iter()
+                .any(|row| row[0] == id && Some(row[2]) == workspace.project.as_deref())
+        });
+    }
+    workspaces.retain(|w| w.is_agent() || w.project.is_some() || w.checkout.is_linked_worktree);
     let aliases = crate::navigation::view_names()?;
     for workspace in &mut workspaces {
         if let Some(name) = aliases.get(&workspace.identity.session) {
@@ -53,14 +87,18 @@ pub fn discover_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
 }
 
 pub fn parse_windows(input: &str) -> Result<Vec<Workspace>, DiscoveryError> {
-    let mut workspaces = input
+    Ok(parse_all_windows(input)?
+        .into_iter()
+        .filter(Workspace::is_agent)
+        .collect())
+}
+
+fn parse_all_windows(input: &str) -> Result<Vec<Workspace>, DiscoveryError> {
+    let workspaces = input
         .lines()
         .filter(|line| !line.is_empty())
         .map(parse_window)
         .collect::<Result<Vec<_>, _>>()?;
-    workspaces.retain(|workspace| {
-        workspace.agent != AgentKind::Unknown || workspace.lifecycle != Lifecycle::Unknown
-    });
     let mut unique: Vec<Workspace> = Vec::new();
     for workspace in workspaces {
         if let Some(existing) = unique
@@ -103,6 +141,9 @@ fn parse_window(line: &str) -> Result<Workspace, DiscoveryError> {
             git_state: GitState::from_tmux(fields[13]),
             is_linked_worktree: !fields[11].is_empty(),
         },
+        project: None,
+        coordinator: None,
+        coordinator_available: false,
         agent: AgentKind::from_command(fields[5]).unwrap_or(AgentKind::Unknown),
         lifecycle: Lifecycle::from_tmux(fields[6]),
         evidence: EvidenceSource::from_tmux(fields[7]),
