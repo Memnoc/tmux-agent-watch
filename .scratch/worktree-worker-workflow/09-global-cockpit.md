@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done
+**Status:** done — independently reviewed through `12c05ce`; Standards and Spec clear of blockers
 
 **What to build:** The approved global overview becomes a real terminal inventory
 for dozens of workers, with consistent evidence and reliable inspection/opening.
@@ -229,3 +229,57 @@ four-project, 39-checkout sample was 1147ms snapshot, 1.161s CLI, 1.110s UI
 ready, 29ms End inspection and 5ms inspection during blocked refresh.
 Implementation, regression tests, user guidance and this correction receipt
 are committed atomically; independent re-review remains pending.
+
+### Independent final crosscheck receipt — 2026-09-30
+
+Reviewed the full ticket diff `98659f7...12c05ce` and correction diff
+`f907b66...12c05ce` against this ticket, the approved specification and ticket
+plan, CONTRIBUTING.md, CONTEXT.md, privacy documentation and ADRs 0005–0007.
+Standards and Spec were reviewed sequentially under the implementation workflow.
+The independent reviewer session was reused because of the harness thread
+limit; it found the two original P2s and implemented neither the ticket nor
+the corrections.
+
+Standards: no blocking violation or new material smell found. The shared
+snapshot reads fixed tmux/process/Git metadata without content inspection or
+persistent storage. Typed checkout identity separates root/canonical identity
+from pane cwd and distinguishes linked worktrees sharing a common directory.
+Rendering and query operations reuse the snapshot. Lifecycle projection batching
+preserves the existing guard and outstanding mutation-child ownership. Pure
+counting/failure predicates introduce no Git or other I/O for future consumers.
+
+Spec: no outstanding ticket-09 finding. The global inventory deduplicates linked
+views, retains unassociated agents, and provides explicit worker/window scopes,
+coordinator access, filters, groups and matching totals. Stable row identity,
+current-window marking, non-navigating inspection, explicit stale/refreshing
+states, revalidated actions and scrollable/redacted details remain intact.
+The two P2s are corrected: root/subdirectory/symlink aliases share one actual
+checkout's detail probes, while distinct linked branches remain separate;
+known nonzero/signalled exits participate in Failed filtering, search, grouping
+and totals without erasing the historical handoff. Attention and worker totals
+count each worker once. Failed/Input/Review overlap is explicitly labelled,
+and an overlapping row appears once in the Failed attention group. Zero or
+unknown exit alone does not manufacture failure or completion. Tickets 10 and
+later were not treated as missing scope; minor header grammar remains the
+already-recorded nonblocking polish item.
+
+Independent validation on frozen `12c05ce`: all 11 global command/UI cases
+passed in 29.245 seconds; log `/tmp/drudwyn-review09-final-global.log`. Coverage
+includes the 36-worker/four-project inventory, linked views, shell routing,
+selection/refresh failures, narrow redacted details, coordinator controls,
+checkout identity and preserved native failure handoffs. The original unchanged
+`/tmp/drudwyn-review09-counting.py` was rerun; its output is retained in
+`/tmp/drudwyn-review09-counting-final.log`. One root/nested checkout now reports
+one unique checkout and one status probe. Review plus native exit23 now reports
+one Failed match, one unique attention worker, retained Review and an explicit
+overlap label. All fixtures used disposable Git/tmux resources and asserted fake
+agents; no installed agent or live user server was used.
+
+The builder's fmt receipt and frozen Rust/full-suite logs were inspected,
+including 41 Rust tests, 36 activity cases and the existing optional Resurrect
+skip; those broader gates were not rerun or represented as reviewer-owned
+full-suite evidence. `git diff --check` passed; the tree was clean before this
+receipt and `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`. Runtime evidence remains Linux/tmux
+3.4; non-Linux fallback behavior was not exercised. This commit changes only
+the ticket status and independent review receipt.
