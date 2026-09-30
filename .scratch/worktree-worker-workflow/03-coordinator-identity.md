@@ -79,3 +79,29 @@ and destination choices, recovery automation/resume, global Cockpit expansion,
 and the new status-bar layout remain their separate tickets. Losing tmux
 metadata loses these associations; Git worktrees remain. No user tmux server
 was touched; `main` remains `eaf2446`.
+
+## Independent Northstar crosscheck — 2026-09-30
+
+- Reviewed only `git diff 6f612ed...6cef4f2` in a fresh reviewer session,
+  with Standards and Spec assessed separately and sequentially as requested.
+  Sources: CONTRIBUTING, privacy boundary, CONTEXT, ADRs 0002/0003/0005/0007,
+  this ticket, and the originating worker-workflow spec. Later batch, recovery,
+  global Cockpit, and status-bar tickets were outside this review's scope.
+- Standards: no documented-standard violations or actionable baseline smell
+  findings. The change preserves local, content-blind supervision, live tmux
+  metadata, existing worktree safety guards, and client-local navigation.
+- Spec: no missing, incorrect, or out-of-scope behavior found within ticket 03.
+  Checked explicit Git common-directory association, shell exclusion from agent
+  totals, stable window identity, moved/vanished coordinator recovery, names and
+  later user renames, duplicate labels, redaction, and all three UI return routes.
+- Independently passed `cargo fmt --check`, `git diff --check`, 35 Rust tests,
+  and all 16 real-client integration tests. An initial sandboxed integration run
+  could not create local tmux sockets; the authorized disposable-server rerun
+  passed. Additional disposable-server checks verified the stored canonical Git
+  common directory, rejection of a coordinator from another repository without
+  replacing the association, and an unrelated repository's worker remaining
+  unassociated. A temporary Git check also confirmed symlink paths resolve to
+  the same common directory. The builder's complete-suite result above was
+  reviewed; this independent pass did not repeat that complete suite.
+- No production or test files changed. Review artifacts were removed; only this
+  receipt is committed. `main` remains `eaf2446`.
