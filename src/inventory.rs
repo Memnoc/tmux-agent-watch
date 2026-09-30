@@ -89,6 +89,9 @@ pub struct Query {
     pub search: String,
     #[arg(long, value_enum, default_value_t=Group::Project)]
     pub group: Group,
+    /// Exact tmux session ID: include only its window membership (also linked views).
+    #[arg(long, conflicts_with = "project")]
+    pub local_session: Option<String>,
     /// Include all project windows, including shells and coordinators.
     #[arg(long)]
     pub windows: bool,
@@ -190,6 +193,7 @@ pub struct Snapshot {
     pub elapsed_ms: u128,
     pub details: HashMap<String, Detail>,
     pub checkouts: usize,
+    pub memberships: HashMap<String, std::collections::HashSet<String>>,
 }
 impl Snapshot {
     pub fn capture() -> io::Result<Self> {
@@ -252,7 +256,17 @@ impl Snapshot {
                 });
         }
         let (details, checkouts) = enrich(&mut workspaces)?;
+        let mut memberships: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+        for row in tmux(&["list-windows", "-a", "-F", "#{session_id}␟#{window_id}"])?.lines() {
+            if let Some((session, window)) = row.split_once('␟') {
+                memberships
+                    .entry(session.into())
+                    .or_default()
+                    .insert(window.into());
+            }
+        }
         Ok(Self {
+            memberships,
             details,
             checkouts,
             workspaces,
@@ -281,6 +295,15 @@ impl Snapshot {
             .as_deref()
             .map(|p| self.project_id(p))
             .transpose()?;
+        let members = query
+            .local_session
+            .as_ref()
+            .map(|session| {
+                self.memberships.get(session).ok_or_else(|| {
+                    io::Error::other("Local session disappeared; reopen its inventory")
+                })
+            })
+            .transpose()?;
         let search = query.search.to_lowercase();
         let mut result: Vec<_> = self
             .workspaces
@@ -302,6 +325,7 @@ impl Snapshot {
                                     .any(|s| self.projects.get(p) == Some(s))
                         }
                     })
+                    && members.is_none_or(|ids| ids.contains(&w.identity.window_id))
                     && query.state.matches(w)
                     && (search.is_empty()
                         || [

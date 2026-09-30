@@ -350,6 +350,21 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
         )?;
         write_style(guard, window, Lifecycle::from_tmux(values[1]))?;
     }
+    // Ambient redraws reuse this projection instead of running a scan per client.
+    // Publish freshness only after the complete guarded reconciliation succeeds.
+    let observed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    tmux_status(
+        guard,
+        &[
+            "set-option",
+            "-gq",
+            "@drudwyn_scan_at",
+            &observed.to_string(),
+        ],
+    )?;
     Ok(())
 }
 

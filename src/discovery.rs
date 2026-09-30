@@ -41,6 +41,12 @@ pub fn discover_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
 
 pub fn discover_all_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
     crate::lifecycle::scan().map_err(|e| DiscoveryError::Tmux(e.to_string()))?;
+    read_all_tmux()
+}
+
+/// Read the current content-blind projection without repeating process scans.
+/// Ambient rows reuse the existing observer projection; explicit fresh commands scan.
+pub fn read_all_tmux() -> Result<Vec<Workspace>, DiscoveryError> {
     let output = Command::new("tmux")
         .args(["list-panes", "-a", "-F", WINDOW_FORMAT])
         .output()?;

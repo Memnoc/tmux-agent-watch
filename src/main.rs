@@ -45,6 +45,22 @@ enum Command {
     Scan,
     /// Receive a content-blind lifecycle event from an agent integration.
     Hook { agent: AgentArg, event: String },
+    /// Render the two-row local status bar with global attention.
+    StatusBar {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        window: String,
+        #[arg(long, default_value_t = 120)]
+        width: usize,
+        #[arg(long, value_enum, default_value_t = tmux_drudwyn::status_bar::Row::Both)]
+        row: tmux_drudwyn::status_bar::Row,
+        /// Reuse observer metadata for ambient redraws without another process scan.
+        #[arg(long)]
+        projection: bool,
+    },
+    /// Open a stable status-bar target in the requesting client.
+    StatusAction { target: String },
     /// Render a tmux status-line projection.
     Hud {
         mode: HudMode,
@@ -403,6 +419,19 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        Command::StatusBar {
+            session,
+            window,
+            width,
+            row,
+            projection,
+        } => {
+            print!(
+                "{}",
+                tmux_drudwyn::status_bar::render(&session, &window, width, row, projection)?
+            );
+        }
+        Command::StatusAction { target } => tmux_drudwyn::status_bar::action(&target)?,
         Command::Scan => lifecycle::scan()?,
         Command::Hook { agent, event } => lifecycle::hook(agent.into(), &event)?,
         Command::Hud {

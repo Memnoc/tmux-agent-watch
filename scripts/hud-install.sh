@@ -18,14 +18,14 @@ if [ "${1:-}" = --disable ]; then
     done
     tmux set-option -gu @drudwyn_saved_status_indexes
     tmux set-option -gu @drudwyn_hud_saved
-  elif tmux show-option -g status-format | grep -Fq "$PLUGIN_DIR/scripts/status-bar.sh"; then
+  elif tmux show-option -g status-format | grep -Eq "$PLUGIN_DIR/scripts/status-(bar|a).sh"; then
     # Older installs did not save the replaced status configuration.
     for name in status status-style status-format; do tmux set-option -gu "$name"; done
   fi
   exit 0
 fi
 
-if [ "$saved" != on ] && ! tmux show-option -g status-format | grep -Fq "$PLUGIN_DIR/scripts/status-bar.sh"; then
+if [ "$saved" != on ] && ! tmux show-option -g status-format | grep -Eq "$PLUGIN_DIR/scripts/status-(bar|a).sh"; then
   for name in status status-style; do
     tmux set-option -gq "@drudwyn_saved_$name" "$(tmux show-option -gqv "$name")"
   done
@@ -44,6 +44,13 @@ separator="#($PLUGIN_DIR/scripts/status-separator.sh '#{client_width}')"
 
 tmux set-option -g status 2
 tmux set-option -g status-style 'bg=default,fg=default'
+if [ "$(tmux show-option -gqv @drudwyn-v2)" != off ]; then
+  # Both jobs are keyed by this client's stable selection and terminal width.
+  # Both rows reuse the observer projection; redraws never start process scans.
+  tmux set-option -g 'status-format[0]' "#($PLUGIN_DIR/scripts/status-a.sh '#{session_id}' '#{window_id}' '#{client_width}' tabs)"
+  tmux set-option -g 'status-format[1]' "#($PLUGIN_DIR/scripts/status-a.sh '#{session_id}' '#{window_id}' '#{client_width}' context)"
+  exit 0
+fi
 if [ "$(tmux show-option -gqv status-position)" = bottom ]; then
   tmux set-option -g status-format[0] "$separator"
   tmux set-option -g status-format[1] "$bar"

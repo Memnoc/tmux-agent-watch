@@ -164,3 +164,38 @@ tmux source-file ~/.tmux.conf
 ```
 
 The legacy mode reads pane scrollback. See the [version boundary](privacy.md#version-boundary) before enabling it.
+
+## Status-bar A (Rust)
+
+The two informative rows show local tabs above selected context and labelled
+GLOBAL attention. **Appearance → Visible status tabs** accepts `1` (selected
+only), `3`, `4` (default), `6`, or `auto`:
+
+```tmux
+set -g @drudwyn-visible-tabs 4
+set -g @drudwyn-status-key g
+```
+
+Every local window counts toward the cap, including shells and coordinators;
+`+N` is outside the cap. Width may show fewer tabs to preserve names and badge
+padding. The selected window remains included in local window order. Invalid
+direct tab settings fall back to four. Themes, per-agent icons, safe mode,
+redaction and lifecycle badge colours apply to these rows. The separator and
+window-number colour controls remain relevant to legacy/native status layouts.
+
+`prefix g` enters a status-action table: `f` Failed, `i` Input, `r` Review,
+`a` all attention, `w` every window in the invoking local session; Escape cancels.
+**Shortcuts → Status actions** changes the entry key. An existing unrelated
+binding at the default key is preserved; choose an unused key in Options in that
+case. `prefix w` and native tree bindings remain available for window movement.
+
+Ambient jobs reuse the existing lifecycle observer; they do not start scans
+for each client redraw. The context row reads only the selected checkout's
+branch, never full Git details for the global fleet. A successful reconciliation
+publishes its live observation time under the existing lifecycle guard. Missing,
+malformed, future or expired times show **GLOBAL STALE** while retaining the
+last observed counts. Expiry is twice `@drudwyn-interval` plus five seconds.
+Opening Cockpit refreshes the inventory; `tmux-drudwyn scan` explicitly refreshes
+the projection. Separate row jobs may observe different moments; they do not
+claim an atomic two-row snapshot. Render errors replace the affected row and its
+click ranges with an unavailable message.

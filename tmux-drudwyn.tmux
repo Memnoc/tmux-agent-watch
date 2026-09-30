@@ -83,7 +83,21 @@ if [ "$(option @drudwyn-v2 on)" = on ]; then
     "$PLUGIN_DIR/scripts/navigation-popup.sh #{q:client_name} cockpit --start"
   tmux bind-key "$(option @drudwyn-cockpit-key P)" run-shell \
     "$PLUGIN_DIR/scripts/navigation-popup.sh #{q:client_name} cockpit"
+  status_key="$(option @drudwyn-status-key g)"
+  status_binding="$(tmux list-keys -T prefix "$status_key" 2>/dev/null || true)"
+  case "$status_binding" in
+    ''|*'switch-client -T drudwyn-status'*) tmux bind-key "$status_key" switch-client -T drudwyn-status ;;
+  esac
+  for mapping in f:failed i:input r:review a:attention w:windows; do
+    tmux bind-key -T drudwyn-status "${mapping%%:*}" run-shell \
+      "$PLUGIN_DIR/scripts/v2.sh status-action ${mapping#*:} --client #{q:client_name}"
+  done
+  tmux bind-key -T drudwyn-status Escape switch-client -T root
 else
+  status_key="$(option @drudwyn-status-key g)"
+  if tmux list-keys -T prefix "$status_key" 2>/dev/null | grep -Fq 'switch-client -T drudwyn-status'; then
+    tmux unbind-key "$status_key"
+  fi
   tmux bind-key "$(option @drudwyn-worktree-key W)" command-prompt -p 'Branch:' \
     "run-shell '$PLUGIN_DIR/scripts/worktree-new.sh --repo \"#{pane_current_path}\" \"%%\"'"
   tmux bind-key "$(option @drudwyn-cockpit-key P)" display-popup -EE -w 78 -h 26 \
@@ -102,7 +116,7 @@ tmux bind-key -n MouseDown1Pane if-shell -F '#{==:#{@drudwyn_sidebar},1}' \
   'select-pane -t ='
 tmux bind-key -n MouseDown1Status if-shell -F '#{mouse_status_range}' \
   "run-shell '$PLUGIN_DIR/scripts/status-click.sh #{q:mouse_status_range} #{q:client_name}'" \
-  'select-window -t ='
+  'if-shell -F "#{&&:#{!=:#{@drudwyn-v2},off},#{!=:#{@drudwyn-hud},off}}" "run-shell true" "select-window -t ="'
 tmux bind-key -n WheelUpPane if-shell -F '#{==:#{@drudwyn_sidebar},1}' \
   'run-shell ":"' \
   'if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" "send-keys -M" "copy-mode -e"'

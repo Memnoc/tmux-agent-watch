@@ -561,3 +561,40 @@ verify, promote, or remove work; those remain separate actions.
 Malformed or older live batch records also require explicit setup and selection;
 reuse the existing destination branch/checkout when setting up again. Literal
 refs and checkout paths, including semicolon and space suffixes, are preserved.
+
+### Two-row status-bar A
+
+The top row contains stable local window tabs: `●` marks selection, `COORD`
+identifies a coordinator, `SH` a shell, `WT` a known linked worktree, and `AGENT`
+an ordinary agent. Agent symbols are separate from role and state. `RUN` means
+process presence; `WORK` requires a lifecycle event. Input, Review, failure and
+exit remain labelled. Full selection highlighting and padded badges preserve
+spacing; narrow terminals show fewer tabs before shortening names.
+
+The lower row combines selected context with global Failed/Input/Review badges.
+**GLOBAL N** counts unique workers needing attention across this tmux server,
+including hidden workers. A failed exit can also retain a Review/Input handoff:
+`(overlap)`, or `*` at narrow widths, marks overlapping categories. Their sum can
+exceed the unique GLOBAL count. No percentage, ETA or task completion is inferred.
+
+Click a tab to open its stable window in the requesting client. Click `+N` for
+all windows in that exact local session, including ordinary shells outside Git,
+mixed repositories and linked views. Click a global badge for the corresponding
+Cockpit filter. Keyboard equivalents are `prefix g`, then `f`/`i`/`r`/`a`/`w`;
+`prefix w` remains the complete workspace navigator. Inspection leaves other
+clients and worker attention unchanged. Vanished targets fail instead of opening
+an index replacement.
+
+The routes are also available as commands:
+
+```sh
+tmux-drudwyn cockpit --windows --local-session '$3' --list
+tmux-drudwyn status-action review --client /dev/pts/7
+tmux-drudwyn status-action 'windows:$3' --client /dev/pts/7
+tmux-drudwyn status-bar --session '$3' --window '@8' --width 120
+```
+
+The final command explicitly refreshes lifecycle metadata. Installed ambient
+rows use its `--projection` mode with the existing observer and report staleness;
+the two rows refresh independently. See [density and refresh configuration](configuration.md#status-bar-a-rust).
+The explicit legacy implementation retains its original clustered bar/separator.

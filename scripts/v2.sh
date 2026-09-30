@@ -38,6 +38,7 @@ case "${1:-}" in
     theme="$(tmux show-option -gqv @drudwyn-theme 2>/dev/null || true)"
     exec "$binary" settings --theme "${theme:-moon}"
     ;;
+  status-bar|status-action) command="$1"; shift; exec "$binary" "$command" "$@" ;;
   navigate) shift; exec "$binary" navigate "$@" ;;
   status) exec "$binary" status ;;
   scan) exec "$binary" scan ;;

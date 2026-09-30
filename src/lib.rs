@@ -16,6 +16,7 @@ pub mod recovery;
 pub mod session;
 pub mod session_navigator;
 pub mod settings;
+pub mod status_bar;
 pub mod theme;
 mod ui;
 pub mod workspace;

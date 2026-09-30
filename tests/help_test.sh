@@ -56,9 +56,10 @@ for expected in \
   'n      new shell session in the session navigator' \
   'C-s    save all sessions (tmux-resurrect)' \
   'C-w    open the native tmux window tree' \
-  'left   ordinary workspaces' \
-  'centre current Git changes' \
-  'right  managed agents' \
+  'top    local tabs' \
+  'below  selected context and GLOBAL attention' \
+  'g      status actions: f failed, i input, r review, a attention, w local windows' \
+  'STALE  observer metadata expired' \
   'CLEAN  no uncommitted changes' \
   'DIRTY  has uncommitted changes' \
   '[q/Esc] Close'
@@ -72,3 +73,12 @@ printf 'ok: help renders controls, markers, and worktree states\n'
 
 printf '\033' | "$ROOT/scripts/help.sh" >/dev/null
 printf 'ok: help closes with q or Escape\n'
+
+# Explicit legacy mode retains guidance for its clustered layout.
+socket_path="$(tmux -L "$default_socket" display-message -p '#{socket_path}')"
+tmux -L "$default_socket" set-option -g @drudwyn-v2 off
+legacy_help="$(printf q | TMUX="$socket_path,0,0" "$ROOT/scripts/help.sh")"
+for expected in 'left   ordinary workspaces' 'centre current Git changes' 'right  managed agents'; do
+  printf '%s\n' "$legacy_help" | grep -Fq "$expected"
+done
+printf 'ok: explicit legacy help retains clustered status guidance\n'

@@ -1045,6 +1045,8 @@ fn event_loop(
                 app.refresh_filter();
             }
             KeyCode::Char('p') => {
+                // Choosing a project explicitly leaves the exact local-session route.
+                app.query.local_session = None;
                 let mut ids: Vec<_> = app
                     .snapshot
                     .as_ref()
@@ -1586,7 +1588,12 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 
 fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let totals = crate::inventory::Totals::from_workspaces(&app.workspaces);
-    let project = app.query.project.as_deref().unwrap_or("all");
+    let project = app
+        .query
+        .local_session
+        .as_deref()
+        .or(app.query.project.as_deref())
+        .unwrap_or("all");
     let project = if app.config.redact_labels && project != "all" && project != "unassociated" {
         "[redacted]"
     } else {
@@ -1617,8 +1624,13 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             }
         )),
         Line::from(format!(
-            " {} · project {} · state {}",
+            " {} · {} {} · state {}",
             crate::inventory::matching_label(&app.workspaces, &app.visible, app.query.windows),
+            if app.query.local_session.is_some() {
+                "session"
+            } else {
+                "project"
+            },
             project,
             app.query.state.label()
         )),

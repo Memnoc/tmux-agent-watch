@@ -109,7 +109,7 @@ impl SettingSpec {
                 "OpenCode symbol in the status bar. Requires All agent icons = auto and Icon mode other than safe."
             }
             "@drudwyn-separator-color" => {
-                "Colour of the line above the status bar; default follows the theme. Enter cycles colours; e sets a hex value."
+                "Separator colour in the legacy status layout; Rust uses both rows for information. Enter cycles colours; e sets a hex value."
             }
             "@drudwyn-color-window-names" => {
                 "Colour agent window numbers by lifecycle state, in the HUD and native tmux window list."
@@ -119,6 +119,12 @@ impl SettingSpec {
             }
             "@drudwyn-hud" => {
                 "Show the two-line Drudwyn status bar. Off restores the status layout saved when the HUD was enabled."
+            }
+            "@drudwyn-visible-tabs" => {
+                "Maximum local tabs: 1 selected-only, 3, 4 default, 6, or auto. Width may show fewer; +N excludes the cap and opens every local window."
+            }
+            "@drudwyn-status-key" => {
+                "Prefix then this key opens status actions: f failed, i input, r review, a all attention, w every local window; Escape cancels."
             }
             "@drudwyn-status" => {
                 "Add lifecycle symbols before windows in the native tmux window list; visible with Lifecycle HUD off."
@@ -290,6 +296,13 @@ const SETTINGS: &[SettingSpec] = &[
         kind: SettingKind::Choice(ON_OFF),
     },
     SettingSpec {
+        category: Category::Appearance,
+        option: "@drudwyn-visible-tabs",
+        label: "Visible status tabs",
+        default: "4",
+        kind: SettingKind::Choice(&["1", "3", "4", "6", "auto"]),
+    },
+    SettingSpec {
         category: Category::Behaviour,
         option: "@drudwyn-v2",
         label: "Rust implementation",
@@ -427,6 +440,13 @@ const SETTINGS: &[SettingSpec] = &[
         option: "@drudwyn-options-key",
         label: "Options",
         default: "O",
+        kind: SettingKind::Key,
+    },
+    SettingSpec {
+        category: Category::Shortcuts,
+        option: "@drudwyn-status-key",
+        label: "Status actions",
+        default: "g",
         kind: SettingKind::Key,
     },
     SettingSpec {
@@ -638,7 +658,19 @@ impl App {
                 return Err(error);
             }
             if matches!(spec.kind, SettingKind::Key) && previous != value {
-                tmux_status(&["unbind-key", &previous])?;
+                // A pre-existing user binding may have prevented the new status
+                // shortcut from installing. Rebinding must not remove that key.
+                let owned = spec.option != "@drudwyn-status-key"
+                    || Command::new("tmux")
+                        .args(["list-keys", "-T", "prefix", &previous])
+                        .output()
+                        .is_ok_and(|o| {
+                            String::from_utf8_lossy(&o.stdout)
+                                .contains("switch-client -T drudwyn-status")
+                        });
+                if owned {
+                    tmux_status(&["unbind-key", &previous])?;
+                }
             }
             Ok(())
         })();
@@ -1069,7 +1101,7 @@ mod tests {
             .map(|setting| setting.option)
             .collect::<HashSet<_>>();
         assert_eq!(options.len(), SETTINGS.len());
-        assert_eq!(SETTINGS.len(), 40);
+        assert_eq!(SETTINGS.len(), 42);
         for setting in SETTINGS {
             assert!(!setting.description().is_empty());
         }

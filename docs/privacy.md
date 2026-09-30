@@ -76,6 +76,15 @@ visibly stale and cannot authorize an action. Exiting the popup discards the
 snapshot. Lifecycle window projections use a single guarded tmux command queue,
 retaining the existing bounded lock and mutation-child lifetime guarantees.
 
+Status-bar A reads the observer's existing content-blind projection. Successful
+reconciliation publishes only a live scan timestamp under the existing guard;
+it is not a history or file cache. Ambient jobs do not start process scans or
+probe Git per tab. Only selected-branch metadata is queried for the context row.
+Each row uses explicit client width and stable session/window IDs, with no
+shared mutable rendered-row cache. Click ranges contain fixed action names or
+stable IDs; no label becomes a command. Stale observation timestamps are shown
+explicitly, and action resolution validates the requesting client and target.
+
 Set `@drudwyn-redact-labels on` before screen sharing to replace repository,
 branch, session, and window labels while preserving lifecycle state and click
 navigation.
