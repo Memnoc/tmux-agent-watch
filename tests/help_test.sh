@@ -53,6 +53,7 @@ for expected in \
   's      open the compact session navigator' \
   'O      customise Drudwyn options' \
   's      save all sessions with tmux-resurrect' \
+  'n      new shell session in the session navigator' \
   'C-s    save all sessions (tmux-resurrect)' \
   'C-w    open the native tmux window tree' \
   'left   ordinary workspaces' \

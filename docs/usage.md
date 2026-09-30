@@ -124,6 +124,7 @@ Inside either navigator, these shortcuts act on the selected item:
 | `j` / `k` or arrow keys | Move selection |
 | `Enter` | Switch to the selected session or window |
 | `/` | Filter the list |
+| `n` | New shell session (session navigator only) |
 | `r` | Rename the selected session (`prefix + s`) or window (`prefix + w`) |
 | `x` | Kill the selected item after confirmation |
 | `s` | Save all sessions with tmux-resurrect |
@@ -133,6 +134,30 @@ Renaming starts with the current name. Use `Backspace` to delete, `Enter` to
 apply, and `Esc` to cancel. The navigator stays open and reports any error so
 you can correct the name. Press `s` afterward to save the updated layout with
 Resurrect.
+
+In the session navigator, `n` opens **New Session**. Enter a name and directory;
+the directory starts at the requesting terminal's selected workspace. `Tab`
+changes fields, `Enter` advances from the name or creates from the directory,
+`Backspace` deletes, and `Esc` cancels. Errors retain the form for correction.
+The shell opens only in the requesting terminal and appears in both navigators.
+Names cannot be empty or contain dots, colons, control characters, or `␟`;
+spaces and shell metacharacters are accepted as literal data.
+
+The command equivalent prints the new stable session ID:
+
+```sh
+tmux-drudwyn session new --name 'Editing notes' --directory '/path/with spaces'
+```
+
+Omit `--directory` to use the invoking workspace. An explicit relative directory
+is resolved from the command's working directory. When more than one terminal
+could be the requester, supply `--client CLIENT` or `DRUDWYN_CLIENT`. Missing or
+ambiguous clients fail before creation. New Session uses tmux's configured shell,
+bypassing `default-command`, and does not create a worktree or change a branch.
+Creation and switching failures preserve existing sessions. If a newly created
+shell cannot be opened, Drudwyn removes that new session and allows retry; a
+failed cleanup or uncertain creation response reports that the new session may
+remain for inspection in the navigator.
 
 Inside either navigator, select an item and press `x`, then `y` to confirm killing
 it (`Esc` or `n` cancels). In `prefix + w`, this kills the selected tmux window

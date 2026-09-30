@@ -1,6 +1,6 @@
 //! Compact, session-only replacement for tmux `choose-tree -s`.
 
-use std::{io, process::Command, time::Duration};
+use std::{io, path::Path, process::Command, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 use crate::{
@@ -25,11 +25,18 @@ const SEP: char = '\u{241f}';
 const FORMAT: &str = "#{session_name}␟#{session_windows}␟#{session_attached}␟#{session_id}";
 const NAVIGATION_ACTIONS: &[(&str, &str)] = &[("j/k", "Move"), ("Enter", "Switch")];
 const SESSION_ACTIONS: &[(&str, &str)] = &[
+    ("n", "New Session"),
     ("c", "Coordinator"),
     ("r", "Rename"),
     ("x", "Kill"),
     ("s", "Save"),
     ("/", "Filter"),
+];
+const NEW_ACTIONS: &[(&str, &str)] = &[
+    ("Tab", "Field"),
+    ("Enter", "Next/Create"),
+    ("Backspace", "Delete"),
+    ("Esc", "Cancel"),
 ];
 const CLOSE_ACTION: &[(&str, &str)] = &[("Esc", "Close")];
 const CONFIRM_ACTION: &[(&str, &str)] = &[("y", "Confirm")];
@@ -59,9 +66,17 @@ struct App {
     filtering: bool,
     pending_kill: Option<Session>,
     pending_rename: Option<(String, String)>,
+    new_session: Option<NewSession>,
     notice: Option<String>,
     theme: Theme,
     redact: bool,
+}
+
+#[derive(Clone)]
+struct NewSession {
+    name: String,
+    directory: String,
+    editing_directory: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,6 +88,8 @@ enum NavigationAction {
     Kill,
     Save,
     Rename,
+    New,
+    Create,
 }
 
 impl App {
@@ -99,6 +116,35 @@ impl App {
 }
 
 fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
+    if let Some(form) = &mut app.new_session {
+        match code {
+            KeyCode::Esc => {
+                app.new_session = None;
+                app.notice = None;
+            }
+            KeyCode::Tab | KeyCode::BackTab => form.editing_directory = !form.editing_directory,
+            KeyCode::Enter if form.editing_directory => return NavigationAction::Create,
+            KeyCode::Enter => form.editing_directory = true,
+            KeyCode::Backspace => {
+                if form.editing_directory {
+                    form.directory.pop();
+                } else {
+                    form.name.pop();
+                }
+                app.notice = None;
+            }
+            KeyCode::Char(character) => {
+                if form.editing_directory {
+                    form.directory.push(character);
+                } else {
+                    form.name.push(character);
+                }
+                app.notice = None;
+            }
+            _ => {}
+        }
+        return NavigationAction::Continue;
+    }
     if app.pending_kill.is_some() {
         return match code {
             KeyCode::Char('y') => NavigationAction::Kill,
@@ -172,6 +218,7 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
             NavigationAction::Continue
         }
         KeyCode::Char('c') => NavigationAction::Coordinator,
+        KeyCode::Char('n') => NavigationAction::New,
         KeyCode::Char('s') => NavigationAction::Save,
         KeyCode::Char('x') => {
             app.pending_kill = app
@@ -204,6 +251,7 @@ pub fn run(variant: Variant) -> io::Result<()> {
         filtering: false,
         pending_kill: None,
         pending_rename: None,
+        new_session: None,
         notice: None,
         theme: Theme::rose_pine(variant),
         redact: tmux_output(&["show-option", "-gqv", "@drudwyn-redact-labels"])? == "on",
@@ -237,6 +285,24 @@ fn event_loop(
         }
         match handle_key(app, key.code) {
             NavigationAction::Close => return Ok(()),
+            NavigationAction::New => match crate::session::directory() {
+                Ok(directory) => {
+                    app.new_session = Some(NewSession {
+                        name: String::new(),
+                        directory,
+                        editing_directory: false,
+                    });
+                }
+                Err(error) => app.notice = Some(format!("New Session failed: {error}")),
+            },
+            NavigationAction::Create => {
+                if let Some(form) = &app.new_session {
+                    match crate::session::create(&form.name, Some(Path::new(&form.directory))) {
+                        Ok(_) => return Ok(()),
+                        Err(error) => app.notice = Some(format!("Create failed: {error}")),
+                    }
+                }
+            }
             NavigationAction::Switch => {
                 if let Some(session) = app
                     .visible
@@ -327,6 +393,10 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         if let Some((_, name)) = &mut projection.pending_rename {
             *name = "[redacted]".into();
         }
+        if let Some(form) = &mut projection.new_session {
+            form.name = "[redacted]".into();
+            form.directory = "[redacted]".into();
+        }
         if projection.filtering {
             projection.filter = "[redacted]".into();
         }
@@ -348,15 +418,70 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         app
     };
     let area = frame.area();
-    let footer_height = if app.pending_kill.is_some()
-        || app.pending_rename.is_some()
-        || app.notice.is_some()
-        || app.filtering
-    {
-        3
-    } else {
-        2
-    };
+    if let Some(form) = &app.new_session {
+        let mut help = action_lines(NEW_ACTIONS, app.theme, area.width);
+        help.push(Line::styled(
+            app.notice
+                .as_deref()
+                .unwrap_or("Enter a name and starting directory")
+                .to_owned(),
+            Style::default().fg(app.theme.muted),
+        ));
+        let groups = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(4),
+            Constraint::Length(help.len() as u16 + 1),
+        ])
+        .split(area);
+        frame.render_widget(
+            Paragraph::new(" NEW SESSION · Shell")
+                .style(
+                    Style::default()
+                        .fg(app.theme.rose)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .block(Block::default().borders(Borders::BOTTOM)),
+            groups[0],
+        );
+        let field = |label: &str, value: &str, active: bool| {
+            Line::styled(
+                format!(
+                    " {} {label}: {value}{}",
+                    if active { "›" } else { " " },
+                    if active { "_" } else { "" }
+                ),
+                Style::default().fg(if active {
+                    app.theme.rose
+                } else {
+                    app.theme.text
+                }),
+            )
+        };
+        frame.render_widget(
+            Paragraph::new(vec![
+                field("Name", &form.name, !form.editing_directory),
+                Line::default(),
+                field("Directory", &form.directory, form.editing_directory),
+                Line::default(),
+                Line::from(" Opens a shell in this terminal."),
+            ])
+            .wrap(Wrap { trim: false }),
+            groups[1],
+        );
+        frame.render_widget(
+            Paragraph::new(help).block(Block::default().borders(Borders::TOP)),
+            groups[2],
+        );
+        return;
+    }
+    let actions: Vec<_> = [NAVIGATION_ACTIONS, SESSION_ACTIONS, CLOSE_ACTION].concat();
+    let action_lines = action_lines(&actions, app.theme, area.width);
+    let footer_height =
+        if app.pending_kill.is_some() || app.pending_rename.is_some() || app.filtering {
+            3
+        } else {
+            action_lines.len() as u16 + 1 + u16::from(app.notice.is_some())
+        };
     let groups = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -453,12 +578,14 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             ("RENAME", &message, FooterTone::Info),
         );
     } else if let Some(notice) = &app.notice {
-        ui::render_footer(
-            frame,
+        let mut lines = action_lines;
+        lines.push(Line::styled(
+            format!(" STATUS   {notice}"),
+            Style::default().fg(app.theme.muted),
+        ));
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::TOP)),
             groups[2],
-            app.theme,
-            &[NAVIGATION_ACTIONS, SESSION_ACTIONS, CLOSE_ACTION],
-            ("STATUS", notice, FooterTone::Info),
         );
     } else if app.filtering {
         let message = format!("› {}_", app.filter);
@@ -470,13 +597,26 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             ("FILTER", &message, FooterTone::Info),
         );
     } else {
-        ui::render_action_bar(
-            frame,
+        frame.render_widget(
+            Paragraph::new(action_lines).block(Block::default().borders(Borders::TOP)),
             groups[2],
-            app.theme,
-            &[NAVIGATION_ACTIONS, SESSION_ACTIONS, CLOSE_ACTION],
         );
     }
+}
+
+fn action_lines(actions: &[(&str, &str)], theme: Theme, width: u16) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for end in 1..=actions.len() {
+        if end > start + 1
+            && ui::action_line(&[&actions[start..end]], theme).width() > usize::from(width)
+        {
+            lines.push(ui::action_line(&[&actions[start..end - 1]], theme));
+            start = end - 1;
+        }
+    }
+    lines.push(ui::action_line(&[&actions[start..]], theme));
+    lines
 }
 
 fn discover() -> io::Result<Vec<Session>> {
@@ -566,6 +706,7 @@ mod tests {
             filtering: true,
             pending_kill: None,
             pending_rename: None,
+            new_session: None,
             notice: None,
             theme: Theme::rose_pine(Variant::Moon),
             redact: false,
@@ -586,6 +727,7 @@ mod tests {
             filtering: false,
             pending_kill: None,
             pending_rename: None,
+            new_session: None,
             notice: None,
             current: String::new(),
             theme: Theme::rose_pine(Variant::Moon),

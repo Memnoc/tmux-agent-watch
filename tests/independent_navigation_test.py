@@ -6,6 +6,7 @@ import struct
 import termios
 import pty
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -107,6 +108,244 @@ class IndependentNavigation(unittest.TestCase):
             self.assertIn(expected, self.tmux('capture-pane', '-p', '-t', pane))
         self.tmux('send-keys', '-t', pane, action)
         time.sleep(.3)
+
+    def wait_pane(self, pane, text):
+        for _ in range(250):
+            output = self.tmux('capture-pane', '-p', '-t', pane)
+            if text in output:
+                return output
+            time.sleep(.02)
+        self.fail(f'no {text!r}: {output}')
+
+    def session_form(self):
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project',
+                         shlex.join(['env', f'DRUDWYN_CLIENT={self.clients[0]}', str(BIN), 'sessions']))
+        self.wait_pane(pane, 'NAVIGATOR')
+        self.tmux('send-keys', '-t', pane, 'n')
+        self.wait_pane(pane, 'NEW SESSION')
+        return pane
+
+    def test_new_session_form_cancel_and_create(self):
+        other = self.selection(self.clients[1])
+        requester = self.selection(self.clients[0])
+        sessions = self.tmux('list-sessions', '-F', '#{session_id}')
+        pane = self.session_form()
+        self.assertIn(str(self.repo), self.tmux('capture-pane', '-p', '-t', pane))
+        self.tmux('send-keys', '-t', pane, '-l', 'cancelled session')
+        self.tmux('send-keys', '-t', pane, 'Escape')
+        self.wait_pane(pane, 'SESSION NAVIGATOR')
+        self.assertEqual(self.tmux('list-sessions', '-F', '#{session_id}'), sessions)
+        self.assertEqual(self.selection(self.clients[0]), requester)
+        self.tmux('send-keys', '-t', pane, 'n')
+        self.wait_pane(pane, 'NEW SESSION')
+        self.tmux('send-keys', '-t', pane, '-l', 'form shell')
+        self.tmux('send-keys', '-t', pane, 'Tab', 'Enter')
+        for _ in range(250):
+            if self.selection(self.clients[0]) != requester:
+                break
+            time.sleep(.02)
+        session = self.selection(self.clients[0]).split(':')[0]
+        self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{session_name}'), 'form shell')
+        self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{pane_current_path}'), str(self.repo))
+        self.assertEqual(self.selection(self.clients[1]), other)
+        # The resulting named shell appears in both navigation surfaces.
+        for surface in ['sessions', 'navigator']:
+            ui = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project',
+                           shlex.join(['env', f'DRUDWYN_CLIENT={self.clients[0]}', str(BIN), surface]))
+            self.wait_pane(ui, 'form shell')
+            self.tmux('send-keys', '-t', ui, 'Escape')
+
+    def test_new_session_validates_before_mutation_and_allows_retry(self):
+        original = self.tmux('list-sessions', '-F', '#{session_id}␟#{session_name}')
+        selections = [self.selection(c) for c in self.clients]
+        cases = [(['--name', 'project'], self.clients[0]),
+                 (['--name', ''], self.clients[0]),
+                 (['--name', 'invalid.name'], self.clients[0]),
+                 (['--name', 'invalid:name'], self.clients[0]),
+                 (['--name', 'invalid\nname'], self.clients[0]),
+                 (['--name', 'new', '--directory', str(self.repo / 'missing')], self.clients[0]),
+                 (['--name', 'new', '--directory', str(self.repo / '.git/HEAD')], self.clients[0]),
+                 (['--name', 'new'], '/dev/missing-client'),
+                 (['--name', 'new'], None)]
+        for args, client in cases:
+            with self.subTest(args=args, client=client):
+                result = self.command('session', 'new', *args, client=client, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stderr.strip())
+                self.assertEqual(self.tmux('list-sessions', '-F', '#{session_id}␟#{session_name}'), original)
+                self.assertEqual([self.selection(c) for c in self.clients], selections)
+        self.command('session', 'new', '--name', 'corrected', client=self.clients[0])
+        self.assertEqual(self.selection(self.clients[1]), selections[1])
+
+    def test_new_session_names_and_paths_are_literal_data(self):
+        other = self.selection(self.clients[1])
+        directory = Path(self.tmp.name) / 'space $(touch SENTINEL) `touch SENTINEL` #{session_name};'
+        directory.mkdir()
+        for name in ['notes $(touch SENTINEL) `touch SENTINEL`', '-notes', '#{session_name}', 'semi;', ';']:
+            with self.subTest(name=name):
+                result = self.command('session', 'new', '--name=' + name,
+                                      '--directory', str(directory), client=self.clients[0], check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                session = result.stdout.strip()
+                self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{session_name}'), name)
+                self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{pane_current_path}'), str(directory))
+                self.assertEqual(self.selection(self.clients[1]), other)
+                self.assertFalse((directory / 'SENTINEL').exists())
+                self.assertFalse((self.repo / 'SENTINEL').exists())
+
+    def test_new_session_ignores_default_command_and_survives_inherited_cleanup(self):
+        self.tmux('set-option', '-g', 'destroy-unattached', 'on')
+        marker = Path(self.tmp.name) / 'agent-started'
+        self.tmux('set-option', '-g', 'default-command', 'touch ' + shlex.quote(str(marker)))
+        other = self.selection(self.clients[1])
+        result = self.command('session', 'new', '--name', 'ad hoc', client=self.clients[0], check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.selection(self.clients[0]).startswith(result.stdout.strip() + ':'))
+        self.assertEqual(self.selection(self.clients[1]), other)
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.tmux('show-option', '-gv', 'destroy-unattached'), 'on')
+        self.assertEqual(self.tmux('show-option', '-gv', 'default-command'), 'touch ' + shlex.quote(str(marker)))
+
+    def test_new_session_form_corrects_duplicate_name_and_bad_directory(self):
+        pane = self.session_form()
+        original = self.tmux('list-sessions', '-F', '#{session_id}')
+        selections = [self.selection(c) for c in self.clients]
+        self.tmux('send-keys', '-t', pane, '-l', 'project')
+        self.tmux('send-keys', '-t', pane, 'Tab', 'Enter')
+        self.wait_pane(pane, 'Create failed')
+        self.assertEqual(self.tmux('list-sessions', '-F', '#{session_id}'), original)
+        self.tmux('send-keys', '-t', pane, 'Tab', *(['BSpace'] * len('project')))
+        self.tmux('send-keys', '-t', pane, '-l', 'corrected shell')
+        self.tmux('send-keys', '-t', pane, 'Tab', *(['BSpace'] * len(str(self.repo))))
+        self.tmux('send-keys', '-t', pane, '-l', '/missing-directory')
+        self.tmux('send-keys', '-t', pane, 'Enter')
+        self.wait_pane(pane, 'Invalid starting directory')
+        self.assertEqual([self.selection(c) for c in self.clients], selections)
+        self.assertEqual(self.tmux('list-sessions', '-F', '#{session_id}'), original)
+        directory = Path(self.tmp.name) / 'directory with spaces; data'
+        directory.mkdir()
+        self.tmux('send-keys', '-t', pane, *(['BSpace'] * len('/missing-directory')))
+        self.tmux('send-keys', '-t', pane, '-l', str(directory))
+        self.tmux('send-keys', '-t', pane, 'Enter')
+        for _ in range(250):
+            if self.selection(self.clients[0]) != selections[0]: break
+            time.sleep(.02)
+        session = self.selection(self.clients[0]).split(':')[0]
+        self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{session_name}'), 'corrected shell')
+        self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{pane_current_path}'), str(directory))
+        self.assertEqual(self.selection(self.clients[1]), selections[1])
+
+    def test_new_session_form_redacts_labels_and_errors(self):
+        self.tmux('set-option', '-g', '@drudwyn-redact-labels', 'on')
+        pane = self.session_form()
+        self.tmux('send-keys', '-t', pane, '-l', 'project')
+        self.tmux('send-keys', '-t', pane, 'Tab', 'Enter')
+        self.wait_pane(pane, 'Action failed')
+        for width in [120, 48]:
+            self.tmux('resize-window', '-t', pane, '-x', str(width), '-y', '24')
+            output = self.wait_pane(pane, '[Esc] Cancel')
+            self.assertIn('[redacted]', output)
+            self.assertNotIn(str(self.repo), output)
+            self.assertNotIn('project', output)
+            self.assertIn('Name', output)
+            self.assertIn('Directory', output)
+            self.assertIn('[Esc] Cancel', output)
+        self.tmux('send-keys', '-t', pane, 'Escape')
+
+    def test_new_session_command_failures_preserve_existing_sessions_and_retry(self):
+        original = self.tmux('list-sessions', '-F', '#{session_id}␟#{session_name}')
+        windows = self.tmux('list-windows', '-a', '-F', '#{window_id}␟#{pane_id}␟#{pane_pid}')
+        selections = [self.selection(c) for c in self.clients]
+        wrapper_dir = Path(self.tmp.name) / 'bin'
+        wrapper_dir.mkdir()
+        wrapper = wrapper_dir / 'tmux'
+        wrapper.write_text('#!' + sys.executable + '\n'
+                           'import os, sys\n'
+                           'if sys.argv[1] == os.environ.get("TEST_FAIL_COMMAND"):\n'
+                           '    sys.stderr.write("injected command failure\\n")\n'
+                           '    sys.exit(1)\n'
+                           'os.execv(os.environ["TEST_REAL_TMUX"], ["tmux", *sys.argv[1:]])\n')
+        wrapper.chmod(0o755)
+        self.env['TEST_REAL_TMUX'] = shutil.which('tmux')
+        self.env['PATH'] = str(wrapper_dir) + os.pathsep + self.env['PATH']
+        for command in ['new-session', 'switch-client']:
+            self.env['TEST_FAIL_COMMAND'] = command
+            result = self.command('session', 'new', '--name', 'retry', client=self.clients[0], check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('injected command failure', result.stderr)
+            self.assertEqual(self.tmux('list-sessions', '-F', '#{session_id}␟#{session_name}'), original)
+            self.assertEqual(self.tmux('list-windows', '-a', '-F', '#{window_id}␟#{pane_id}␟#{pane_pid}'), windows)
+            self.assertEqual([self.selection(c) for c in self.clients], selections)
+        self.env.pop('TEST_FAIL_COMMAND')
+        self.command('--client', self.clients[0], 'session', 'new', '--name', 'retry')
+        self.assertEqual(self.selection(self.clients[1]), selections[1])
+
+    def test_new_session_uncertain_creation_keeps_existing_sessions(self):
+        windows = self.tmux('list-windows', '-a', '-F', '#{window_id}␟#{pane_id}␟#{pane_pid}').splitlines()
+        selections = [self.selection(c) for c in self.clients]
+        wrapper_dir = Path(self.tmp.name) / 'bin'
+        wrapper_dir.mkdir()
+        wrapper = wrapper_dir / 'tmux'
+        real_tmux = shutil.which('tmux')
+        wrapper.write_text('#!' + sys.executable + '\n'
+                           'import os, subprocess, sys\n'
+                           'if sys.argv[1] == "new-session":\n'
+                           '    sys.exit(subprocess.run([os.environ["TEST_REAL_TMUX"], *sys.argv[1:]], stdout=subprocess.DEVNULL).returncode)\n'
+                           'os.execv(os.environ["TEST_REAL_TMUX"], ["tmux", *sys.argv[1:]])\n')
+        wrapper.chmod(0o755)
+        self.env['TEST_REAL_TMUX'] = real_tmux
+        self.env['PATH'] = str(wrapper_dir) + os.pathsep + self.env['PATH']
+        result = self.command('session', 'new', '--name', 'inspect retained', client=self.clients[0], check=False)
+        self.assertNotEqual(result.returncode, 0)
+        for window in windows:
+            self.assertIn(window, self.tmux('list-windows', '-a', '-F', '#{window_id}␟#{pane_id}␟#{pane_pid}').splitlines())
+        self.assertEqual([self.selection(c) for c in self.clients], selections)
+        self.assertIn('inspect retained', self.tmux('list-sessions', '-F', '#{session_name}'))
+        self.assertIn('inspect', result.stderr.lower())
+
+    def test_new_session_without_attached_client_creates_nothing(self):
+        sessions = self.tmux('list-sessions', '-F', '#{session_id}')
+        for client in self.clients:
+            self.tmux('detach-client', '-t', client)
+        result = self.command('session', 'new', '--name', 'unattached', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('missing or detached', result.stderr)
+        self.assertEqual(self.tmux('list-sessions', '-F', '#{session_id}'), sessions)
+
+    def test_session_management_shortcuts_remain_visible_at_narrow_width(self):
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project',
+                         shlex.join(['env', f'DRUDWYN_CLIENT={self.clients[0]}', str(BIN), 'sessions']))
+        self.wait_pane(pane, 'NAVIGATOR')
+        self.tmux('resize-window', '-t', pane, '-x', '48', '-y', '24')
+        for shortcut in ['[n] New Session', '[x] Kill', '[s] Save', 'Filter', 'Close']:
+            self.wait_pane(pane, shortcut)
+        self.tmux('send-keys', '-t', pane, 'Escape')
+
+    def test_new_session_default_directory_preserves_literal_suffix(self):
+        directory = Path(self.tmp.name) / 'directory ␟'
+        directory.mkdir()
+        self.command('session', 'new', '--name', 'literal directory', '--directory', str(directory), client=self.clients[0])
+        result = self.command('session', 'new', '--name', 'same directory', client=self.clients[0], check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.tmux('display-message', '-p', '-t', result.stdout.strip(), '#{pane_current_path}'), str(directory))
+
+    def test_new_session_creates_only_shell_and_switches_requester(self):
+        other = self.selection(self.clients[1])
+        windows = self.tmux('list-windows', '-a', '-F', '#{window_id}␟#{pane_id}␟#{pane_pid}')
+        worktrees = subprocess.check_output(['git', '-C', str(self.repo), 'worktree', 'list', '--porcelain'])
+        result = self.command('session', 'new', '--name', 'editing room',
+                              client=self.clients[0], check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session = result.stdout.strip()
+        self.assertTrue(self.selection(self.clients[0]).startswith(session + ':'))
+        self.assertEqual(self.selection(self.clients[1]), other)
+        self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{session_name}'), 'editing room')
+        self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{pane_current_path}'), str(self.repo))
+        self.assertEqual(self.tmux('display-message', '-p', '-t', session, '#{session_windows}'), '1')
+        self.assertIn(self.tmux('display-message', '-p', '-t', session, '#{pane_current_command}'), ['zsh', 'bash', 'sh', 'fish'])
+        for window in windows.splitlines():
+            self.assertIn(window, self.tmux('list-windows', '-a', '-F', '#{window_id}␟#{pane_id}␟#{pane_pid}'))
+        self.assertEqual(subprocess.check_output(['git', '-C', str(self.repo), 'worktree', 'list', '--porcelain']), worktrees)
 
     def test_coordinator_association_and_return_preserve_identity(self):
         other = self.selection(self.clients[1])

@@ -67,6 +67,14 @@ fn stable(value: &str, prefix: char) -> bool {
 /// grouped view shares the actual windows/panes, never their processes or files.
 pub fn open(window: Option<&str>, session: Option<&str>) -> io::Result<()> {
     let client = client()?;
+    open_for(&client, window, session)
+}
+
+pub(crate) fn open_for(
+    client: &str,
+    window: Option<&str>,
+    session: Option<&str>,
+) -> io::Result<()> {
     if window.is_some_and(|id| !stable(id, '@')) || session.is_some_and(|id| !stable(id, '$')) {
         return Err(io::Error::other(
             "Navigation requires a stable window/session ID",
@@ -168,7 +176,7 @@ pub fn open(window: Option<&str>, session: Option<&str>) -> io::Result<()> {
     let target = window
         .map(|window| format!("{destination}:{window}"))
         .unwrap_or(destination.clone());
-    let result = tmux(&["switch-client", "-c", &client, "-t", &target]);
+    let result = tmux(&["switch-client", "-c", client, "-t", &target]);
     if result.is_err() && created {
         let _ = tmux(&["kill-session", "-t", &destination]);
     }

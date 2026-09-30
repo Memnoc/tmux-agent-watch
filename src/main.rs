@@ -75,6 +75,11 @@ enum Command {
         #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
         theme: ThemeArg,
     },
+    /// Create an ad hoc shell session in the requesting terminal.
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
     /// Open the interactive tmux options editor.
     Settings {
         #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
@@ -83,6 +88,17 @@ enum Command {
     Workspace {
         #[command(subcommand)]
         command: WorkspaceCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SessionCommand {
+    /// Create a named shell; directory defaults to the invoking workspace.
+    New {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        directory: Option<PathBuf>,
     },
 }
 
@@ -264,6 +280,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::Cockpit { theme, start } => cockpit::run(theme.into(), start)?,
         Command::Navigator { theme } => navigator::run(theme.into())?,
         Command::Sessions { theme } => session_navigator::run(theme.into())?,
+        Command::Session { command } => match command {
+            SessionCommand::New { name, directory } => {
+                println!(
+                    "{}",
+                    tmux_drudwyn::session::create(&name, directory.as_deref())?
+                );
+            }
+        },
         Command::Settings { theme } => settings::run(theme.into())?,
         Command::Workspace { command } => match command {
             WorkspaceCommand::Start {
