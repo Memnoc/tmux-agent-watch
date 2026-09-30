@@ -102,7 +102,7 @@ EOF
   files="$(printf '%s\n' "$status" | awk 'NF { count++ } END { print count+0 }')"
   untracked="$(printf '%s\n' "$status" | awk 'substr($0,1,2) == "??" { count++ } END { print count+0 }')"
   case "$state" in
-    needs_input) state_context="#[fg=${waiting_colour}]WAITING #[fg=${muted}]· " ;;
+    needs_input) state_context="#[fg=${waiting_colour}]! INPUT #[fg=${muted}]· " ;;
     done) state_context="#[fg=${review_colour}]REVIEW #[fg=${muted}]· " ;;
     failed) state_context="#[fg=${failed_colour}]FAILED #[fg=${muted}]· " ;;
   esac
@@ -174,9 +174,9 @@ EOF
   attention=0
   case "$state" in
     working) agent_label='WORK'; agent_color="$working_colour" ;;
-    needs_input) agent_label='WAIT'; agent_color="$waiting_colour"; badge_fg='#191724'; attention=1 ;;
+    needs_input) agent_label='! INPUT'; agent_color="$waiting_colour"; badge_fg='#191724'; attention=1 ;;
     done) agent_label='REVIEW'; agent_color="$review_colour"; badge_fg='#faf4ed'; attention=1 ;;
-    failed) agent_label='FAIL'; agent_color="$failed_colour"; badge_fg='#191724'; attention=1 ;;
+    failed) agent_label='! FAIL'; agent_color="$failed_colour"; badge_fg='#191724'; attention=1 ;;
     *) agent_label=''; agent_color="$iris" ;;
   esac
   if [ -n "$agent_label" ]; then
@@ -240,7 +240,7 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
     elif [ -n "$state" ]; then
       case "$state" in
         working) state_label='WORKING'; state_detail='active'; context_color="$working_colour" ;;
-        needs_input) state_label='WAITING'; state_detail='needs you'; context_color="$waiting_colour" ;;
+        needs_input) state_label='! INPUT'; state_detail='needs you'; context_color="$waiting_colour" ;;
         done) state_label='REVIEW'; state_detail='ready'; context_color="$review_colour" ;;
         failed) state_label='FAILED'; state_detail='stopped'; context_color="$failed_colour" ;;
         *) state_label='AGENT'; state_detail='active'; context_color="$iris" ;;
@@ -278,20 +278,24 @@ while IFS='|' read -r index window_id name _active state branch repo git_status 
     if [ "$show_agent" = 1 ]; then
       attention=0
       case "$state" in
-        failed) color="$failed_colour"; badge_fg='#191724'; attention=1 ;;
-        needs_input) color="$waiting_colour"; badge_fg='#191724'; attention=1 ;;
-        done) color="$review_colour"; badge_fg='#faf4ed'; attention=1 ;;
+        failed) color="$failed_colour"; badge_fg='#191724'; attention=1; state_label='! FAIL' ;;
+        needs_input) color="$waiting_colour"; badge_fg='#191724'; attention=1; state_label='! INPUT' ;;
+        done) color="$review_colour"; badge_fg='#faf4ed'; attention=1; state_label='REVIEW' ;;
         *) color="$working_colour" ;;
       esac
       if [ "$attention" = 1 ]; then
+        # Keep the state readable without growing every badge by a full label.
+        label_limit=$((agent_name_limit - ${#state_label} - 1))
+        [ "$label_limit" -ge 3 ] || label_limit=3
+        short_name="$(printf '%s' "$name" | cut -c1-"$label_limit")"
         if [ "$window_id" = "$current" ]; then
-          item="#[range=window|${index}]#[bg=default,fg=${iris},bold]▶ #[bg=${color},fg=${badge_fg},bold] ${row_agent_icon} ${index} ${short_name} #[default]#[norange]"
+          item="#[range=window|${index}]#[bg=default,fg=${love},bold]● #[bg=${color},fg=${badge_fg},bold] ${row_agent_icon} ${index} ${short_name} ${state_label} #[default]#[norange]"
         else
-          item="#[range=window|${index}]#[bg=${color},fg=${badge_fg},bold] ${row_agent_icon} ${index} ${short_name} #[default]#[norange]"
+          item="#[range=window|${index}]#[bg=${color},fg=${badge_fg},bold] ${row_agent_icon} ${index} ${short_name} ${state_label} #[default]#[norange]"
         fi
       elif [ "$window_id" = "$current" ]; then
         number_colour="$color"; [ "$colour_numbers" != off ] || number_colour="$text"
-        item="#[range=window|${index}]#[bg=default,fg=${iris},bold]▶ #[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${color}]${short_name}#[norange]"
+        item="#[range=window|${index}]#[bg=default,fg=${love},bold]● #[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${color}]${short_name}#[norange]"
       else
         number_colour="$color"; [ "$colour_numbers" != off ] || number_colour="$subtle"
         item="#[range=window|${index}]#[fg=${color}]${row_agent_icon} #[fg=${number_colour}]${index} #[fg=${subtle}]${short_name}#[norange]"

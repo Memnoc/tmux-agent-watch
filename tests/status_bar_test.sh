@@ -68,7 +68,7 @@ printf 'ok: status segments distinguish Codex, Claude, and OpenCode with per-age
 
 tmux -L "$SOCKET" set-option -g @drudwyn-agent-icon bot
 nerd="$($ROOT/scripts/status-bar.sh bar "$codex_window" 120)"
-printf '%s' "$nerd" | grep -Fq '▶'
+printf '%s' "$nerd" | grep -Fq '#[bg=default,fg=#eb6f92,bold]●'
 printf '%s' "$nerd" | grep -Fq '󰚩'
 printf '%s' "$nerd" | grep -Fq '󰁔'
 if printf '%s' "$nerd" | grep -Eq '|'; then
@@ -113,11 +113,32 @@ fi
 printf 'ok: very narrow bar renders one collision-free sequential stream\n'
 
 selected_second="$($ROOT/scripts/status-bar.sh bar "$claude_window" 64)"
-printf '%s' "$selected_second" | grep -Fq 'WAIT'
+printf '%s' "$selected_second" | grep -Fq '! INPUT'
 if printf '%s' "$selected_second" | grep -Fq 'WORK'; then
   printf 'not ok: very narrow bar rendered another agent state before the selected agent\n'; exit 1
 fi
 printf 'ok: very narrow bar gives its agent state to the selected workspace\n'
+
+for mode in safe nerd; do
+  tmux -L "$SOCKET" set-option -g @drudwyn-icon-mode "$mode"
+  for state in needs_input done failed; do
+    case "$state" in
+      needs_input) label='! INPUT' ;;
+      done) label='REVIEW' ;;
+      failed) label='! FAIL' ;;
+    esac
+    tmux -L "$SOCKET" set-option -wq -t "$claude_window" @drudwyn_state "$state"
+    for width in 64 96 120 160; do
+      attention_bar="$($ROOT/scripts/status-bar.sh bar "$claude_window" "$width")"
+      printf '%s' "$attention_bar" | grep -Fq "$label"
+    done
+    # Unselected agents must explain their state in the right-hand cluster too.
+    attention_bar="$($ROOT/scripts/status-bar.sh bar "$codex_window" 160)"
+    printf '%s' "$attention_bar" | grep -Fq "$label"
+  done
+done
+tmux -L "$SOCKET" set-option -wq -t "$claude_window" @drudwyn_state needs_input
+printf 'ok: attention badges explain input, review, and failure in both icon modes\n'
 
 tmux -L "$SOCKET" set-option -g @drudwyn-theme dawn
 dawn="$($ROOT/scripts/status-bar.sh bar "$codex_window" 120)"

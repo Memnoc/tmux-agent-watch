@@ -88,8 +88,10 @@ Codex `✣`, Claude `✦`, and OpenCode `⌬`. In safe mode these become `C`, `A
 `O`. Lifecycle color remains separate from agent identity, so the symbol says
 which agent is running while its color says whether it is working, waiting,
 ready for review, or failed. Waiting, review-ready, and failed agents use a
-filled high-contrast badge so work needing attention stands apart from active
-work at a glance.
+filled high-contrast badge with a text label: `! INPUT` means the agent needs
+your input or approval, `REVIEW` means its turn finished, and `! FAIL` means it
+failed. These labels appear alongside the agent identity in both icon modes,
+including compact bars. Press `prefix + a` to jump to an agent needing attention.
 
 The workspace navigator and cockpit details use the Drudwyn hound at `U+F0000`
 when **Drudwyn Symbols** is installed, then the Nerd Font bot as a fallback.

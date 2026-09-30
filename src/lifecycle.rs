@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env,
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
@@ -25,14 +26,24 @@ pub enum LifecycleError {
 
 pub fn scan() -> Result<(), LifecycleError> {
     let output = tmux_output(&["list-panes", "-a", "-F", PANE_FORMAT])?;
+    let mut windows = BTreeMap::<&str, Vec<Vec<&str>>>::new();
     for line in output.lines().filter(|line| !line.is_empty()) {
         let fields = line.split(SEPARATOR).collect::<Vec<_>>();
         if fields.len() != 6 {
             continue;
         }
-        let window_id = fields[0];
-        let Some(agent) = AgentKind::from_command(fields[2]) else {
-            if !fields[4].is_empty() && fields[5] != "hook" {
+        windows.entry(fields[0]).or_default().push(fields);
+    }
+    // Lifecycle metadata belongs to a window. Reconcile all its panes before
+    // publishing it, so a shell/editor split cannot temporarily erase an agent.
+    for (window_id, panes) in windows {
+        let agent_pane = panes
+            .iter()
+            .filter_map(|fields| AgentKind::from_command(fields[2]).map(|agent| (fields, agent)))
+            .max_by_key(|(fields, _)| fields[3] != "1");
+        let Some((fields, agent)) = agent_pane else {
+            let previous = &panes[0];
+            if !previous[4].is_empty() && previous[5] != "hook" {
                 clear(window_id)?;
             }
             continue;

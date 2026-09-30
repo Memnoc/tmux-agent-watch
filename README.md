@@ -120,8 +120,9 @@ kill the selection, and `s` saves all sessions through tmux-resurrect.
 
 ## Agent integrations
 
-Codex, Claude Code, and OpenCode are detected automatically. Optional lifecycle
-hooks provide exact state transitions. [Set up your agent](docs/agents.md).
+Codex, Claude Code, and OpenCode are detected automatically. Configure lifecycle
+hooks to show when an agent needs input or is ready for review.
+[Set up your agent](docs/agents.md).
 
 ## Configure
 

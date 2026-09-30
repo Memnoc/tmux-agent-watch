@@ -65,6 +65,12 @@ Remove an old `@drudwyn-native-session-key C-s` override if it takes that key.
 Start the agent inside a tmux pane. Automatic detection uses process and tmux
 metadata; optional [agent integrations](agents.md) provide explicit lifecycle
 transitions. Verify that hook commands point to the checkout you actually use.
+If every agent stays in the plain working style, the lifecycle hooks may be
+missing or untrusted. Process detection alone cannot produce input or review
+badges. In Codex, open `/hooks` and review the Drudwyn commands. Newly configured
+hooks report future events; they cannot recover a permission request or finished
+turn that happened before they were enabled.
+
 The default scan interval is two seconds; it can be changed in [configuration](configuration.md).
 
 The default implementation does not read your conversation to infer progress.
