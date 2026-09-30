@@ -409,6 +409,10 @@ pub fn apply(reviewed: &Preview) -> Result<&'static str, Error> {
         Path::new("."),
         &[
             "merge",
+            // Override branch.<name>.mergeOptions: the preview promises a
+            // committed merge, never squash or an uncommitted alternate mode.
+            "--no-squash",
+            "--commit",
             "--no-edit",
             "--no-autostash",
             "--no-overwrite-ignore",

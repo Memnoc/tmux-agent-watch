@@ -95,6 +95,9 @@ interactive refresh thread creates no persistent cache; failed snapshots remain
 visibly stale and cannot authorize an action. Exiting the popup discards the
 snapshot. Lifecycle window projections use a single guarded tmux command queue,
 retaining the existing bounded lock and mutation-child lifetime guarantees.
+If a sampled live pane's root is missing from the subsequent process observation,
+reconciliation retries both observations before any writes. Persistent uncertainty
+returns an error without clearing evidence or publishing a fresh scan timestamp.
 
 Status-bar A reads the observer's existing content-blind projection. Successful
 reconciliation publishes only a live scan timestamp under the existing guard;

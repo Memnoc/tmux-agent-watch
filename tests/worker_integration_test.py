@@ -403,6 +403,40 @@ class WorkerIntegrationTest(IndependentNavigation):
         output = self.wait_pane(pane, 'Not contained in selected destination')
         self.assertIn(self.commit, output)
 
+    def test_advertised_merge_modes_override_branch_options_without_staged_alternates(self):
+        for divergent in [False, True]:
+            for i, options in enumerate(['--squash', '--no-commit', '--squash --no-commit',
+                                         '--squash --no-commit '+('--ff-only' if divergent else '--no-ff')]):
+                with self.subTest(divergent=divergent, options=options):
+                    branch = f'target-{int(divergent)}-{i}'
+                    target = Path(self.tmp.name)/branch
+                    self.git('worktree', 'add', '-b', branch, str(target), self.base)
+                    if divergent: self.git('commit', '--allow-empty', '-qm', 'target change', path=target)
+                    before = self.git('rev-parse', 'HEAD', path=target)
+                    self.git('config', f'branch.{branch}.mergeOptions', options)
+                    marker = Path(self.tmp.name)/(branch+'-hook')
+                    hook = self.repo/'.git/hooks/post-merge'
+                    hook.write_text('#!/usr/bin/python3\nimport sys\nfrom pathlib import Path\n'
+                                    'assert sys.stdin.read() == ""\n'
+                                    f'Path({str(marker)!r}).write_text(sys.argv[1])\n')
+                    hook.chmod(0o755)
+                    preview = self.integrate(destination=branch)
+                    self.assertIn('Normal merge' if divergent else 'Fast-forward', preview.stdout)
+                    result = self.integrate('--apply', self.token(preview), destination=branch)
+                    self.assertIn('Integrated:', result.stdout)
+                    after = self.git('rev-parse', 'HEAD', path=target)
+                    self.assertNotEqual(after, before)
+                    if divergent:
+                        parents = self.git('rev-list', '--parents', '-n', '1', 'HEAD', path=target).split()
+                        self.assertEqual(parents[1:], [before, self.commit])
+                    else:
+                        self.assertEqual(after, self.commit)
+                    self.assertEqual(self.git('status', '--porcelain', path=target), '')
+                    self.assertEqual(self.git('diff', '--cached', '--name-only', path=target), '')
+                    self.assertEqual(self.git('rev-parse', '--verify', 'MERGE_HEAD', path=target, check=False), '')
+                    self.assertEqual(marker.read_text(), '0')  # Git says normal merge, not squash.
+                    self.assertTrue(self.source.is_dir())
+
 if __name__ == '__main__':
     names = [n for n in WorkerIntegrationTest.__dict__ if n.startswith('test_') and (len(sys.argv)==1 or sys.argv[1] in n)]
     result = unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(WorkerIntegrationTest(n) for n in names))

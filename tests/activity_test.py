@@ -381,7 +381,7 @@ class Activity(unittest.TestCase):
     @contextmanager
     def paused_cli(self, *args, phase='snapshot', fail=False):
         """Pause a real tmux call at its boundary, without faking its result."""
-        gate = self.path / 'gate'
+        gate = self.path / f'gate-{time.monotonic_ns()}'
         gate.mkdir()
         wrapper = gate / 'tmux'
         # Python refuses directory stdin at startup. Preserve any inherited
@@ -602,6 +602,69 @@ os.execv(real, [real, *args])
             self.assertEqual(scan.returncode, 0)
         self.cli('hook', 'codex', 'stop', timeout=5)
         self.assertIn('REVIEW', self.cli('status', timeout=5))
+
+    def test_exit_between_pane_and_process_observations_preserves_handoff(self):
+        for event, state in [('stop', 'done'), ('permissionRequest', 'needs_input')]:
+            with self.subTest(event=event):
+                child, reap = self.reaping_worker()
+                root = self.tmux('display-message', '-p', '-t', self.pane, '#{pane_pid}')
+                self.cli('hook', 'codex', event)
+                since = self.option('attention_since')
+                with self.paused_cli('scan') as (scan, release):
+                    # The wrapper already captured the real live-pane snapshot.
+                    # Let tmux reap the root before scan obtains its real ps sample.
+                    os.kill(int(child), signal.SIGTERM)
+                    self.reap_worker(child, reap)
+                    os.kill(int(root), signal.SIGTERM)
+                    deadline = time.monotonic() + 3
+                    while self.tmux('display-message', '-p', '-t', self.pane, '#{pane_dead}') != '1' or Path('/proc', root).exists():
+                        self.assertLess(time.monotonic(), deadline, 'root was not reaped')
+                        time.sleep(.01)
+                    release.touch()
+                    _, error = scan.communicate(timeout=5)
+                    self.assertEqual(scan.returncode, 0, error)
+                self.assertEqual(self.option('state'), state)
+                self.assertEqual(self.option('source'), 'hook')
+                self.assertEqual(self.option('attention_since'), since)
+                self.assertEqual(self.option('process'), 'exited')
+                status = self.cli('status')
+                self.assertIn('REVIEW' if event == 'stop' else 'NEEDS INPUT', status)
+                self.assertIn('Exited', status)
+                self.assertNotIn('Running process', status)
+
+    def test_replacement_between_observations_does_not_inherit_handoff(self):
+        self.cli('hook', 'codex', 'stop')
+        with self.paused_cli('scan') as (scan, release):
+            self.tmux('respawn-pane', '-k', '-t', self.pane, str(self.fake), '300')
+            self.wait_fake_agents(1)
+            release.touch()
+            _, error = scan.communicate(timeout=5)
+            self.assertEqual(scan.returncode, 0, error)
+        self.assertEqual(self.option('state'), 'running')
+        self.assertEqual(self.option('source'), 'process')
+        self.assertEqual(self.option('attention_since'), '')
+        self.assertNotIn('REVIEW', self.cli('status'))
+
+    def test_incoherent_observations_preserve_evidence_and_freshness(self):
+        self.cli('hook', 'codex', 'permissionRequest')
+        since = self.option('attention_since')
+        scanned = self.tmux('show-option', '-gqv', '@drudwyn_scan_at')
+        root = self.tmux('display-message', '-p', '-t', self.pane, '#{pane_pid}')
+        wrapper = self.path / 'ps'
+        # Model an unavailable root in the process observation without changing
+        # the real pane or its previously attributable hook evidence.
+        wrapper.write_text('#!/usr/bin/python3\nimport subprocess, sys\n'
+                           f'output = subprocess.check_output([{shutil.which("ps")!r}, *sys.argv[1:]], text=True)\n'
+                           f'print("".join(line for line in output.splitlines(keepends=True) if line.split()[0] != {root!r}), end="")\n')
+        wrapper.chmod(0o755)
+        result = subprocess.run([str(BIN), 'scan'], env=dict(self.env, PATH=str(self.path) + ':' + self.env['PATH']), capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pane and process observations changed; retry', result.stderr)
+        self.assertEqual(self.option('state'), 'needs_input')
+        self.assertEqual(self.option('source'), 'hook')
+        self.assertEqual(self.option('attention_since'), since)
+        self.assertEqual(self.tmux('show-option', '-gqv', '@drudwyn_scan_at'), scanned)
+        self.assertIn('NEEDS INPUT', self.cli('status'))
 
     def test_same_pane_replacement_loses_old_attention(self):
         self.cli('hook', 'codex', 'permissionRequest')

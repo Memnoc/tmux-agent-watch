@@ -141,3 +141,96 @@ integration-specific throughput benchmark. No status-row ancestry work was added
 Implementation and verified receipt are committed atomically on the feature
 branch, with independent review pending. `main` remains
 `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+## Review correction — pending independent re-review
+
+Independent review of `29144fd..948b902` found one P2: inherited
+`branch.<destination>.mergeOptions` could replace the advertised integration
+mode. With `--squash`, a fast-forward preview staged the source changes but did
+not advance HEAD or leave MERGE_HEAD; with `--no-commit`, divergent integration
+stopped with staged changes and MERGE_HEAD. Apply reported uncertainty rather
+than success, but it had still performed an unadvertised alternate operation.
+
+Apply now explicitly passes `--no-squash --commit` before its planned
+`--ff-only`/`--no-ff` mode. This keeps the preview's promised fast-forward or
+committed normal merge authoritative while preserving normal Git hooks. No
+other mutation, locking, preview-token or conflict behavior changed.
+
+The new public-command regression uses real Git for eight combinations:
+fast-forward/divergent histories crossed with `--squash`, `--no-commit`, their
+combination, and their combination with the opposing fast-forward setting.
+Seven combinations failed before the fix (plain no-commit does not prevent a
+fast-forward), then all eight passed. Each verifies exact resulting HEAD or
+both merge parents, an empty worktree/index status, absent MERGE_HEAD, retained
+worker checkout, and a real Python post-merge hook receiving Git's normal-merge
+argument `0` with usable stdin. Existing Python pre-merge, failure/conflict,
+concurrent/orphan, ancestry, redaction and UI regressions remain green.
+
+Evidence: `/tmp/drudwyn-ticket11-merge-options-red.log` and
+`/tmp/drudwyn-ticket11-merge-options-focused.log` (16 integration cases).
+Reviewer originals remain `/tmp/drudwyn-review11-merge-options.py` and
+`/tmp/drudwyn-review11-merge-options-ff.py`. Sequential Standards/Spec correction
+audit confirmed that the explicit options enforce the reviewed mode without
+suppressing hooks or weakening preserved-failure behavior. Code is frozen for
+final gates; independent re-review remains pending. No ticket12 changes.
+
+### Regression-gate lifecycle correction (ticket07 behavior)
+
+The first correction full suite passed launch15, recovery17, integration16 and
+Global11, then failed the status test's worker-discovery wait before rendering.
+The independent diagnostic `/tmp/drudwyn-ticket11-status-diagnose.log` reproduced
+valid new-root/new-child hook evidence being erased immediately after exit.
+This is a separate lifecycle race discovered during ticket11 validation, not
+another integration defect: tmux sampled a live pane, then its bound root exited
+and was reaped before the subsequent process sample. The old reconciliation
+cleared the binding because neither the captured pane nor the process sample
+proved exit coherently.
+
+Reconciliation now checks the two observations before any projection writes.
+A live pane missing its root in the process sample triggers up to three complete
+resamples; persistent disagreement returns explicit retry uncertainty, retaining
+prior evidence and the old freshness timestamp. Dead panes naturally permit a
+missing root. Existing root/child birth identity checks still discard replacement
+lifetimes; the guard and mutation-child inheritance are unchanged. Ordinary
+coherent scans perform the same number of subprocesses as before. This is a
+bounded consistency check, not a claim that tmux and process snapshots are atomic.
+
+The deterministic public scan test gates an actual tmux live-pane response,
+exits/reaps its controlled fake worker and shell, then permits the real process
+sample. Both Review and Input were erased before the fix, and both survive as
+hook history alongside exit afterward. Additional cases prove replacement in
+that gap receives fresh process evidence and persistent missing-root observation
+fails without changing attention or freshness. Evidence:
+`/tmp/drudwyn-ticket11-lifecycle-race-red.log`,
+`/tmp/drudwyn-ticket11-lifecycle-race-green.log`, and
+`/tmp/drudwyn-ticket11-lifecycle-targeted.log` (three new cases).
+The first full activity run passed the original36 cases, including orphan,
+queued-hook, zombie/reaping and replacement coverage. Its new fixtures required
+shorter socket names and explicit child reaping before root exit; corrected
+fixtures then passed all three targeted cases. No production checks were relaxed.
+Independent early patch inspection found the bounded pre-mutation retry clear;
+final correction re-review remains pending after the complete gates below.
+
+
+### Final correction gates
+
+- `cargo fmt --check` and `git diff --check` passed.
+- `cargo test --locked`: 41 Rust tests passed.
+- `bash tests/run.sh`: the complete frozen suite passed, including launch15,
+  recovery17, integration16, Global11, status11, activity39, clients29,
+  navigator13 (one existing optional Resurrect skip), settings10, and the
+  lifecycle shell, privacy, packaging and release-workflow checks.
+- Final logs: `/tmp/drudwyn-ticket11-correction-final-rust.log` and
+  `/tmp/drudwyn-ticket11-correction-final-suite.log`. Focused actual status
+  evidence: `/tmp/drudwyn-ticket11-status-focused.log` (11 cases).
+- Sequential Standards/Spec audit: no new content observation, persistent state,
+  hook suppression, destructive Git cleanup, or weakened lifetime checks. The
+  observation retry completes before any window mutations or scan freshness
+  publication. Validation uses Linux, real Git/tmux and controlled fake agents;
+  no installed agents or live user projects were used. Cross-platform runtime
+  behavior beyond this environment remains unverified.
+
+Both corrections and this receipt are committed together. Independent correction
+re-review is pending; this receipt does not self-clear it. `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`. No ticket12 work was started;
+work pauses after ticket11 independent clearance as requested.

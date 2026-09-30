@@ -645,7 +645,8 @@ own locks and ignored-file overwrite protection remain effective; no automatic
 stash, reset, squash, rebase, push or cleanup occurs.
 
 A source already contained in the target is a reported no-op. Otherwise Drudwyn
-uses a fast-forward or normal divergent merge. It preserves the existing target
+uses a fast-forward or normal divergent merge. Explicit non-squash/commit options
+override conflicting branch merge options; normal Git hooks still run. It preserves the existing target
 checkout even when it is elsewhere or the invoking shell is on another branch.
 Success means the reviewed source commit is contained in the selected destination;
 it does not mean checks passed or the task completed. The worker and branch remain.

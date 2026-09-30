@@ -143,8 +143,7 @@ pub fn scan() -> Result<(), LifecycleError> {
 }
 
 fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
-    let output = tmux_output(&["list-panes", "-a", "-F", PANE_FORMAT])?;
-    let all = processes()?;
+    let (output, all) = reconciliation_observations()?;
     let mut windows = BTreeMap::<&str, Vec<Vec<&str>>>::new();
     let mut seen = std::collections::HashSet::new();
     for line in output.lines().filter(|line| !line.is_empty()) {
@@ -366,6 +365,28 @@ fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
         ],
     )?;
     Ok(())
+}
+
+fn reconciliation_observations() -> Result<(String, Vec<Process>), LifecycleError> {
+    for _ in 0..3 {
+        let panes = tmux_output(&["list-panes", "-a", "-F", PANE_FORMAT])?;
+        let all = processes()?;
+        // The guard serializes our writers, not process exit or tmux reaping.
+        // A root may disappear between these two observations. Resample before
+        // any mutation instead of erasing its handoff using a stale live pane.
+        let missing_live_root = panes.lines().any(|line| {
+            let fields: Vec<_> = line.split(SEPARATOR).collect();
+            fields.len() == 18
+                && fields[4] == "0"
+                && !all.iter().any(|process| process.pid == fields[2])
+        });
+        if !missing_live_root {
+            return Ok((panes, all));
+        }
+    }
+    Err(LifecycleError::Synchronization(
+        "pane and process observations changed; retry this command".into(),
+    ))
 }
 
 pub fn starting(pane: &str, pid: &str, agent: Option<AgentKind>) -> Result<(), LifecycleError> {
