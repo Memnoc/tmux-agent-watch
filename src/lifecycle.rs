@@ -4,7 +4,7 @@ use std::{
     fs::{self, File},
     os::unix::fs::MetadataExt,
     path::Path,
-    process::Command,
+    process::{Command, Stdio},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -34,11 +34,13 @@ pub enum LifecycleError {
 
 /// Lock the existing socket directory, without creating a lock file or storing
 /// state. Servers sharing a directory serialize conservatively. The descriptor
-/// is close-on-exec; errors, unwinding and process death release the kernel lock.
+/// is close-on-exec except for controlled mutation children, which hold a clone
+/// as their unused stdin until they finish. Parent death cannot release the lock
+/// while an already-spawned child can still write stale evidence.
 /// All lifecycle snapshots and writes, including window projection, must be
 /// inside this guard. A reread alone would leave another read/write race.
 struct LifecycleGuard {
-    _directory: File,
+    directory: File,
 }
 
 impl LifecycleGuard {
@@ -76,9 +78,7 @@ impl LifecycleGuard {
                 "tmux socket directory changed; retry this command".into(),
             ));
         }
-        Ok(Self {
-            _directory: directory,
-        })
+        Ok(Self { directory })
     }
 }
 
@@ -132,7 +132,7 @@ pub fn scan() -> Result<(), LifecycleError> {
     reconcile(&guard)
 }
 
-fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
+fn reconcile(guard: &LifecycleGuard) -> Result<(), LifecycleError> {
     let output = tmux_output(&["list-panes", "-a", "-F", PANE_FORMAT])?;
     let all = processes()?;
     let mut windows = BTreeMap::<&str, Vec<Vec<&str>>>::new();
@@ -165,6 +165,7 @@ fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                 let identity = format!("{}:{}:{}", f[2], process.pid, process.birth);
                 if f[7] != identity {
                     pane_state(
+                        guard,
                         f[1],
                         Lifecycle::Running,
                         "process",
@@ -189,6 +190,7 @@ fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                         .map(|a| a.command())
                         .unwrap_or("");
                     pane_state(
+                        guard,
                         f[1],
                         state,
                         "process",
@@ -204,6 +206,7 @@ fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                     Lifecycle::Running
                 };
                 pane_state(
+                    guard,
                     f[1],
                     state,
                     if f[16] == "starting" {
@@ -224,6 +227,7 @@ fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                 ));
             } else if agents.len() <= 1 {
                 pane_options(
+                    guard,
                     f[1],
                     &[
                         ("identity", ""),
@@ -239,13 +243,13 @@ fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
         // Multiple independent agents have no window-level owner. Do not let
         // pane order or the active pane choose which worker gets represented.
         if ambiguous || candidates.len() > 1 {
-            clear(window)?;
-            set_option(window, "@drudwyn_state", "unknown")?;
-            set_option(window, "@drudwyn_process", "ambiguous")?;
+            clear(guard, window)?;
+            set_option(guard, window, "@drudwyn_state", "unknown")?;
+            set_option(guard, window, "@drudwyn_process", "ambiguous")?;
             continue;
         }
         let Some((f, process_state)) = candidates.first() else {
-            clear(window)?;
+            clear(guard, window)?;
             continue;
         };
         for key in ["agent", "state", "source", "since", "attention_since"] {
@@ -256,21 +260,24 @@ fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                 f[1],
                 &format!("@drudwyn_p_{key}"),
             ])?;
-            set_option(window, &format!("@drudwyn_{key}"), &value)?;
+            set_option(guard, window, &format!("@drudwyn_{key}"), &value)?;
         }
-        set_option(window, "@drudwyn_activity_pane", f[1])?;
-        set_option(window, "@drudwyn_process", process_state)?;
+        set_option(guard, window, "@drudwyn_activity_pane", f[1])?;
+        set_option(guard, window, "@drudwyn_process", process_state)?;
         set_option(
+            guard,
             window,
             "@drudwyn_exit_code",
             if *process_state == "exited" { f[5] } else { "" },
         )?;
         set_option(
+            guard,
             window,
             "@drudwyn_exit_time",
             if *process_state == "exited" { f[6] } else { "" },
         )?;
         set_option(
+            guard,
             window,
             "@drudwyn_exit_signal",
             if *process_state == "exited" {
@@ -279,9 +286,9 @@ fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
                 ""
             },
         )?;
-        set_option(window, "@drudwyn_message", "")?;
+        set_option(guard, window, "@drudwyn_message", "")?;
         let state = tmux_output(&["show-option", "-wqv", "-t", window, "@drudwyn_state"])?;
-        write_style(window, Lifecycle::from_tmux(&state))?;
+        write_style(guard, window, Lifecycle::from_tmux(&state))?;
     }
     Ok(())
 }
@@ -289,12 +296,13 @@ fn reconcile(_guard: &LifecycleGuard) -> Result<(), LifecycleError> {
 pub fn starting(pane: &str, pid: &str, agent: Option<AgentKind>) -> Result<(), LifecycleError> {
     let guard = LifecycleGuard::acquire()?;
     let window = tmux_output(&["display-message", "-p", "-t", pane, "#{window_id}"])?;
-    set_option(&window, "@drudwyn_launch_stage", "starting")?;
+    set_option(&guard, &window, "@drudwyn_launch_stage", "starting")?;
     let identity = tmux_output(&["show-option", "-pqv", "-t", pane, "@drudwyn_p_identity"])?;
     // A worker may report a hook before new-window returns. Never overwrite
     // that stronger evidence with the coordinator's startup bookkeeping.
     if identity.split(':').next() != Some(pid) {
         pane_state(
+            &guard,
             pane,
             Lifecycle::Starting,
             "launch",
@@ -328,6 +336,7 @@ pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
     }
     let identity = format!("{}:{}:{}", f[2], agents[0].pid, agents[0].birth);
     pane_state(
+        &guard,
         &pane,
         lifecycle,
         "hook",
@@ -337,7 +346,11 @@ pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
     reconcile(&guard)
 }
 
-fn pane_options(pane: &str, options: &[(&str, &str)]) -> Result<(), LifecycleError> {
+fn pane_options(
+    guard: &LifecycleGuard,
+    pane: &str,
+    options: &[(&str, &str)],
+) -> Result<(), LifecycleError> {
     // Submit state and its binding in one synchronous tmux command queue,
     // with identity last. A failed submission must not publish a new identity
     // before replacing the old process's evidence.
@@ -352,9 +365,10 @@ fn pane_options(pane: &str, options: &[(&str, &str)]) -> Result<(), LifecycleErr
         }
         args.extend(["set-option", "-pq", "-t", pane, name, value]);
     }
-    tmux_status(&args)
+    tmux_status(guard, &args)
 }
 fn pane_state(
+    guard: &LifecycleGuard,
     pane: &str,
     lifecycle: Lifecycle,
     source: &str,
@@ -391,7 +405,7 @@ fn pane_state(
     if let Some((identity, agent)) = binding {
         options.extend([("agent", agent), ("identity", identity)]);
     }
-    pane_options(pane, &options)
+    pane_options(guard, pane, &options)
 }
 
 pub fn map_event(agent: AgentKind, event: &str) -> Option<Lifecycle> {
@@ -414,19 +428,23 @@ pub fn map_event(agent: AgentKind, event: &str) -> Option<Lifecycle> {
 
 /// Repaint existing markers without altering lifecycle evidence or timestamps.
 pub fn refresh_styles() -> Result<(), LifecycleError> {
-    let _guard = LifecycleGuard::acquire()?;
+    let guard = LifecycleGuard::acquire()?;
     let windows = tmux_output(&["list-windows", "-a", "-F", "#{window_id}␟#{@drudwyn_state}"])?;
     for line in windows.lines() {
         if let Some((window, state)) = line.split_once(SEPARATOR) {
             if !state.is_empty() {
-                write_style(window, Lifecycle::from_tmux(state))?;
+                write_style(&guard, window, Lifecycle::from_tmux(state))?;
             }
         }
     }
     Ok(())
 }
 
-fn write_style(window_id: &str, lifecycle: Lifecycle) -> Result<(), LifecycleError> {
+fn write_style(
+    guard: &LifecycleGuard,
+    window_id: &str,
+    lifecycle: Lifecycle,
+) -> Result<(), LifecycleError> {
     let theme = tmux_output(&["show-option", "-gqv", "@drudwyn-theme"])?;
     let dawn = theme == "dawn";
     let (name, fallback) = match lifecycle {
@@ -446,8 +464,8 @@ fn write_style(window_id: &str, lifecycle: Lifecycle) -> Result<(), LifecycleErr
         ),
         Lifecycle::Failed => ("failed", if dawn { "#b4637a" } else { "#eb6f92" }),
         Lifecycle::Unknown => {
-            set_option(window_id, "@drudwyn_marker", "")?;
-            return set_option(window_id, "@drudwyn_window_style", "");
+            set_option(guard, window_id, "@drudwyn_marker", "")?;
+            return set_option(guard, window_id, "@drudwyn_window_style", "");
         }
     };
     let configured_color =
@@ -465,8 +483,9 @@ fn write_style(window_id: &str, lifecycle: Lifecycle) -> Result<(), LifecycleErr
         &configured_symbol
     };
     let marker = format!("#[fg={color}]{symbol}#[default] ");
-    set_option(window_id, "@drudwyn_marker", &marker)?;
+    set_option(guard, window_id, "@drudwyn_marker", &marker)?;
     set_option(
+        guard,
         window_id,
         "@drudwyn_window_style",
         &format!("#[fg={color}]"),
@@ -474,7 +493,7 @@ fn write_style(window_id: &str, lifecycle: Lifecycle) -> Result<(), LifecycleErr
     Ok(())
 }
 
-fn clear(window_id: &str) -> Result<(), LifecycleError> {
+fn clear(guard: &LifecycleGuard, window_id: &str) -> Result<(), LifecycleError> {
     for option in [
         "@drudwyn_state",
         "@drudwyn_source",
@@ -490,13 +509,18 @@ fn clear(window_id: &str) -> Result<(), LifecycleError> {
         "@drudwyn_exit_time",
         "@drudwyn_exit_signal",
     ] {
-        set_option(window_id, option, "")?;
+        set_option(guard, window_id, option, "")?;
     }
     Ok(())
 }
 
-fn set_option(window_id: &str, name: &str, value: &str) -> Result<(), LifecycleError> {
-    tmux_status(&["set-option", "-wq", "-t", window_id, name, value])
+fn set_option(
+    guard: &LifecycleGuard,
+    window_id: &str,
+    name: &str,
+    value: &str,
+) -> Result<(), LifecycleError> {
+    tmux_status(guard, &["set-option", "-wq", "-t", window_id, name, value])
 }
 
 fn tmux_output(args: &[&str]) -> Result<String, LifecycleError> {
@@ -507,9 +531,14 @@ fn tmux_output(args: &[&str]) -> Result<String, LifecycleError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn tmux_status(args: &[&str]) -> Result<(), LifecycleError> {
+fn tmux_status(guard: &LifecycleGuard, args: &[&str]) -> Result<(), LifecycleError> {
+    // set-option never consumes stdin. Stdio safely duplicates the same open
+    // file description into this child only, so it shares the kernel lock even
+    // if our process is killed. Reads and unrelated subprocesses do not inherit
+    // it. Do not explicitly unlock: the last surviving owner releases the lock.
     Command::new("tmux")
         .args(args)
+        .stdin(Stdio::from(guard.directory.try_clone()?))
         .status()?
         .success()
         .then_some(())

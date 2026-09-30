@@ -56,14 +56,20 @@ class Activity(unittest.TestCase):
         gate = self.path / 'gate'
         gate.mkdir()
         wrapper = gate / 'tmux'
-        wrapper.write_text('''#!/usr/bin/python3
+        # Python refuses directory stdin at startup. Preserve any inherited
+        # descriptor through startup, then restore it before the real command.
+        wrapper.write_text('#!/bin/sh\nexec /usr/bin/python3 "$(dirname "$0")/gate.py" "$@" 3<&0 </dev/null\n')
+        (gate / 'gate.py').write_text('''
 import os, pathlib, subprocess, sys, time
+os.dup2(3, 0)
+os.close(3)
 gate = pathlib.Path(__file__).parent
 real = REAL
 args = sys.argv[1:]
+state_option = '@drudwyn_state' if PHASE == 'projection' else '@drudwyn_p_state'
 pause = (args[:1] == ['list-panes'] if PHASE == 'snapshot' else
-         args[:1] == ['set-option'] and '@drudwyn_p_state' in args and
-         args[args.index('@drudwyn_p_state') + 1] == 'running')
+         args[:1] == ['set-option'] and state_option in args and
+         args[args.index(state_option) + 1] == 'running')
 if pause and not (gate / 'ready').exists():
     result = subprocess.run([real, *args], capture_output=True) if PHASE == 'snapshot' else None
     (gate / 'ready').touch()
@@ -71,7 +77,10 @@ if pause and not (gate / 'ready').exists():
     while not (gate / 'release').exists():
         if time.monotonic() > deadline: sys.exit(97)
         time.sleep(.01)
-    if FAIL: sys.exit(1)
+    if FAIL == 'spawn':
+        # The next mutation cannot exec; the snapshot itself remains real.
+        (gate / 'tmux').write_bytes(bytes([127]) + b'ELF-invalid-executable')
+    if FAIL is True: sys.exit(1)
     if result is not None:
         sys.stdout.buffer.write(result.stdout)
         sys.stderr.buffer.write(result.stderr)
@@ -161,6 +170,66 @@ os.execv(real, [real, *args])
             scan.communicate(timeout=5)
         self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
 
+    def orphaned_write_preserves_attention(self, replace, phase='write'):
+        if replace:
+            self.cli('hook', 'codex', 'stop')
+            self.tmux('respawn-pane', '-k', '-t', self.pane, str(self.fake), '300')
+            time.sleep(.08)
+        with self.paused_cli('scan', phase=phase) as (scan, release):
+            scan.kill()
+            scan.wait(timeout=2)
+            hook = subprocess.Popen([str(BIN), 'hook', 'codex', 'permissionRequest'], env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                try:
+                    hook.wait(timeout=.4)
+                except subprocess.TimeoutExpired:
+                    pass
+                release.touch()
+                scan.communicate(timeout=5)
+                _, error = hook.communicate(timeout=5)
+                self.assertEqual(hook.returncode, 0, error)
+            finally:
+                if hook.poll() is None:
+                    hook.kill()
+                hook.communicate(timeout=5)
+        # Check the completed writers before a fresh scan can repair projection.
+        self.assertEqual(self.option('state'), 'needs_input')
+        self.assertEqual(self.option('source'), 'hook')
+        since = self.option('attention_since')
+        self.assertNotEqual(since, '')
+        self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
+        self.cli('scan', timeout=5)
+        self.assertEqual(self.option('attention_since'), since)
+        self.tmux('respawn-pane', '-k', '-t', self.pane, str(self.fake), '300')
+        time.sleep(.08)
+        self.assertIn('RUNNING', self.cli('status', timeout=5))
+        self.assertEqual(self.option('source'), 'process')
+        self.assertEqual(self.option('attention_since'), '')
+
+    def test_orphaned_initial_write_cannot_erase_newer_hook(self):
+        self.orphaned_write_preserves_attention(replace=False)
+
+    def test_orphaned_replacement_write_cannot_erase_newer_hook(self):
+        self.orphaned_write_preserves_attention(replace=True)
+
+    def test_orphaned_window_projection_cannot_erase_newer_hook(self):
+        self.cli('scan')
+        self.orphaned_write_preserves_attention(replace=False, phase='projection')
+
+    def test_stalled_orphaned_mutation_returns_bounded_retry(self):
+        with self.paused_cli('scan', phase='write') as (scan, release):
+            scan.kill()
+            scan.wait(timeout=2)
+            result = subprocess.run([str(BIN), 'hook', 'codex', 'permissionRequest'], env=self.env, capture_output=True, text=True, timeout=7)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('another update is still in progress; retry', result.stderr)
+            release.touch()
+            scan.communicate(timeout=5)
+        self.cli('hook', 'codex', 'permissionRequest', timeout=5)
+        self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
+        self.assertEqual(self.option('source'), 'hook')
+        self.assertNotEqual(self.option('attention_since'), '')
+
     def test_failed_scan_releases_guard_for_hook(self):
         with self.paused_cli('scan', fail=True) as (scan, release):
             release.touch()
@@ -168,6 +237,16 @@ os.execv(real, [real, *args])
             self.assertNotEqual(scan.returncode, 0)
         self.cli('hook', 'codex', 'permissionRequest', timeout=5)
         self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
+
+    def test_mutation_spawn_failure_releases_guard_for_hook(self):
+        with self.paused_cli('scan', fail='spawn') as (scan, release):
+            release.touch()
+            _, error = scan.communicate(timeout=5)
+            self.assertNotEqual(scan.returncode, 0)
+            self.assertIn('could not invoke tmux', error)
+        self.cli('hook', 'codex', 'permissionRequest', timeout=5)
+        self.assertIn('NEEDS INPUT', self.cli('status', timeout=5))
+        self.assertEqual(self.option('source'), 'hook')
 
     def test_failed_replacement_update_cannot_inherit_old_handoff(self):
         self.cli('hook', 'codex', 'stop')

@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done — P1 correction pending fresh independent review
+**Status:** done — orphaned mutation P1 correction pending fresh independent review
 
 **What to build:** Users can distinguish a running process, reported task
 activity, attention requests, and an agent that exited, across current surfaces.
@@ -180,3 +180,71 @@ included. `main` remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
 Fresh independent Standards/Spec re-review remains required; this correction
 does not mark crosscheck clear.
 Runtime evidence remains Linux/tmux 3.4 only; macOS was not exercised.
+
+## Independent re-review P1 correction — 2026-09-30
+
+The next independent review reproduced a different crash boundary: pause an
+already-spawned initial-scan mutation, SIGKILL its parent, complete a newer
+`permissionRequest` hook, then release the orphaned mutation. The prior
+close-on-exec guard released with the parent, and the orphan changed Needs
+input/hook/nonempty attention to Running/process/empty attention.
+`PYTHONDONTWRITEBYTECODE=1 python3 /tmp/drudwyn-review07-orphan.py` reproduced
+those exact values. Two committed CLI regressions, for initial and replacement
+pane writes, also failed before the correction with Needs input missing from
+the resulting Running status. This supersedes the earlier receipt's claim
+that releasing the lock on owner death was sufficient.
+
+Every lifecycle mutation now explicitly receives the acquired guard. The
+controlled `set-option` child receives a cloned `File` through Rust's safe
+`Stdio` API as its unused stdin. That clone shares the existing kernel lock
+and survives parent death until the child completes. The parent descriptor
+remains close-on-exec; metadata reads and process scans do not inherit it.
+There is no unsafe code, global descriptor-flag change, explicit unlock, new
+file, persistent registry, or content inspection. Pane state, window projection,
+style updates, and launch-stage bookkeeping all use this guarded mutation path.
+All other tmux calls in this module only display/list/show metadata.
+
+The behavior was checked against the actual supported runtime, tmux 3.4. Its
+[client implementation](https://github.com/tmux/tmux/blob/3.4/client.c#L339-L416)
+sends the command, retains stdin throughout its command loop, and returns after
+the exit response. `client_send_identify` duplicates stdin for the server
+(lines 444–446) without closing the client's descriptor. The
+[server identify path](https://github.com/tmux/tmux/blob/3.4/server-client.c#L2880-L2934)
+closes its nonterminal duplicate when terminal initialization fails; this is
+not relied on to retain the lock. The controlled option commands do not consume
+stdin. These source observations support the child-lifetime design; the tests
+exercise real tmux completion and verify the lock is subsequently released.
+The test timing wrapper uses a small shell bootstrap to preserve stdin while
+starting Python, which otherwise refuses a directory stdin; it restores the
+descriptor before pausing or executing the real tmux command.
+
+The acquisition deadline remains five seconds. A permanently stalled mutation
+child prevents newer updates from passing it, returning an explicit retry
+error; the implementation does not trade correctness for a timed lock bypass.
+The deadline bounds contention, not the execution time of an already-started
+tmux command. Read-only orphan children still permit immediate recovery because
+they cannot mutate state. Command failure before submission still releases the
+guard. When the outstanding mutation finishes, a retry or waiting hook takes a
+fresh snapshot and publishes newer evidence.
+
+Five new scenarios cover orphaned initial-pane writes, replacement-pane writes,
+window projection before a repair scan, bounded contention/retry while an
+orphan is stalled, and an actual mutation exec failure before child startup.
+The orphan race cases assert hook provenance and attention timestamps, then
+replace the worker again and require Running/process with no inherited
+attention. The existing surviving read-child and failed-submission cases remain
+separate checks.
+
+The complete `bash tests/run.sh` passed on the final production code, including
+22 activity cases, 15 delivery cases, 29 independent-navigation cases, 10
+settings cases, privacy, packaging, and release checks, with the existing
+optional navigator skip. During that run, only the additive exec-failure test
+and its fixture mode were added; the loaded activity suite was still the
+22-case version. The final focused rerun passed all 23 activity cases.
+`cargo fmt --check`, all 41 `cargo test --locked` tests, and
+`git diff --check` passed. No Python cache or probe artifact is included.
+
+Fresh independent Standards/Spec review is still required; this receipt does
+not mark crosscheck clear. Runtime validation remains Linux/tmux 3.4 only;
+macOS was not exercised. `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
