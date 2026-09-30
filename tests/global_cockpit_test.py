@@ -254,7 +254,7 @@ class GlobalCockpitTest(IndependentNavigation):
         self.assertIn(commit, screen)
         self.assertIn('Destination: main', screen)
         self.assertIn(reference, screen)
-        self.assertIn('Integration: unknown', screen)
+        self.assertIn('Contained in selected destination', screen)
         self.assertIn('Checks: unknown', screen)
         self.tmux('set-option', '-u', '-t', 'project', '@drudwyn_batch_' + batch.split('/')[1])
         self.tmux('set-option', '-wu', '-t', self.worker, '@drudwyn_task_reference')

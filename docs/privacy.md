@@ -24,7 +24,7 @@ for sensitive or organisational workflows without a separate assessment.
 | process executable name, PID, parent PID, process birth time/state, and derived agent kind | identify Codex, Claude Code, or OpenCode and bind evidence to its lifetime | current scan or tmux session | agent symbol and label |
 | working directory, Git repository/common directory, worktree, and branch | identify workspaces and enforce safe start/finish | current command or tmux session | cockpit/sidebar unless redacted |
 | batch ID, pinned source ref/commit, destination branch/starting commit/checkout | keep sibling launches and integration choices explicit | current tmux session only | batch commands and Cockpit unless redacted |
-| clean/dirty state and merge ancestry | prevent unsafe worktree removal | current command | fixed readiness state |
+| clean/dirty state, refs/commit IDs, changed-file names and merge ancestry | preview/integrate reviewed commits and prevent unsafe worktree removal | current command | fixed readiness state |
 | lifecycle state, evidence source, timestamps, and available pane exit code/signal/time | distinguish running, working, attention, and process exit | current tmux session | cockpit, HUD, and sidebar |
 | launch pane/process identity, losslessly encoded checkout path, expected executable and delivery state | bind and serialize a send to its worker and distinguish not sent/sent/uncertain | current tmux session | workspace commands and Cockpit |
 | deliberately selected repository task-file reference (including lossless path encoding) | let the agent read the chosen task in its checkout | current tmux session | launch form and live window option |
@@ -66,11 +66,31 @@ checkout with an explicit conflict. Recovery takes the checkout guard before
 the socket guard; coordinator setters never acquire checkout guards. No tmux
 wait-for lock or persistent reservation is created.
 
+Integration previews keep only source/target refs, commits, canonical checkout
+identities and file-name metadata in command/UI memory. The displayed review
+token is an ephemeral comparison of those facts, not a stored history or a
+reservation. Integration ignores inherited Git repository/index-addressing
+variables without reading their values. Destination and source Git metadata use
+the same explicit-checkout command seam as inventory enrichment. Mutating Git
+and hooks may operate on repository files as normal, but their output is not
+captured, interpreted or retained by the supervisor.
+
+Apply serializes on the existing canonical destination-directory inode, sharing
+the checkout lock namespace with recovery and task delivery. Competing actions
+return an explicit retry error. The mutating Git process inherits the descriptor
+through unused stdin and starts in the selected directory; process death does
+not release the guard while the child remains able to mutate. Git provides its
+normal hook stdin. No global lifecycle guard is held during Git or hooks, and
+no lock file, durable merge registry or task history is created. Failed/conflicting
+merges remain in Git for deliberate recovery; nothing is automatically reset.
+
 Global Cockpit refreshes keep a single in-memory snapshot of known tmux windows,
 projects, process evidence, Git checkout identity/status, changed-file names and
 live batch/task-reference metadata. Git status uses NUL-separated names; no diff
 bodies or file contents are read. Each unique checkout and live batch is probed
-once per refresh, then shared by filtering, grouping, counts and details. The
+once per refresh, then shared by filtering, grouping, counts and details.
+Current batch destinations and source-commit containment are also shared within
+each refresh; the UI never probes ancestry while rendering or from status cells. The
 interactive refresh thread creates no persistent cache; failed snapshots remain
 visibly stale and cannot authorize an action. Exiting the popup discards the
 snapshot. Lifecycle window projections use a single guarded tmux command queue,

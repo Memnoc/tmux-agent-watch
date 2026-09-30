@@ -7,6 +7,7 @@ pub mod coordinator;
 pub mod discovery;
 pub mod domain;
 mod icons;
+pub mod integration;
 pub mod inventory;
 pub mod lifecycle;
 pub mod navigation;

@@ -182,6 +182,23 @@ enum CoordinatorCommand {
 
 #[derive(Debug, Subcommand)]
 enum WorkspaceCommand {
+    /// Preview reviewed commits; apply only the token from an unchanged preview.
+    Integrate {
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        #[arg(
+            long,
+            required_unless_present = "destination",
+            conflicts_with = "destination"
+        )]
+        batch: Option<String>,
+        /// Explicit existing local destination branch, when no live batch is selected.
+        #[arg(long)]
+        destination: Option<String>,
+        /// Apply this preview token after reviewing refs, commits and checkout.
+        #[arg(long)]
+        apply: Option<String>,
+    },
     /// Open a surviving checkout; never create/reset a worktree.
     Recover {
         #[arg(long)]
@@ -497,6 +514,38 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         },
         Command::Settings { theme } => settings::run(theme.into())?,
         Command::Workspace { command } => match command {
+            WorkspaceCommand::Integrate {
+                path,
+                batch,
+                destination,
+                apply,
+            } => {
+                use tmux_drudwyn::integration::{self, Destination, Request};
+                let redact = Config::load_tmux()?.redact_labels;
+                let destination = match batch {
+                    Some(id) => Destination::Batch(id),
+                    None => Destination::Branch(
+                        destination.ok_or("Select an explicit batch or destination")?,
+                    ),
+                };
+                let preview = integration::preview(Request {
+                    source: path,
+                    destination,
+                })?;
+                if let Some(token) = apply {
+                    if token != preview.token {
+                        return Err(
+                            "Source or destination changed after preview; review again".into()
+                        );
+                    }
+                    println!("{}", integration::apply(&preview)?);
+                } else {
+                    print!("{}", preview.display(redact));
+                    println!(
+                        "Preview only; no changes. Re-run with --apply TOKEN to integrate this reviewed state."
+                    );
+                }
+            }
             WorkspaceCommand::Recover {
                 repo,
                 path,

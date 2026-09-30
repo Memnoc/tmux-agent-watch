@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** ready
+**Status:** done
 
 **What to build:** Users inspect and integrate commits into the chosen destination
 from Cockpit or a command, without manually opening a shell to run Git.
@@ -10,17 +10,17 @@ from Cockpit or a command, without manually opening a shell to run Git.
 **Blocked by:** 05, 09.
 **Priority:** P1. **Stories:** 17, 21, 22.
 
-- [ ] Preview source/target refs, commit IDs, target checkout, changed-file
+- [x] Preview source/target refs, commit IDs, target checkout, changed-file
   metadata, and available check evidence; revalidate before applying.
-- [ ] Perform fast-forward or normal divergent clean merge; report already-
+- [x] Perform fast-forward or normal divergent clean merge; report already-
   contained work as a no-op. Update integration from actual ancestry, not Review.
-- [ ] Reject dirty/detached/ambiguous targets, active Git operations, stale
+- [x] Reject dirty/detached/ambiguous targets, active Git operations, stale
   previews, and unsafe untracked-file collisions without stashing or resetting.
-- [ ] Serialize Drudwyn operations on the same destination and preserve its
+- [x] Serialize Drudwyn operations on the same destination and preserve its
   existing checkout; a second client cannot concurrently start another merge there.
-- [ ] Keep merge failure/conflict visible and recoverable, with no success claim
+- [x] Keep merge failure/conflict visible and recoverable, with no success claim
   or cleanup. Coordinator resolution is added by 12; this slice must remain safe.
-- [ ] Test both direct-to-base and integration-branch destinations, missing
+- [x] Test both direct-to-base and integration-branch destinations, missing
   metadata, target-branch checkout elsewhere, cancellation, and Git failures.
 
 ## Working agreement
@@ -30,3 +30,114 @@ Use a fresh session, test through the spec’s command/UI seams, preserve existi
 work, and record tests and crosscheck results before marking this ticket done.
 Commit this ticket with its implementation; leave branch integration to the
 coordinating session.
+
+
+## Builder receipt — pending independent review
+
+Implemented against `29144fd311cec9574a94e82b0bbac93baadafbb7` on
+`work/worktree-worker-workflow`. The shared integration module owns preview,
+revalidation, ancestry, destination serialization and merge outcomes; the public
+`workspace integrate` command and Cockpit **i** cross that same seam. No ticket12
+coordinator delivery/Continue/Abort or ticket13 verification behavior is included.
+
+### Verified acceptance evidence
+
+- Preview is read-only and cancellation preserves refs/files. It shows full
+  source/target refs and commits, canonical actual checkout, commit IDs, explicit
+  target-versus-source file-name comparison (not a predicted merge result), and
+  unknown checks. No file/diff/commit-body content is read. CLI apply requires the
+  ephemeral token for that state; Cockpit retains the reviewed object in memory.
+- Fast-forward, normal divergent merge with both parents, and already-contained
+  no-op are asserted against Git ancestry. Explicit direct destination and live
+  integration-branch batch paths work when the original checkout is on another
+  branch and the actual target is elsewhere. Batch checkout movement requires
+  deliberate reselection; neither source starting pin nor target is reset.
+- Both sides reject tracked/staged/untracked changes, active merge/cherry-pick/
+  revert/rebase/sequencer state and Git locks. Detached or multiply checked-out
+  destinations fail. Source ref changes, source/target commit changes, and a
+  recreated directory at the same pathname invalidate review. Git is invoked
+  with no autostash and ignored-file overwrite protection; an ignored collision
+  retains its original bytes and target commit.
+- The existing target directory inode lock serializes clients and canonical
+  aliases in the same namespace as recovery/delivery. The controlled mutating
+  child inherits its descriptor through stdin and begins in the target directory.
+  A paused real Git wrapper survives parent death while a second client is
+  still refused; after release the actual Git merge completes and a fresh preview
+  reports containment. Lifecycle scan remains available while Git is paused.
+  A real Python pre-merge hook starts normally and reads EOF from its Git-provided
+  stdin. No persistent lock file, tmux wait-for lock or global lifecycle lock is
+  held across merge/hooks.
+- Controlled add/add conflict and failing merge hook retain Git's merge operation,
+  source checkout and target files. No success or cleanup is reported; hook output
+  is suppressed rather than captured or interpreted. Another integration is
+  refused until the existing operation is deliberately handled.
+- Actual Cockpit previews/cancel/apply preserve both attached clients' selections.
+  Stale commit review and a vanished pane/window replaced by the same name/index
+  are refused. Missing batch metadata opens explicit destination selection.
+  48-column preview and all33 changed names remain reachable through scrolling;
+  redaction conceals paths, refs, commit IDs and names while preserving controls.
+- Full details derive committed containment from current live batch targets,
+  sharing destination and source-commit probes within each refresh. External
+  merge changes Not contained to Contained; moving the target back changes it
+  back; metadata loss becomes unknown. Retained Review is independent throughout.
+  Missing targets or mismatched associations never inherit a prior success label.
+  No ancestry probe is performed per render or status cell.
+
+### Red/green work and audit
+
+The first public command regression failed because Integrate did not exist;
+Cockpit's action was also exercised before wiring. Later audits reproduced
+inherited `GIT_DIR`/`GIT_WORK_TREE` redirecting the explicit source to an unrelated
+repository and separately contaminating snapshot source metadata with the target
+commit, falsely reporting containment. Integration and inventory now share an
+explicit-checkout Git constructor that removes repository/index/object namespace
+variables without reading or storing their values. Both public command and
+actual-detail regressions now pass. Other Git identity/configuration and normal
+hook behavior remain available.
+
+Fixture corrections were kept distinct from implementation defects: a broad UI
+search initially selected an ordinary worker with the same name; the fixture now
+selects a unique managed name. An initial Python Git wrapper could not initialize
+stdin from a directory FD; the orphan test uses a controlled shell wrapper and
+asserts the exact system Git executable. A separate real Python Git hook passes.
+Escape followed immediately by text produced an Alt key; UI fixtures now wait
+for each visible mode transition. Retrying i during an actual refresh is correctly
+blocked; that fixture waits for visible freshness before the next action.
+
+Focused integration15, global Cockpit11 and existing real-client29 regressions
+passed before freeze. Sequential builder Standards/Spec audit checked the
+content-blind boundary, explicit path/ref identity, current ancestry, missing
+metadata, lock and orphan-child lifetime, literal paths, redaction, UI scrolling,
+client independence and ticket scope. Cosmetic shell-context/singular-project
+polish remains reserved for ticket15. Independent review remains pending.
+
+Evidence: `/tmp/drudwyn-ticket11-first-red.log`, `-first-green.log`,
+`-environment-red.log`, `-detail-environment-red.log`, `-focused.log`, `-lock.log`,
+`-details-green.log`, `-global.log`, and `-clients.log` (all with the same
+`/tmp/drudwyn-ticket11` prefix). Inspected actual terminal captures:
+`/tmp/drudwyn-ticket11-narrow-preview.txt`, `-narrow-bottom.txt`, and
+`-redacted-preview.txt`. Fixtures use disposable `/tmp` Git/tmux servers with
+fake codex asserted to resolve to system sleep. Runtime exercised on Linux with
+tmux3.4/Git2.43; non-Linux runtime remains untested. Review tokens are in-memory
+comparison checks, not durable approval records or authentication.
+
+
+### Final frozen-code gates
+
+`cargo fmt --check`, `git diff --check`, `cargo test --locked` (41 Rust tests),
+and complete `bash tests/run.sh` passed without a restart. The suite includes
+integration15, launch15, recovery17, global Cockpit11, status A11, activity36,
+real clients29, navigator13 (one existing optional Resurrect skip), settings10,
+and all shell/help/privacy/package/release checks. Final logs:
+`/tmp/drudwyn-ticket11-final-rust.log` and
+`/tmp/drudwyn-ticket11-final-suite.log`. No runtime changes followed the green run.
+
+The existing global fixture still has 36 workers across 4 projects and 39 distinct
+checkouts; final CLI snapshot wall time was 1.183s, UI ready 1.136s, End inspection
+29ms and inspection during a gated refresh 28ms on this test environment. This
+fixture is a regression observation, not a portable guarantee or a new
+integration-specific throughput benchmark. No status-row ancestry work was added.
+
+Implementation and verified receipt are committed atomically on the feature
+branch, with independent review pending. `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.

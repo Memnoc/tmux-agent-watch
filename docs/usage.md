@@ -105,20 +105,23 @@ exit alone does not establish failure or task completion.
 | `x` | Clear filters and return to global worker inventory |
 | `d` | Full details; arrows or `PgUp/PgDn` scroll, `d` or `Esc` returns |
 | `c` | Open the selected project's coordinator |
+| `i` | Preview worker integration into its live batch or an explicit destination |
 | `r` | Refresh the snapshot |
 
 `*` marks the invoking client's current window; `>` marks the row being
 inspected. Inspection and Open do not clear attention. Rows retain their stable
 ID through refresh and filtering. If a selected window disappears, refresh
 chooses a visible row for inspection and requires an explicit move or inspection
-before another action. A pending Finish keeps its original window/pane/path.
+before another action. Pending Finish and Integrate keep their original window/pane/path.
 
 Narrow terminals show a full-width inventory with details available through
 `d`; wider terminals show details alongside or below the list. Full details wrap
 and scroll, including full names/paths, session membership, branch and commit,
 live batch source/destination, a retained task-file reference, activity evidence,
-exit receipts and changed-file names. Unknown integration and check evidence
-remain unknown. These fields do not enable integration or verification actions.
+exit receipts and changed-file names. Integration details compare current committed
+ancestry with the selected live batch destination; they refresh after external
+merges or target movement. Missing or mismatched associations stay unknown.
+Review is independent of containment; check evidence remains unknown.
 Label redaction also covers details, search text, task references and file names.
 
 Refreshes resolve each pane's Git checkout root and reuse Git details once per
@@ -604,3 +607,51 @@ The final command explicitly refreshes lifecycle metadata. Installed ambient
 rows use its `--projection` mode with the existing observer and report staleness;
 the two rows refresh independently. See [density and refresh configuration](configuration.md#status-bar-a-rust).
 The explicit legacy implementation retains its original clustered bar/separator.
+
+
+### Integrate reviewed worker commits (Rust v2)
+
+Select a worker in Cockpit and press **i Integrate**. Its live batch supplies the
+chosen destination. Without valid batch metadata, explicitly enter a destination
+branch or a live batch ID; Drudwyn never guesses a base. The target branch must
+have exactly one existing checkout. Use Batch setup when a destination needs to
+be created, or deliberately choose an existing branch after metadata loss.
+
+The preview shows source/target refs, full commit IDs, actual target checkout,
+commit IDs to integrate, and changed-file names. The file list compares the target
+and source trees; it is **not a predicted merged result** and includes destination-
+only differences for divergent histories. No file contents, diffs or commit bodies
+are inspected. Checks stay unknown. **PgUp/PgDn** scroll all details at narrow
+widths; **y** applies only the reviewed state, **e** edits the destination, and
+**Esc** cancels without Git mutation. After an outcome, **r** refreshes current
+ancestry rather than silently retrying the merge.
+
+```sh
+# Preview only; nothing changes.
+tmux-drudwyn workspace integrate --path /path/to/worker --batch '$3/123-456'
+# Use the exact token printed by that preview.
+tmux-drudwyn workspace integrate --path /path/to/worker --batch '$3/123-456' \
+  --apply REVIEW_TOKEN
+# Explicit selection when live associations are unavailable.
+tmux-drudwyn workspace integrate --path /path/to/worker --destination main
+```
+
+Preview tokens are ephemeral state comparisons, not reservations or saved review
+history. Apply revalidates source/target refs, commits and checkout identities
+under a destination-directory lock. Dirty or untracked work, detached/ambiguous
+checkouts, active Git operations and stale previews block integration. Inherited
+Git repository/index addressing cannot redirect the explicit checkout. Git's
+own locks and ignored-file overwrite protection remain effective; no automatic
+stash, reset, squash, rebase, push or cleanup occurs.
+
+A source already contained in the target is a reported no-op. Otherwise Drudwyn
+uses a fast-forward or normal divergent merge. It preserves the existing target
+checkout even when it is elsewhere or the invoking shell is on another branch.
+Success means the reviewed source commit is contained in the selected destination;
+it does not mean checks passed or the task completed. The worker and branch remain.
+
+Conflict or Git-hook failure leaves Git's operation and files in the destination
+for inspection. The error stays visible in Cockpit or returns nonzero from the
+command; closing a popup is not success. Automatic coordinator conflict delivery,
+Continue/Abort and assembled verification are separate subsequent slices. Do not
+start another merge while the destination has an existing Git operation.

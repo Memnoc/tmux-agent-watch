@@ -60,6 +60,7 @@ for expected in \
   'below  selected context and GLOBAL attention' \
   'g      status actions: f failed, i input, r review, a attention, w local windows' \
   'STALE  observer metadata expired' \
+  'i      preview worker integration' \
   'CLEAN  no uncommitted changes' \
   'DIRTY  has uncommitted changes' \
   '[q/Esc] Close'

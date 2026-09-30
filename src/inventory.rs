@@ -9,7 +9,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     io,
     path::{Path, PathBuf},
-    process::Command,
     time::Instant,
 };
 
@@ -178,6 +177,7 @@ impl Totals {
 }
 #[derive(Clone, Default)]
 pub struct Detail {
+    pub integration: Option<String>,
     pub batch: Option<crate::batch::Batch>,
     pub task_reference: Option<String>,
     pub source_commit: Option<String>,
@@ -439,11 +439,7 @@ impl Snapshot {
 
 // Status names only; no diff bodies, file contents or task contents are read.
 fn git(path: &Path, args: &[&str]) -> io::Result<Vec<u8>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(args)
-        .output()?;
+    let output = crate::workspace::checkout_git(path, args).output()?;
     if !output.status.success() {
         return Err(io::Error::other(
             "Git metadata unavailable; refresh or inspect checkout",
@@ -546,8 +542,11 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
     let mut identities = HashMap::new();
     let mut checkouts = HashMap::new();
     let mut details = HashMap::new();
+    let mut destinations = HashMap::new();
+    let mut containment = HashMap::new();
     for w in workspaces {
         let mut detail = Detail::default();
+        let mut source_common = None;
         if let Some(f) = records
             .get(w.identity.pane_id.as_str())
             .filter(|f| f[0] == w.identity.window_id)
@@ -571,11 +570,14 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
                     .entry(path.clone())
                     .or_insert_with(|| checkout_identity(&path).map_err(|e| e.to_string()));
                 let data = match identity {
-                    Ok(identity) => checkouts
-                        .entry(identity.clone())
-                        .or_insert_with(|| checkout(identity).map_err(|e| e.to_string()))
-                        .as_ref()
-                        .map_err(String::as_str),
+                    Ok(identity) => {
+                        source_common = Some(identity.common_dir.clone());
+                        checkouts
+                            .entry(identity.clone())
+                            .or_insert_with(|| checkout(identity).map_err(|e| e.to_string()))
+                            .as_ref()
+                            .map_err(String::as_str)
+                    }
                     Err(error) => Err(error.as_str()),
                 };
                 match data {
@@ -607,6 +609,31 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
                 }
             }
             detail.task_reference = crate::recovery::decode(f[9]).map(|p| p.display().to_string());
+            if let (Some(batch), Some(commit), Some(common)) =
+                (&detail.batch, &detail.commit, source_common)
+            {
+                let target = destinations
+                    .entry((
+                        batch.repository.clone(),
+                        batch.destination.clone(),
+                        batch.checkout.clone(),
+                    ))
+                    .or_insert_with(|| {
+                        crate::integration::batch_destination(batch).map_err(|e| e.to_string())
+                    });
+                detail.integration = Some(match target {
+                    Ok(target) => containment
+                        .entry((target.clone(), common.clone(), commit.clone()))
+                        .or_insert_with(|| {
+                            target
+                                .observe(&common, commit)
+                                .map(str::to_owned)
+                                .unwrap_or_else(|_| "unknown · ancestry unavailable".into())
+                        })
+                        .clone(),
+                    Err(_) => "unknown · destination unavailable or association changed".into(),
+                });
+            }
             detail.source_commit = detail.batch.as_ref().map(|b| b.source.commit.clone());
             detail.delivery = if f[4] == f[1] && f[5] == f[2] {
                 f[10].into()

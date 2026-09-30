@@ -39,6 +39,7 @@ const COCKPIT_ACTIONS: &[(&str, &str)] = &[
     ("n", "New"),
     ("b", "Batch setup"),
     ("c", "Coordinator"),
+    ("i", "Integrate"),
     ("f", "Finish"),
     ("/", "Search"),
     ("p/s", "Project/state"),
@@ -83,6 +84,7 @@ pub struct App {
     recovery: Option<RecoveryForm>,
     batches: HashMap<String, String>,
     finishing: Option<(String, String, PathBuf)>,
+    integration: Option<IntegrationForm>,
     snapshot: Option<crate::inventory::Snapshot>,
     query: crate::inventory::Query,
     current_window: String,
@@ -120,6 +122,19 @@ struct RecoveryForm {
     error: Option<String>,
 }
 
+struct IntegrationForm {
+    window: String,
+    pane: String,
+    source: PathBuf,
+    fields: [String; 2],
+    cursors: [usize; 2],
+    field: usize,
+    preview: Option<crate::integration::Preview>,
+    result: Option<String>,
+    error: Option<String>,
+    scroll: u16,
+}
+
 struct BatchForm {
     fields: [String; 4],
     selected: usize,
@@ -153,6 +168,7 @@ impl App {
                 .position(|agent| *agent == config.default_agent)
                 .unwrap_or(0),
             finishing: None,
+            integration: None,
             snapshot: None,
             query: crate::inventory::Query::default(),
             current_window: String::new(),
@@ -165,6 +181,128 @@ impl App {
             agent_icon: "A".into(),
             config,
             theme: Theme::rose_pine(variant),
+        }
+    }
+
+    fn begin_integration(&mut self) {
+        let Some(w) = self.selected_workspace() else {
+            self.error = Some("Select an available worker before integration".into());
+            return;
+        };
+        let window = w.identity.window_id.clone();
+        let pane = w.identity.pane_id.clone();
+        let source = match crate::recovery::selected_checkout(&window, &pane) {
+            Ok(path) => path,
+            Err(error) => {
+                self.error = Some(error.to_string());
+                return;
+            }
+        };
+        let selected = batch::for_window(&window);
+        let id = selected
+            .as_ref()
+            .ok()
+            .and_then(|b| b.as_ref())
+            .map(|b| b.id.clone())
+            .unwrap_or_default();
+        self.integration = Some(IntegrationForm {
+            window,
+            pane,
+            source,
+            fields: [String::new(), id.clone()],
+            cursors: [0, id.len()],
+            field: 0,
+            preview: None,
+            result: None,
+            error: selected.err().map(|e| e.to_string()),
+            scroll: 0,
+        });
+        if !id.is_empty() {
+            self.integration_preview();
+        }
+    }
+    fn integration_preview(&mut self) {
+        let Some(form) = &mut self.integration else {
+            return;
+        };
+        form.error = None;
+        form.result = None;
+        form.preview = None;
+        form.scroll = 0;
+        let destination = match (form.fields[0].is_empty(), form.fields[1].is_empty()) {
+            (false, true) => crate::integration::Destination::Branch(form.fields[0].clone()),
+            (true, false) => crate::integration::Destination::Batch(form.fields[1].clone()),
+            _ => {
+                form.error = Some("Choose exactly one explicit destination branch or live batch ID; no base is inferred".into());
+                return;
+            }
+        };
+        match crate::integration::preview(crate::integration::Request {
+            source: form.source.clone(),
+            destination,
+        }) {
+            Ok(preview) => form.preview = Some(preview),
+            Err(error) => form.error = Some(error.to_string()),
+        }
+    }
+    fn integration_edit(&mut self, key: KeyCode, paste: Option<&str>) {
+        if let Some(form) = &mut self.integration {
+            if form.preview.is_none() {
+                edit_text(
+                    &mut form.fields[form.field],
+                    &mut form.cursors[form.field],
+                    key,
+                    paste,
+                    false,
+                );
+            }
+        }
+    }
+    fn integration_key(&mut self, key: KeyCode) {
+        if key == KeyCode::Esc {
+            self.integration = None;
+            self.begin_refresh();
+            return;
+        }
+        let Some(form) = &mut self.integration else {
+            return;
+        };
+        if form.preview.is_some() {
+            match key {
+                KeyCode::Char('y') if form.result.is_none() && form.error.is_none() => {
+                    let current = crate::recovery::selected_checkout(&form.window, &form.pane);
+                    if !current.is_ok_and(|path| path == form.source) {
+                        form.error = Some("Pending Integrate target changed or disappeared; cancel and inspect again".into());
+                        return;
+                    }
+                    match crate::integration::apply(form.preview.as_ref().unwrap()) {
+                        Ok(result) => form.result = Some(result.into()),
+                        Err(error) => form.error = Some(error.to_string()),
+                    }
+                    form.scroll = 0;
+                }
+                KeyCode::Char('r') => self.integration_preview(),
+                KeyCode::Char('e') => {
+                    form.preview = None;
+                    form.result = None;
+                    form.error = None;
+                    form.scroll = 0;
+                }
+                KeyCode::PageDown | KeyCode::Down | KeyCode::Char('j') => {
+                    form.scroll = form.scroll.saturating_add(5)
+                }
+                KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
+                    form.scroll = form.scroll.saturating_sub(5)
+                }
+                KeyCode::Home => form.scroll = 0,
+                _ => {}
+            }
+        } else {
+            match key {
+                KeyCode::Enter => self.integration_preview(),
+                KeyCode::Tab | KeyCode::BackTab => form.field = 1 - form.field,
+                _ => self.integration_edit(key, None),
+            }
         }
     }
 
@@ -895,6 +1033,10 @@ fn event_loop(
         }
         let input = event::read()?;
         if let Event::Paste(text) = &input {
+            if app.integration.is_some() {
+                app.integration_edit(KeyCode::Null, Some(text));
+                continue;
+            }
             if app.recovery.is_some() {
                 app.recovery_edit(KeyCode::Null, Some(text));
                 continue;
@@ -908,6 +1050,10 @@ fn event_loop(
             continue;
         };
         if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        if app.integration.is_some() {
+            app.integration_key(key.code);
             continue;
         }
         if app.recovery.is_some() {
@@ -1011,7 +1157,7 @@ fn event_loop(
         if (app.stale || app.refreshing.is_some() || app.selection_changed)
             && matches!(
                 key.code,
-                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o')
+                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o' | 'i')
             )
         {
             app.error = Some(
@@ -1027,6 +1173,7 @@ fn event_loop(
             continue;
         }
         match key.code {
+            KeyCode::Char('i') => app.begin_integration(),
             KeyCode::Char('d') => {
                 app.selection_changed = false;
                 app.details_open = true;
@@ -1134,6 +1281,10 @@ fn event_loop(
 }
 
 fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
+    if let Some(form) = &app.integration {
+        render_integration(frame, app, form);
+        return;
+    }
     if let Some(form) = &app.recovery {
         render_recovery(frame, app, form);
         return;
@@ -1424,6 +1575,90 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             modal,
         );
     }
+}
+
+fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &IntegrationForm) {
+    let area = frame.area();
+    let sections = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(3),
+    ])
+    .split(area);
+    let title = if form.preview.is_some() {
+        "INTEGRATE PREVIEW"
+    } else {
+        "INTEGRATE · CHOOSE DESTINATION"
+    };
+    frame.render_widget(
+        Paragraph::new(title).style(
+            Style::default()
+                .fg(app.theme.rose)
+                .add_modifier(Modifier::BOLD),
+        ),
+        sections[0],
+    );
+    let redact = app.config.redact_labels;
+    let mut text = String::new();
+    if let Some(result) = &form.result {
+        text.push_str(&format!(
+            "{result}\nReviewed state below; r refreshes current ancestry.\n\n"
+        ));
+    }
+    if let Some(error) = &form.error {
+        text.push_str(&format!(
+            "{}\n\n",
+            if redact {
+                "Integration unavailable; inspect Git state or choose destination again"
+            } else {
+                error
+            }
+        ));
+    }
+    if let Some(preview) = &form.preview {
+        text.push_str(&preview.display(redact));
+        text.push_str("Worker retained. Integration does not establish checks or completion.\n");
+    } else {
+        text.push_str("Select a destination branch OR a live batch ID.\nMissing metadata never implies a base branch.\n\n");
+        for (i, label) in ["Destination branch", "Batch ID"].iter().enumerate() {
+            let (value, _) = input_view(
+                &form.fields[i],
+                form.cursors[i],
+                sections[1].width.saturating_sub(23) as usize,
+            );
+            text.push_str(&format!(
+                "{} {label}: {}\n",
+                if i == form.field { ">" } else { " " },
+                if redact && !value.is_empty() {
+                    "[redacted]"
+                } else {
+                    &value
+                }
+            ));
+        }
+        text.push_str("\nThe destination must already have one existing checkout.\nUse Batch setup to create/select one explicitly.\n");
+    }
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    let max_scroll = paragraph
+        .line_count(sections[1].width)
+        .saturating_sub(sections[1].height as usize) as u16;
+    frame.render_widget(
+        paragraph.scroll((form.scroll.min(max_scroll), 0)),
+        sections[1],
+    );
+    let actions = if form.preview.is_none() {
+        "Tab field · Enter preview · Esc cancel"
+    } else if form.error.is_some() || form.result.is_some() {
+        "r refresh ancestry · e destination · PgUp/PgDn scroll · Esc back"
+    } else {
+        "y integrate reviewed state · e destination · PgUp/PgDn scroll · Esc cancel"
+    };
+    frame.render_widget(
+        Paragraph::new(actions)
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::TOP)),
+        sections[2],
+    );
 }
 
 fn render_recovery(frame: &mut ratatui::Frame<'_>, app: &App, form: &RecoveryForm) {
@@ -1966,10 +2201,17 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             }));
         }
     }
-    lines.push(Line::from(
-        " Integration: unknown · no integration evidence",
-    ));
+    let integration = app
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.details.get(&workspace.identity.window_id))
+        .and_then(|detail| detail.integration.as_deref())
+        .unwrap_or("unknown · choose a live batch or i explicit destination");
+    lines.push(Line::from(format!(" Integration: {integration}")));
     lines.push(Line::from(" Checks: unknown · not verified"));
+    lines.push(Line::from(
+        " i integrate · preview explicit destination and ancestry",
+    ));
     lines.push(Line::from(""));
     lines.push(Line::styled(
         " NEXT",

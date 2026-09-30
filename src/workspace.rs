@@ -941,6 +941,26 @@ pub fn finish(path: &Path, base: &str, yes: bool) -> Result<PathBuf, Error> {
     Ok(worktree)
 }
 
+/// Explicit checkout probes/mutations must not inherit another Git operation's
+/// repository, index or object namespace. Values are neither read nor retained.
+pub(crate) fn checkout_git(path: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(path).args(args);
+    for name in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+    ] {
+        command.env_remove(name);
+    }
+    command
+}
+
 pub(crate) fn git(path: &Path, args: &[&str]) -> Result<String, Error> {
     let mut c = Command::new("git");
     c.arg("-C").arg(path).args(args);
