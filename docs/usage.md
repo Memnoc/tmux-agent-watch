@@ -211,15 +211,17 @@ what is saved, including pane contents if you enabled its capture option.
 
 ### Choosing a task base (Rust v2)
 
-New workspaces start from `@drudwyn-base-branch` (default `main`), even when
-launched inside another task's worktree. Drudwyn prefers that branch's locally
+Unassociated command launches default to `@drudwyn-base-branch` (normally
+`main`), even when launched inside another task's worktree. Batch launches use
+their explicitly chosen, pinned source. Drudwyn prefers that branch's locally
 available upstream ref, then `origin/<base>`, then the local base branch. If none
 exists, creation stops with an error instead of inheriting the current branch.
 
-Press `prefix + W` (or `n` in the cockpit) to open the start form, which shows
-the resolved ref and commit. Press **F2** to choose
-**Continue from current branch** when the new task intentionally depends on the
-current checkout. The displayed commit is the starting point used at creation.
+Press `prefix + W` (or `n` in Cockpit) to set up a live batch before the first
+worker. Select `base`, `current`, or an explicit local ref in the Source field.
+The preview shows the resolved commit separately from the integration destination.
+Later siblings keep the batch's pinned source; **F3** opens deliberate new batch
+setup. See the batch workflow below.
 
 Refs are read locally; remote freshness is unknown. Run `git fetch <remote>`
 before opening the form when you need the latest remote commits.
@@ -289,3 +291,62 @@ selecting a window that reused its name or index. Open a shell in the project
 checkout, then explicitly select it with `coordinator set --window ID` to recover
 the route. This does not restore an agent conversation. Associations live only
 in tmux and must be selected again after that metadata is lost.
+
+
+### Batch source and destination (Rust v2)
+
+After explicitly selecting the project coordinator, press `b` in Cockpit or
+open New workspace. Use Tab to move between Source, Integration branch,
+Destination start, and Dedicated checkout. Leave Integration branch empty to
+integrate directly into the displayed configured base (which need not be `main`).
+For a new integration branch, choose its name and optionally its starting ref;
+the default starting point is the configured base. This destination starting
+point is independent of the worker source.
+
+Enter first previews the resolved commits and checkout. Enter again confirms;
+Esc cancels without creating anything. A suitable existing destination checkout
+is reused. If none exists, supply a dedicated checkout path. An existing named
+integration branch requires explicit F2 reuse selection; it is never reset.
+The coordinator stays on its original branch. Dirty destinations, invalid local
+refs, branch/path collisions, and changes since preview stop setup with an error.
+Dirty source checkouts warn that workers inherit committed files only.
+
+The same workflow is available through commands:
+
+```sh
+# Preview only. Source accepts base, current, a branch, tag, or commit.
+tmux-drudwyn batch setup --source base
+# Separate integration branch, with an explicitly selected dedicated checkout.
+tmux-drudwyn batch setup --source current --integration assembled \
+  --destination-start trunk --checkout ../assembled
+# Repeat the chosen setup arguments, plus BOTH full commits from its preview:
+tmux-drudwyn batch setup --source current --integration assembled \
+  --destination-start trunk --checkout ../assembled \
+  --yes --expect-source SOURCE_COMMIT --expect-destination DESTINATION_COMMIT
+# Use the Batch ID printed after creation; quote IDs containing a dollar sign.
+tmux-drudwyn batch select '$3/123-456'
+tmux-drudwyn workspace start --batch '$3/123-456' --name api work/api codex
+tmux-drudwyn batch show '$3/123-456'
+```
+
+`batch setup --session '$3'` selects an explicit project; otherwise setup uses
+the invoking workspace's project. `batch select` selects a live batch for the
+invoking window, or `--window @12` for an explicit member of that project.
+Cockpit confirmation selects the new batch automatically. Subsequent launches
+from a selected window or its workers inherit that batch without selecting its
+destination again. `workspace start --batch ID` chooses one explicitly.
+Explicit legacy `--base` / `--from-current` starts remain available without a
+batch association.
+
+Batch IDs distinguish simultaneous batches in the same repository. Navigation,
+source-ref movement, and target merges do not change their pinned source. Create
+and select a new batch to deliberately choose a different source or destination.
+Cockpit details show the selected window's batch, source, destination branch,
+and checkout; the recorded destination commit is labelled **at setup**, not a
+claim about its current revision or merge state. Source and destination labels
+are hidden in redacted mode.
+
+All associations live only in tmux options. If that metadata is lost, the batch
+is unknown and must be selected or set up again; Drudwyn does not infer it from
+a shared repository. Git checkouts and branches survive. Setup does not merge,
+verify, promote, or remove work; those remain separate actions.

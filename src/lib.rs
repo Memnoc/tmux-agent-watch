@@ -1,4 +1,5 @@
 pub mod ambient;
+pub mod batch;
 mod brand;
 pub mod cockpit;
 pub mod config;

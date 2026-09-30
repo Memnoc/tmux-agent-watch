@@ -24,6 +24,11 @@ struct Cli {
 enum Command {
     /// Print the live, content-blind workspace model.
     Status,
+    /// Preview and select live worker batches (no persistent registry).
+    Batch {
+        #[command(subcommand)]
+        command: BatchCommand,
+    },
     /// Associate or return to the project coordinator.
     Coordinator {
         #[command(subcommand)]
@@ -92,6 +97,42 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum BatchCommand {
+    /// Preview source/destination; --yes requires the two reviewed commits.
+    Setup {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long, default_value = "base")]
+        source: String,
+        #[arg(long)]
+        integration: Option<String>,
+        #[arg(long)]
+        destination_start: Option<String>,
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        #[arg(long)]
+        reuse_existing: bool,
+        #[arg(long, requires_all = ["expect_source", "expect_destination"])]
+        yes: bool,
+        #[arg(long)]
+        expect_source: Option<String>,
+        #[arg(long)]
+        expect_destination: Option<String>,
+    },
+    Show {
+        id: String,
+    },
+    /// Select a batch for subsequent siblings from this window.
+    Select {
+        id: String,
+        #[arg(long)]
+        window: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum SessionCommand {
     /// Create a named shell; directory defaults to the invoking workspace.
     New {
@@ -131,6 +172,9 @@ enum WorkspaceCommand {
         /// Intentionally include the current checkout's commits.
         #[arg(long)]
         from_current: bool,
+        /// Use an explicit live batch; source/destination remain pinned.
+        #[arg(long, conflicts_with_all = ["base", "from_current"])]
+        batch: Option<String>,
         /// Deliberate short window name; defaults to the branch.
         #[arg(long)]
         name: Option<String>,
@@ -205,6 +249,70 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     match cli.command {
+        Command::Batch { command } => {
+            use tmux_drudwyn::{batch, navigation};
+            let config = Config::load_tmux()?;
+            let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+                match command {
+                    BatchCommand::Setup {
+                        repo,
+                        session,
+                        source,
+                        integration,
+                        destination_start,
+                        checkout,
+                        reuse_existing,
+                        yes,
+                        expect_source,
+                        expect_destination,
+                    } => {
+                        let session = match session {
+                            Some(s) => s,
+                            None => navigation::current_session()?,
+                        };
+                        let preview = batch::preview(batch::Request {
+                            repo,
+                            session,
+                            base: config.base_branch.clone(),
+                            source,
+                            integration,
+                            destination_start,
+                            checkout,
+                            reuse_existing,
+                        })?;
+                        println!("{}", preview.display(config.redact_labels));
+                        if yes {
+                            if expect_source.as_deref() != Some(&preview.source.commit)
+                                || expect_destination.as_deref()
+                                    != Some(&preview.destination_commit)
+                            {
+                                return Err("Source or destination changed after preview; review a fresh preview".into());
+                            }
+                            println!("{}", batch::create(&preview)?.display(config.redact_labels));
+                        } else {
+                            println!(
+                                "Preview only; nothing created. Confirm with --yes --expect-source COMMIT --expect-destination COMMIT, or cancel by leaving."
+                            );
+                        }
+                    }
+                    BatchCommand::Show { id } => {
+                        println!("{}", batch::load(&id)?.display(config.redact_labels))
+                    }
+                    BatchCommand::Select { id, window } => {
+                        match window {
+                            Some(w) => batch::select(&id, &w)?,
+                            None => batch::select_current(&id)?,
+                        };
+                        println!("{}", batch::load(&id)?.display(config.redact_labels));
+                    }
+                }
+                Ok(())
+            })();
+            if config.redact_labels && result.is_err() {
+                return Err("Batch operation failed; details hidden by label redaction".into());
+            }
+            result?;
+        }
         Command::Coordinator { command } => match command {
             CoordinatorCommand::Set { window, session } => {
                 tmux_drudwyn::coordinator::set(&window, session.as_deref())?
@@ -295,20 +403,36 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 worktree_root,
                 base,
                 from_current,
+                batch,
                 branch,
                 name,
                 command,
             } => {
+                let config = Config::load_tmux()?;
+                let selected = if let Some(id) = batch {
+                    Some(tmux_drudwyn::batch::load(&id)?)
+                } else if base.is_none() && !from_current {
+                    tmux_drudwyn::batch::current()?
+                } else {
+                    None
+                };
                 let base = match base {
                     Some(base) => base,
-                    None => Config::load_tmux()?.base_branch,
+                    None => config.base_branch,
                 };
-                let point = workspace::resolve_start_point(&repo, &base, from_current)?;
-                eprintln!(
-                    "Starting from {} ({}) — local ref; remote freshness unknown",
-                    point.reference,
-                    &point.commit[..12]
-                );
+                let point = match &selected {
+                    Some(batch) => batch.source.clone(),
+                    None => workspace::resolve_start_point(&repo, &base, from_current)?,
+                };
+                if config.redact_labels {
+                    eprintln!("Starting from [redacted] — local ref; remote freshness unknown");
+                } else {
+                    eprintln!(
+                        "Starting from {} ({}) — local ref; remote freshness unknown",
+                        point.reference,
+                        &point.commit[..12]
+                    );
+                }
                 let root = worktree_root
                     .or_else(|| std::env::var_os("DRUDWYN_WORKTREE_ROOT").map(PathBuf::from));
                 println!(
@@ -318,6 +442,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         branch,
                         name,
                         start_point: point.commit,
+                        batch: selected.map(|b| b.id),
                         root,
                         command
                     })?

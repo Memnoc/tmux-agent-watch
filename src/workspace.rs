@@ -26,6 +26,7 @@ pub struct Start {
     pub branch: String,
     pub name: Option<String>,
     pub start_point: String,
+    pub batch: Option<String>,
     pub root: Option<PathBuf>,
     pub command: Vec<String>,
 }
@@ -148,7 +149,28 @@ pub fn start(request: Start) -> Result<Started, Error> {
             &format!("{}^{{commit}}", request.start_point),
         ],
     )?;
-    let project = crate::coordinator::launch_project(&source)?;
+    if std::env::var_os("DRUDWYN_CLIENT").is_some() {
+        crate::navigation::client()?;
+    }
+    let batch = request
+        .batch
+        .as_deref()
+        .map(crate::batch::load)
+        .transpose()?;
+    if let Some(batch) = &batch {
+        if batch.repository != crate::coordinator::repository(&source)?
+            || batch.source.commit != commit
+        {
+            return Err(Error::Invalid(
+                "Batch source or repository does not match launch".into(),
+            ));
+        }
+    }
+    let project = if let Some(batch) = &batch {
+        Some(batch.project.clone())
+    } else {
+        crate::coordinator::launch_project(&source)?
+    };
     let name = request.name.as_deref().unwrap_or(&request.branch);
     if name.trim().is_empty() || name.chars().any(char::is_control) {
         return Err(Error::Invalid(
@@ -232,6 +254,9 @@ pub fn start(request: Start) -> Result<Started, Error> {
                 "@drudwyn_project",
                 project,
             ]))?;
+        }
+        if let Some(batch) = &batch {
+            crate::batch::select(&batch.id, &window)?;
         }
         for (name, value) in [
             ("@drudwyn_branch", request.branch.as_str()),
@@ -467,7 +492,7 @@ pub fn finish(path: &Path, base: &str, yes: bool) -> Result<PathBuf, Error> {
     Ok(worktree)
 }
 
-fn git(path: &Path, args: &[&str]) -> Result<String, Error> {
+pub(crate) fn git(path: &Path, args: &[&str]) -> Result<String, Error> {
     let mut c = Command::new("git");
     c.arg("-C").arg(path).args(args);
     let o = c.output()?;

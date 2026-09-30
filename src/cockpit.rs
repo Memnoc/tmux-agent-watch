@@ -22,6 +22,7 @@ use ratatui::{
 use thiserror::Error;
 
 use crate::{
+    batch,
     config::Config,
     discovery,
     domain::{AgentKind, GitState, Lifecycle, Workspace},
@@ -33,6 +34,7 @@ use crate::{
 const COCKPIT_NAVIGATION: &[(&str, &str)] = &[("j/k", "Move"), ("Enter", "Open")];
 const COCKPIT_ACTIONS: &[(&str, &str)] = &[
     ("n", "New"),
+    ("b", "Batch setup"),
     ("c", "Coordinator"),
     ("f", "Finish"),
     ("/", "Filter"),
@@ -44,7 +46,12 @@ const FILTER_ACTIONS: &[(&str, &str)] = &[
     ("Backspace", "Delete"),
     ("Enter/Esc", "Done"),
 ];
-const CREATE_ACTIONS: &[(&str, &str)] = &[("Enter", "Create"), ("Tab", "Agent"), ("F2", "Base")];
+const CREATE_ACTIONS: &[(&str, &str)] = &[
+    ("Enter", "Create"),
+    ("Tab", "Agent"),
+    ("F2", "Base"),
+    ("F3", "Batch"),
+];
 const CREATE_BLOCKED_ACTIONS: &[(&str, &str)] = &[("Tab", "Agent"), ("F2", "Base")];
 const CANCEL_ACTION: &[(&str, &str)] = &[("Esc", "Cancel")];
 const FINISH_ACTION: &[(&str, &str)] = &[("y", "Finish")];
@@ -70,11 +77,35 @@ pub struct App {
     from_current: bool,
     start_point: Option<workspace::StartPoint>,
     start_error: Option<String>,
+    active_batch: Option<batch::Batch>,
+    batch_form: Option<BatchForm>,
+    batches: HashMap<String, String>,
     finishing: bool,
     git_diffs: HashMap<PathBuf, GitDiff>,
     agent_icon: String,
     config: Config,
     theme: Theme,
+}
+
+struct BatchForm {
+    fields: [String; 4],
+    selected: usize,
+    reuse: bool,
+    preview: Option<batch::Preview>,
+    error: Option<String>,
+}
+
+fn batch_details(workspaces: &[Workspace], redacted: bool) -> HashMap<String, String> {
+    workspaces
+        .iter()
+        .map(|w| {
+            let detail = match batch::for_window(&w.identity.window_id) {
+                Ok(Some(batch)) => batch.display(redacted),
+                _ => "Batch: unknown; source/destination unknown".into(),
+            };
+            (w.identity.window_id.clone(), detail)
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -89,7 +120,11 @@ impl App {
     pub fn new(workspaces: Vec<Workspace>, variant: Variant, config: Config) -> Self {
         let visible = (0..workspaces.len()).collect();
         let git_diffs = collect_git_diffs(&workspaces);
+        let batches = HashMap::new();
         Self {
+            batches,
+            active_batch: None,
+            batch_form: None,
             workspaces,
             visible,
             selected: 0,
@@ -115,8 +150,101 @@ impl App {
     fn begin_start(&mut self) {
         self.task = Some(String::new());
         self.from_current = false;
-        self.resolve_start_point();
+        self.active_batch = None;
+        match batch::current() {
+            Ok(Some(batch)) => {
+                self.start_point = Some(batch.source.clone());
+                self.active_batch = Some(batch);
+                self.start_error = None;
+            }
+            Ok(None) => {
+                self.start_point = None;
+                self.start_error = Some("Batch unknown; F3 choose source and destination".into());
+                self.begin_batch();
+            }
+            Err(error) => {
+                self.start_point = None;
+                self.start_error = Some(error.to_string());
+            }
+        }
         self.error = None;
+    }
+
+    fn begin_batch(&mut self) {
+        self.batch_form = Some(BatchForm {
+            fields: ["base".into(), String::new(), String::new(), String::new()],
+            selected: 0,
+            reuse: false,
+            preview: None,
+            error: None,
+        });
+    }
+
+    fn batch_key(&mut self, key: KeyCode) {
+        if key == KeyCode::Esc {
+            self.batch_form = None;
+            return;
+        }
+        let Some(form) = &mut self.batch_form else {
+            return;
+        };
+        match key {
+            KeyCode::Tab | KeyCode::Down => form.selected = (form.selected + 1) % 4,
+            KeyCode::BackTab | KeyCode::Up => form.selected = (form.selected + 3) % 4,
+            KeyCode::F(2) => {
+                form.reuse = !form.reuse;
+                form.preview = None;
+            }
+            KeyCode::Backspace => {
+                form.fields[form.selected].pop();
+                form.preview = None;
+            }
+            KeyCode::Char(c) => {
+                form.fields[form.selected].push(c);
+                form.preview = None;
+            }
+            KeyCode::Enter => {
+                let result = if let Some(preview) = &form.preview {
+                    batch::create(preview).and_then(|batch| {
+                        batch::select_current(&batch.id)?;
+                        Ok(Some(batch))
+                    })
+                } else {
+                    (|| {
+                        let request = batch::Request {
+                            repo: std::env::current_dir()?,
+                            session: crate::navigation::current_session()?,
+                            base: self.config.base_branch.clone(),
+                            source: form.fields[0].clone(),
+                            integration: (!form.fields[1].is_empty())
+                                .then(|| form.fields[1].clone()),
+                            destination_start: (!form.fields[2].is_empty())
+                                .then(|| form.fields[2].clone()),
+                            checkout: (!form.fields[3].is_empty())
+                                .then(|| PathBuf::from(&form.fields[3])),
+                            reuse_existing: form.reuse,
+                        };
+                        form.preview = Some(batch::preview(request)?);
+                        Ok(None)
+                    })()
+                };
+                match result {
+                    Ok(Some(batch)) => {
+                        self.start_point = Some(batch.source.clone());
+                        self.start_error = None;
+                        self.active_batch = Some(batch);
+                        self.batch_form = None;
+                        self.batches = batch_details(&self.workspaces, self.config.redact_labels);
+                    }
+                    Ok(None) => form.error = None,
+                    Err(error) => {
+                        form.error = Some(error.to_string());
+                        form.preview = None;
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn resolve_start_point(&mut self) {
@@ -214,6 +342,7 @@ impl App {
 pub fn run(variant: Variant, start: bool) -> Result<(), CockpitError> {
     let config = Config::load_tmux().map_err(|error| io::Error::other(error.to_string()))?;
     let mut app = App::new(discovery::discover()?, variant, config);
+    app.batches = batch_details(&app.workspaces, app.config.redact_labels);
     if start {
         app.begin_start();
     }
@@ -245,6 +374,10 @@ fn event_loop(
         if key.kind != KeyEventKind::Press {
             continue;
         }
+        if app.batch_form.is_some() {
+            app.batch_key(key.code);
+            continue;
+        }
         if let Some(task) = &mut app.task {
             match key.code {
                 KeyCode::Esc => app.task = None,
@@ -252,7 +385,8 @@ fn event_loop(
                     task.pop();
                 }
                 KeyCode::Tab | KeyCode::Right => app.next_start_agent(),
-                KeyCode::F(2) => {
+                KeyCode::F(3) => app.begin_batch(),
+                KeyCode::F(2) if app.active_batch.is_none() => {
                     app.from_current = !app.from_current;
                     app.resolve_start_point();
                 }
@@ -266,6 +400,7 @@ fn event_loop(
                     app.task = None;
                     match workspace::start(Start {
                         name: None,
+                        batch: app.active_batch.as_ref().map(|batch| batch.id.clone()),
                         repo: std::env::current_dir()?,
                         branch: format!("{}{slug}", app.config.branch_prefix),
                         start_point: point.commit,
@@ -333,6 +468,7 @@ fn event_loop(
             KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
             KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
             KeyCode::Char('/') => app.filtering = true,
+            KeyCode::Char('b') => app.begin_batch(),
             KeyCode::Char('n') => {
                 app.begin_start();
             }
@@ -354,6 +490,7 @@ fn event_loop(
             KeyCode::Char('r') => {
                 app.workspaces = discovery::discover()?;
                 app.git_diffs = collect_git_diffs(&app.workspaces);
+                app.batches = batch_details(&app.workspaces, app.config.redact_labels);
                 app.refresh_filter();
             }
             KeyCode::Enter => {
@@ -403,7 +540,71 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     render_list(frame, app, body[0]);
     render_detail(frame, app, body[1]);
     render_footer(frame, app, layout[2]);
-    if let Some(task) = &app.task {
+    if let Some(form) = &app.batch_form {
+        let mut lines = vec![
+            Line::from("BATCH SETUP · Tab field · Enter preview/confirm · Esc cancel"),
+            Line::from(format!(
+                "Direct destination: {} (blank branch); F2 reuse existing: {}",
+                if app.config.redact_labels {
+                    "[redacted]"
+                } else {
+                    &app.config.base_branch
+                },
+                form.reuse
+            )),
+        ];
+        for (i, label) in [
+            "Source (base / current / local ref)",
+            "Integration branch (blank = direct)",
+            "Destination start (blank = base)",
+            "Dedicated checkout (blank = reuse)",
+        ]
+        .iter()
+        .enumerate()
+        {
+            lines.push(Line::from(format!(
+                "{} {}: {}",
+                if i == form.selected { ">" } else { " " },
+                label,
+                if app.config.redact_labels {
+                    "[redacted]"
+                } else {
+                    &form.fields[i]
+                }
+            )));
+        }
+        if let Some(preview) = &form.preview {
+            lines.extend(
+                preview
+                    .display(app.config.redact_labels)
+                    .lines()
+                    .map(|line| Line::from(line.to_owned())),
+            );
+            lines.push(Line::from(
+                "Enter: confirm this source and destination · Esc: cancel",
+            ));
+        } else {
+            lines.push(Line::from(
+                "Enter previews before any creation. Original branch is preserved.",
+            ));
+        }
+        if let Some(error) = &form.error {
+            lines.push(Line::from(if app.config.redact_labels {
+                "Batch operation failed; details redacted".into()
+            } else {
+                error.clone()
+            }));
+        }
+        let modal = centered(area, 110, 23);
+        frame.render_widget(Clear, modal);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .block(Block::default().borders(Borders::ALL))
+                .style(Style::default().bg(app.theme.base).fg(app.theme.text)),
+            modal,
+        );
+    } else if let Some(task) = &app.task {
         let modal = centered(area, 70, 15);
         let label_width = usize::from(modal.width.saturating_sub(10));
         let branch = slug(task);
@@ -420,7 +621,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 label_width,
             )
         };
-        let text = vec![
+        let mut text = vec![
             Line::styled(
                 "START WORKSPACE",
                 Style::default()
@@ -430,7 +631,9 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             Line::from(""),
             Line::from(format!("Task   {task_label}")),
             Line::from(format!("Branch {branch_label}")),
-            Line::from(if app.from_current {
+            Line::from(if app.active_batch.is_some() {
+                "Source Pinned batch (F3 new batch)"
+            } else if app.from_current {
                 "Base   Continue from current branch (F2 change)"
             } else {
                 "Base   Independent task (F2 change)"
@@ -454,11 +657,39 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             )),
             Line::from(""),
             if app.start_point.is_some() {
-                ui::action_line(&[CREATE_ACTIONS, CANCEL_ACTION], app.theme)
+                if app.active_batch.is_some() {
+                    ui::action_line(
+                        &[
+                            &[("Enter", "Create"), ("Tab", "Agent"), ("F3", "Batch")],
+                            CANCEL_ACTION,
+                        ],
+                        app.theme,
+                    )
+                } else {
+                    ui::action_line(&[CREATE_ACTIONS, CANCEL_ACTION], app.theme)
+                }
             } else {
                 ui::action_line(&[CREATE_BLOCKED_ACTIONS, CANCEL_ACTION], app.theme)
             },
         ];
+        if let Some(batch) = &app.active_batch {
+            text.insert(
+                8,
+                Line::from(if app.config.redact_labels {
+                    "Batch pinned · Destination [redacted]".into()
+                } else {
+                    format!(
+                        "Batch pinned · Destination {} · F3 new batch",
+                        batch.destination
+                    )
+                }),
+            );
+        } else {
+            text.insert(
+                8,
+                Line::from("Batch unknown · F3 choose source and destination"),
+            );
+        }
         frame.render_widget(Clear, modal);
         frame.render_widget(
             Paragraph::new(text)
@@ -719,6 +950,14 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         detail_line("BRANCH", branch.to_owned(), app.theme.muted),
         detail_line("CHECKOUT", format!("{checkout} · {git}"), app.theme.muted),
     ];
+    lines.extend(
+        app.batches
+            .get(&workspace.identity.window_id)
+            .map(String::as_str)
+            .unwrap_or("Batch: unknown; source/destination unknown")
+            .lines()
+            .map(|line| Line::from(format!(" {line}"))),
+    );
     if let Some(diff) = app.git_diffs.get(&workspace.checkout.working_directory) {
         if diff.files == 0 {
             lines.push(Line::from(vec![
@@ -956,6 +1195,101 @@ mod tests {
             state_since: Some(1),
             attention_since: None,
         }
+    }
+
+    #[test]
+    fn batch_start_labels_the_pinned_source_without_claiming_a_base_choice() {
+        let mut app = App::new(vec![], Variant::Moon, Config::default());
+        let source = workspace::StartPoint {
+            reference: "refs/heads/planning".into(),
+            commit: "123456789abcdef0123456789abcdef0123456789a".into(),
+        };
+        app.start_point = Some(source.clone());
+        app.task = Some("example".into());
+        app.active_batch = Some(batch::Batch {
+            id: "$1/123".into(),
+            project: "$1".into(),
+            coordinator: "@1".into(),
+            repository: "/repo/.git".into(),
+            source,
+            destination: "assembled".into(),
+            destination_commit: "abcdef".into(),
+            checkout: "/assembled".into(),
+        });
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(content.contains("Source Pinned batch"));
+        assert!(!content.contains("Independent task"));
+    }
+
+    #[test]
+    fn batch_destination_is_visible_in_normal_height_details() {
+        let mut app = App::new(
+            vec![workspace("planning", Lifecycle::Working)],
+            Variant::Moon,
+            Config::default(),
+        );
+        app.batches.insert(
+            "@1".into(),
+            "Batch: $1/123
+Source: refs/heads/planning abcdef
+Destination: assembled 123456 (at setup)
+Checkout: /repo/assembled"
+                .into(),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(content.contains("Destination: assembled"));
+    }
+
+    #[test]
+    fn batch_setup_keys_preview_and_cancel_without_changing_the_launch() {
+        let mut app = App::new(vec![], Variant::Moon, Config::default());
+        app.begin_batch();
+        app.batch_key(KeyCode::Tab);
+        for c in "integration/private".chars() {
+            app.batch_key(KeyCode::Char(c));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(120, 32)).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(content.contains("BATCH SETUP"));
+        assert!(content.contains("integration/private"));
+        assert!(content.contains("base / current / local ref"));
+        assert!(content.contains("Dedicated checkout"));
+        app.config.redact_labels = true;
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(!content.contains("integration/private"));
+        app.batch_key(KeyCode::Esc);
+        assert!(app.batch_form.is_none());
+        assert!(app.active_batch.is_none());
     }
 
     #[test]
