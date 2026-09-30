@@ -95,3 +95,32 @@ semantics until clients use distinct views. No real user tmux server was touched
 - This correction changes only navigation, its behavioral regression, and this
   ticket. `main` remains `eaf2446`; the coordinating session will independently
   re-review the correction commit before advancing to the next ticket.
+
+## Independent correction review — 2026-09-30
+
+- Reviewed `git diff a005e62...6cb0cb5` against this ticket, its originating
+  spec, the common working agreement, contributing guidance, domain context,
+  and privacy boundary. Checked the surrounding navigation implementation and
+  lifecycle coverage in the whole-ticket range `cbc11dd...6cb0cb5`.
+- Standards: no remaining findings. The correction introduced one minor
+  documentation mismatch: the usage guide still attributed generated view
+  names to tmux. This review updates that sentence to describe Drudwyn-assigned
+  internal names. No production code changed during review.
+- Spec: no findings. The previous inherited `destroy-unattached on` failure is
+  resolved: creation and the exact new view's local `off` override share one
+  command queue, stable session IDs route subsequent operations, ownership
+  marking and failure cleanup remain intact, and attachment restores local
+  automatic cleanup. The user's global setting is never mutated.
+- Independently rebuilt and ran all 10 real two-client tests successfully,
+  including global cleanup enabled, requester-only navigation, shared pane/PID
+  identity, view reuse and detach cleanup, repeated switches, retained
+  user-created grouped sessions, and rejected invalid routes. The first attempt
+  could not create sockets in the sandbox; the rerun used disposable tmux
+  servers and repositories under `/tmp` with approved socket access.
+- Independent `cargo test --locked --offline`: 33 passed.
+  `cargo build --locked --offline`, `cargo fmt --check`, and `git diff --check`
+  passed. The correction builder's full-suite result remains separately
+  recorded above; this review did not repeat the full suite.
+- No remaining behavioral blocker. Review began with a clean feature branch
+  at `6cb0cb5`; `main` remains `eaf2446`. This receipt and the naming sentence
+  are the only review changes.

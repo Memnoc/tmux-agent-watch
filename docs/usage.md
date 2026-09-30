@@ -87,8 +87,8 @@ view with independent window selection. The windows, panes, worker processes,
 files, and branches remain shared; worker totals count each window once.
 
 Views are created only when needed and reused while that client stays in the
-project. Tmux assigns the view name; `@drudwyn_view_of` identifies its original
-session by ID. Drudwyn shows the shared project name and hides these extra views
+project. Drudwyn assigns an internal view name; `@drudwyn_view_of` identifies
+its original session by ID. Drudwyn shows the shared project name and hides these extra views
 from its session list. User-created grouped sessions remain visible and are
 never treated as disposable views. Switching away or detaching removes an unused
 application view through tmux's `destroy-unattached` option. Other sessions and
