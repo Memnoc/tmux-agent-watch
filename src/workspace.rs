@@ -29,11 +29,13 @@ pub struct Start {
     pub batch: Option<String>,
     pub root: Option<PathBuf>,
     pub command: Vec<String>,
+    pub task_file: Option<String>,
 }
 
 pub struct Started {
     pub path: PathBuf,
     pub window_id: String,
+    pub pane_id: String,
 }
 
 /// Resolve a starting point using local refs only. Never inherit HEAD implicitly.
@@ -172,10 +174,20 @@ pub fn start(request: Start) -> Result<Started, Error> {
         crate::coordinator::launch_project(&source)?
     };
     let name = request.name.as_deref().unwrap_or(&request.branch);
-    if name.trim().is_empty() || name.chars().any(char::is_control) {
+    if name.trim().is_empty() || name.chars().count() > 64 || name.chars().any(char::is_control) {
         return Err(Error::Invalid(
-            "worker name must be nonempty and contain no control characters".into(),
+            "worker name must be 1–64 characters and contain no control characters".into(),
         ));
+    }
+    if let Some(reference) = &request.task_file {
+        validate_task_reference(reference)?;
+        let entry = git(
+            &source,
+            &["--literal-pathspecs", "ls-tree", &commit, "--", reference],
+        )?;
+        if !(entry.starts_with("100644 blob ") || entry.starts_with("100755 blob ")) {
+            return Err(Error::Invalid("Task file is not available at the pinned source; commit it and deliberately choose a new source, or paste instructions. Uncommitted planning files are not inherited".into()));
+        }
     }
     fs::create_dir_all(&root)?;
     git_ok(
@@ -191,15 +203,28 @@ pub fn start(request: Start) -> Result<Started, Error> {
     } else {
         request.command
     };
+    let expected_agent = command
+        .first()
+        .and_then(|c| crate::domain::AgentKind::from_command(c));
     let mut launch = Command::new("tmux");
     launch.arg("new-window");
     if let Some(project) = &project {
         launch.args(["-t", project]);
     }
     let window = launch
-        .args(["-d", "-P", "-F", "#{window_id}", "-n", name, "-c"])
-        .arg(&target)
-        .args(command)
+        .args([
+            "-d",
+            "-P",
+            "-F",
+            "#{window_id}␟#{pane_id}␟#{pane_pid}",
+            "-n",
+            &tmux_argument(name),
+            "-c",
+        ])
+        .arg(tmux_argument(&target.to_string_lossy().replace('#', "##")))
+        // Multiple arguments bypass the shell even for a lone agent executable.
+        .arg("env")
+        .args(command.into_iter().map(|arg| tmux_argument(&arg)))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
@@ -227,24 +252,42 @@ pub fn start(request: Start) -> Result<Started, Error> {
             None,
         ));
     }
-    let window = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if !window.starts_with('@')
-        || window[1..].is_empty()
-        || !window[1..].bytes().all(|c| c.is_ascii_digit())
+    let identity = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let fields: Vec<_> = identity.split('␟').collect();
+    let stable = |value: &str, prefix| {
+        value.starts_with(prefix)
+            && value.len() > 1
+            && value[1..].bytes().all(|b| b.is_ascii_digit())
+    };
+    if fields.len() != 3
+        || !stable(fields[0], '@')
+        || !stable(fields[1], '%')
+        || fields[2].parse::<u32>().is_err()
     {
         return Err(retained_start_error(
-            "tmux did not return a window identity",
+            "tmux did not return a window/pane/process identity",
             &target,
             &request.branch,
             None,
         ));
     }
+    let (window, launch_pane, launch_pid) = (
+        fields[0].to_owned(),
+        fields[1].to_owned(),
+        fields[2].to_owned(),
+    );
     let initialize = || -> Result<(), Error> {
         crate::coordinator::protect_name(&window)?;
         // A fast process may emit a rename escape before new-window returns.
         // Finish initialization with the requested name after blocking escapes;
         // no refresh or scan rewrites subsequent deliberate user renames.
-        tmux_ok(Command::new("tmux").args(["rename-window", "-t", &window, "--", name]))?;
+        tmux_ok(Command::new("tmux").args([
+            "rename-window",
+            "-t",
+            &window,
+            "--",
+            &tmux_argument(name),
+        ]))?;
         if let Some(project) = &project {
             tmux_ok(Command::new("tmux").args([
                 "set-option",
@@ -256,7 +299,7 @@ pub fn start(request: Start) -> Result<Started, Error> {
             ]))?;
         }
         if let Some(batch) = &batch {
-            crate::batch::select(&batch.id, &window)?;
+            crate::batch::select_created(&batch.id, &window, &target)?;
         }
         for (name, value) in [
             ("@drudwyn_branch", request.branch.as_str()),
@@ -267,6 +310,11 @@ pub fn start(request: Start) -> Result<Started, Error> {
         ] {
             tmux_ok(Command::new("tmux").args(["set-option", "-wq", "-t", &window, name, value]))?;
         }
+        if let Some(reference) = &request.task_file {
+            validate_task_file(&target, reference)?;
+            // The selected path is operational metadata; never read file content.
+            set_window(&window, "@drudwyn_task_file", &tmux_argument(reference))?;
+        }
         // tmux can report a new window before its command has had a chance to
         // exit. Do not publish a workspace until the initial process survives
         // a short startup frame and the target is still addressable.
@@ -275,7 +323,7 @@ pub fn start(request: Start) -> Result<Started, Error> {
             "display-message",
             "-p",
             "-t",
-            &window,
+            &launch_pane,
             "#{window_id}\t#{pane_dead}\t#{pane_dead_status}",
         ]))?;
         let mut fields = live.split('\t');
@@ -291,6 +339,20 @@ pub fn start(request: Start) -> Result<Started, Error> {
                 "agent exited during startup (exit status {status}); exit is not task completion"
             )));
         }
+        let pane = delivery_target(&launch_pane)?;
+        if pane.window != window || pane.pid != launch_pid {
+            return Err(Error::Invalid(
+                "Launch pane/process changed during initialization".into(),
+            ));
+        }
+        set_window(&window, "@drudwyn_launch_pane", &launch_pane)?;
+        set_window(&window, "@drudwyn_launch_pid", &launch_pid)?;
+        set_window(
+            &window,
+            "@drudwyn_launch_command",
+            expected_agent.map(|a| a.command()).unwrap_or(&pane.command),
+        )?;
+        set_window(&window, "@drudwyn_delivery", "not_sent")?;
         Ok(())
     };
     if let Err(error) = initialize() {
@@ -304,6 +366,69 @@ pub fn start(request: Start) -> Result<Started, Error> {
     Ok(Started {
         path: target,
         window_id: window,
+        pane_id: launch_pane,
+    })
+}
+
+// tmux parses trailing semicolons as separators even with an argv API.
+fn tmux_argument(value: &str) -> String {
+    value
+        .strip_suffix(';')
+        .map(|p| format!("{p}\\;"))
+        .unwrap_or_else(|| value.into())
+}
+fn set_window(window: &str, option: &str, value: &str) -> Result<(), Error> {
+    tmux_ok(Command::new("tmux").args(["set-option", "-wq", "-t", window, option, value]))
+}
+fn validate_task_reference(reference: &str) -> Result<(), Error> {
+    if reference.is_empty()
+        || reference.chars().any(char::is_control)
+        || Path::new(reference)
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err(Error::Invalid("Task file must be a repository-relative file path without parent components or controls".into()));
+    }
+    Ok(())
+}
+pub fn validate_task_file(checkout: &Path, reference: &str) -> Result<(), Error> {
+    validate_task_reference(reference)?;
+    let root = checkout.canonicalize()?;
+    let path = checkout.join(reference).canonicalize().map_err(|_| {
+        Error::Invalid("Task file is unavailable in the worker checkout; task not sent".into())
+    })?;
+    if !path.starts_with(root) || !path.is_file() {
+        return Err(Error::Invalid(
+            "Task file must be a file inside the worker checkout; task not sent".into(),
+        ));
+    }
+    Ok(())
+}
+struct DeliveryTarget {
+    window: String,
+    pane: String,
+    pid: String,
+    command: String,
+}
+fn delivery_target(target: &str) -> Result<DeliveryTarget, Error> {
+    let record = tmux(Command::new("tmux").args([
+        "display-message",
+        "-p",
+        "-t",
+        target,
+        "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_current_command}␟#{pane_dead}",
+    ]))?;
+    let fields: Vec<_> = record.split('␟').collect();
+    if fields.len() != 5 || fields[4] != "0" {
+        return Err(Error::Invalid(
+            "Delivery target unavailable or exited; task not sent".into(),
+        ));
+    }
+    Ok(DeliveryTarget {
+        window: fields[0].into(),
+        pane: fields[1].into(),
+        pid: fields[2].into(),
+        command: fields[3].into(),
     })
 }
 
@@ -358,39 +483,186 @@ fn remove_unused_start(repo: &Path, target: &Path, branch: &str, commit: &str) -
     .is_ok()
 }
 
-pub fn deliver_task(window_id: &str, task: &str) -> Result<(), Error> {
+/// Bounded startup observation uses process metadata only. A matching executable
+/// is not proof of readiness/acceptance; the resulting receipt says only sent.
+pub fn send_started(
+    started: &Started,
+    task: &str,
+    file: bool,
+    agent: Option<crate::domain::AgentKind>,
+) -> Result<(), Error> {
+    let mut ready = agent.is_none();
+    for _ in 0..30 {
+        let pane = bound_target(&started.pane_id)?;
+        if agent.is_none() || crate::domain::AgentKind::from_command(&pane.command) == agent {
+            ready = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    if !ready {
+        return Err(Error::Invalid("Worker created; startup delayed or process unrecognized; task NOT sent. Inspect the pane and deliberately deliver when ready".into()));
+    }
+    if file {
+        validate_task_file(&started.path, task)?;
+        deliver(
+            &started.pane_id,
+            &format!("Read the repository task file {task:?} and carry out its instructions."),
+            false,
+        )
+    } else {
+        deliver_task(&started.pane_id, task)
+    }
+}
+
+/// Text is held only in this call and a uniquely named, delete-on-paste buffer.
+/// A successful send is not evidence of agent acceptance or implementation.
+pub fn deliver_task(target: &str, task: &str) -> Result<(), Error> {
+    deliver(target, task, false)
+}
+
+pub fn deliver_reference(target: &str, reference: &str, retry: bool) -> Result<(), Error> {
+    let pane = bound_target(target)?;
+    let checkout = tmux(Command::new("tmux").args([
+        "show-option",
+        "-wqv",
+        "-t",
+        &pane.window,
+        "@drudwyn_worktree",
+    ]))?;
+    validate_task_file(Path::new(&checkout), reference)?;
+    set_window(
+        &pane.window,
+        "@drudwyn_task_file",
+        &tmux_argument(reference),
+    )?;
+    deliver(
+        &pane.pane,
+        &format!("Read the repository task file {reference:?} and carry out its instructions."),
+        retry,
+    )
+}
+
+fn bound_target(target: &str) -> Result<DeliveryTarget, Error> {
+    let selected = delivery_target(target)?;
+    let pane = tmux(Command::new("tmux").args([
+        "show-option",
+        "-wqv",
+        "-t",
+        &selected.window,
+        "@drudwyn_launch_pane",
+    ]))?;
+    if pane.is_empty() {
+        return Ok(selected);
+    }
+    let bound = delivery_target(&pane)?;
+    let pid = tmux(Command::new("tmux").args([
+        "show-option",
+        "-wqv",
+        "-t",
+        &selected.window,
+        "@drudwyn_launch_pid",
+    ]))?;
+    if bound.window != selected.window
+        || bound.pid != pid
+        || (target.starts_with('%') && target != pane)
+    {
+        return Err(Error::Invalid("Launch pane/process changed; task not sent. Inspect the worker before deliberate recovery".into()));
+    }
+    Ok(bound)
+}
+
+fn same_process(expected: &DeliveryTarget) -> Result<(), Error> {
+    let current = delivery_target(&expected.pane)?;
+    if current.window != expected.window
+        || current.pid != expected.pid
+        || current.command != expected.command
+    {
+        return Err(Error::Invalid("Delivery pane/process changed; delivery uncertain. Inspect the worker before deliberate recovery".into()));
+    }
+    Ok(())
+}
+
+struct TransientBuffer(String);
+impl Drop for TransientBuffer {
+    fn drop(&mut self) {
+        let _ = Command::new("tmux")
+            .args(["delete-buffer", "-b", &self.0])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+pub fn deliver(target: &str, task: &str, retry: bool) -> Result<(), Error> {
+    if task.trim().is_empty() {
+        return Err(Error::Invalid("Task is empty; not sent".into()));
+    }
+    let pane = bound_target(target)?;
+    let previous = tmux(Command::new("tmux").args([
+        "show-option",
+        "-wqv",
+        "-t",
+        &pane.window,
+        "@drudwyn_delivery",
+    ]))?;
+    if !retry && !previous.is_empty() && previous != "not_sent" {
+        return Err(Error::Invalid("A delivery was already attempted; inspect the agent before an explicit --retry. Nothing resent".into()));
+    }
+    let command = tmux(Command::new("tmux").args([
+        "show-option",
+        "-wqv",
+        "-t",
+        &pane.window,
+        "@drudwyn_launch_command",
+    ]))?;
+    if !command.is_empty() && pane.command != command {
+        return Err(Error::Invalid("Launch process changed or startup is delayed; task not sent. Inspect before deliberate recovery".into()));
+    }
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let buffer = format!("drudwyn-task-{}-{nonce}", std::process::id());
+    let buffer = TransientBuffer(format!("drudwyn-task-{}-{nonce}", std::process::id()));
     let mut child = Command::new("tmux")
-        .args(["load-buffer", "-b", &buffer, "-"])
+        .args(["load-buffer", "-b", &buffer.0, "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    child
+    let written = child
         .stdin
         .take()
         .ok_or_else(|| Error::Invalid("task input unavailable".into()))?
-        .write_all(task.as_bytes())?;
-    if !child.wait()?.success() {
-        return Err(Error::Tmux("could not load transient task".into()));
+        .write_all(task.as_bytes());
+    let loaded = child.wait()?;
+    if written.is_err() || !loaded.success() {
+        return Err(Error::Tmux(
+            "Could not load transient task; task not sent; worker retained".into(),
+        ));
     }
-    let result =
-        tmux_ok(Command::new("tmux").args(["paste-buffer", "-d", "-b", &buffer, "-t", window_id]));
-    if result.is_err() {
-        let _ = Command::new("tmux")
-            .args(["delete-buffer", "-b", &buffer])
-            .status();
-        return result;
-    }
-    // Interactive TUIs may process a bracketed paste asynchronously. Give the
-    // editor one frame to settle before submitting, otherwise Enter can be
-    // consumed while the pasted text remains in the input field.
-    thread::sleep(Duration::from_millis(750));
-    tmux_ok(Command::new("tmux").args(["send-keys", "-t", window_id, "Enter"]))
+    same_process(&pane)?;
+    // Mark uncertainty before the first potentially transmitting operation. No
+    // failure or subsequent invocation may silently resend this task.
+    set_window(&pane.window, "@drudwyn_delivery", "uncertain")?;
+    let transmit = || -> Result<(), Error> {
+        tmux_ok(Command::new("tmux").args([
+            "paste-buffer",
+            "-d",
+            "-p",
+            "-r",
+            "-b",
+            &buffer.0,
+            "-t",
+            &pane.pane,
+        ]))?;
+        thread::sleep(Duration::from_millis(750));
+        same_process(&pane)?;
+        tmux_ok(Command::new("tmux").args(["send-keys", "-t", &pane.pane, "Enter"]))?;
+        set_window(&pane.window, "@drudwyn_delivery", "sent")?;
+        Ok(())
+    };
+    transmit().map_err(|_| Error::Invalid(format!("Worker created; task delivery uncertain; retained window {} pane {}. Inspect it before deliberate retry; nothing automatically resent", pane.window, pane.pane)))
 }
 
 pub fn finish(path: &Path, base: &str, yes: bool) -> Result<PathBuf, Error> {

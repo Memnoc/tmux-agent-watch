@@ -178,6 +178,12 @@ enum WorkspaceCommand {
         /// Deliberate short window name; defaults to the branch.
         #[arg(long)]
         name: Option<String>,
+        /// Repository-owned task reference, checked at the pinned source; no content is read.
+        #[arg(long)]
+        task_file: Option<String>,
+        /// Read the initial task from stdin, create the worker, then send once.
+        #[arg(long, conflicts_with = "task_file")]
+        task_stdin: bool,
         branch: String,
         #[arg(trailing_var_arg = true)]
         command: Vec<String>,
@@ -191,7 +197,15 @@ enum WorkspaceCommand {
         yes: bool,
     },
     /// Deliver a task from stdin without placing it in arguments or persistent state.
-    DeliverTask { window_id: String },
+    DeliverTask {
+        window_id: String,
+        /// Send only a repository file reference; the agent reads the file.
+        #[arg(long)]
+        task_file: Option<String>,
+        /// Deliberately send again after inspecting a prior sent/uncertain delivery.
+        #[arg(long)]
+        retry: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -406,6 +420,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 batch,
                 branch,
                 name,
+                task_file,
+                task_stdin,
                 command,
             } => {
                 let config = Config::load_tmux()?;
@@ -435,28 +451,57 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let root = worktree_root
                     .or_else(|| std::env::var_os("DRUDWYN_WORKTREE_ROOT").map(PathBuf::from));
-                println!(
-                    "{}",
-                    workspace::start(Start {
-                        repo,
-                        branch,
-                        name,
-                        start_point: point.commit,
-                        batch: selected.map(|b| b.id),
-                        root,
-                        command
-                    })?
-                    .path
-                    .display()
+                let mut task = String::new();
+                if task_stdin {
+                    std::io::stdin().read_to_string(&mut task)?;
+                }
+                let file = task_file.is_some();
+                if let Some(reference) = &task_file {
+                    task = reference.clone();
+                }
+                if (task_stdin || file) && task.trim().is_empty() {
+                    return Err("Task is empty; worker not created".into());
+                }
+                let agent = command
+                    .first()
+                    .and_then(|c| AgentKind::from_command(c))
+                    .or_else(|| command.is_empty().then_some(AgentKind::Codex));
+                let started = workspace::start(Start {
+                    repo,
+                    branch,
+                    name,
+                    start_point: point.commit,
+                    batch: selected.map(|b| b.id),
+                    root,
+                    command,
+                    task_file,
+                })?;
+                println!("{}", started.path.display());
+                eprintln!(
+                    "Worker created: window {} pane {}; task not sent yet",
+                    started.window_id, started.pane_id
                 );
+                if task_stdin || file {
+                    workspace::send_started(&started, &task, file, agent)?;
+                    println!("Task sent; acceptance and implementation unknown");
+                }
             }
             WorkspaceCommand::Finish { path, base, yes } => {
                 println!("{}", workspace::finish(&path, &base, yes)?.display())
             }
-            WorkspaceCommand::DeliverTask { window_id } => {
-                let mut task = String::new();
-                std::io::stdin().read_to_string(&mut task)?;
-                workspace::deliver_task(&window_id, &task)?;
+            WorkspaceCommand::DeliverTask {
+                window_id,
+                task_file,
+                retry,
+            } => {
+                if let Some(reference) = task_file {
+                    workspace::deliver_reference(&window_id, &reference, retry)?;
+                } else {
+                    let mut task = String::new();
+                    std::io::stdin().read_to_string(&mut task)?;
+                    workspace::deliver(&window_id, &task, retry)?;
+                }
+                println!("Task sent; acceptance and implementation unknown");
             }
         },
     }

@@ -7,7 +7,10 @@ use std::{
 };
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+        KeyModifiers,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -46,14 +49,6 @@ const FILTER_ACTIONS: &[(&str, &str)] = &[
     ("Backspace", "Delete"),
     ("Enter/Esc", "Done"),
 ];
-const CREATE_ACTIONS: &[(&str, &str)] = &[
-    ("Enter", "Create"),
-    ("Tab", "Agent"),
-    ("F2", "Base"),
-    ("F3", "Batch"),
-];
-const CREATE_BLOCKED_ACTIONS: &[(&str, &str)] = &[("Tab", "Agent"), ("F2", "Base")];
-const CANCEL_ACTION: &[(&str, &str)] = &[("Esc", "Cancel")];
 const FINISH_ACTION: &[(&str, &str)] = &[("y", "Finish")];
 const FINISH_CANCEL_ACTION: &[(&str, &str)] = &[("n/Esc", "Cancel")];
 
@@ -73,6 +68,7 @@ pub struct App {
     filtering: bool,
     error: Option<String>,
     task: Option<String>,
+    launch: LaunchForm,
     start_agent: usize,
     from_current: bool,
     start_point: Option<workspace::StartPoint>,
@@ -85,6 +81,16 @@ pub struct App {
     agent_icon: String,
     config: Config,
     theme: Theme,
+}
+
+#[derive(Default)]
+struct LaunchForm {
+    name: String,
+    branch: String,
+    custom_branch: bool,
+    field: usize,
+    cursors: [usize; 3],
+    file: bool,
 }
 
 struct BatchForm {
@@ -132,6 +138,7 @@ impl App {
             filtering: false,
             error: None,
             task: None,
+            launch: LaunchForm::default(),
             from_current: false,
             start_point: None,
             start_error: None,
@@ -149,6 +156,7 @@ impl App {
 
     fn begin_start(&mut self) {
         self.task = Some(String::new());
+        self.launch = LaunchForm::default();
         self.from_current = false;
         self.active_batch = None;
         match batch::current() {
@@ -168,6 +176,85 @@ impl App {
             }
         }
         self.error = None;
+    }
+
+    fn launch_edit(&mut self, key: KeyCode, paste: Option<&str>) {
+        let field = self.launch.field;
+        let text = match field {
+            0 => &mut self.launch.name,
+            1 => &mut self.launch.branch,
+            _ => self.task.as_mut().unwrap(),
+        };
+        let multiline = field == 2 && !self.launch.file;
+        edit_text(text, &mut self.launch.cursors[field], key, paste, multiline);
+        if field == 1 {
+            self.launch.custom_branch = true;
+        }
+        if field == 0 && !self.launch.custom_branch {
+            self.launch.branch =
+                format!("{}{}", self.config.branch_prefix, slug(&self.launch.name));
+            self.launch.cursors[1] = self.launch.branch.len();
+        }
+    }
+
+    fn launch_worker(&mut self) -> io::Result<()> {
+        self.error = None;
+        if self.launch.name.trim().is_empty()
+            || self.task.as_ref().is_none_or(|t| t.trim().is_empty())
+        {
+            self.error = Some("Short name and task/reference are required".into());
+            return Ok(());
+        }
+        let Some(point) = self.start_point.clone() else {
+            return Ok(());
+        };
+        match workspace::start(Start {
+            name: Some(self.launch.name.clone()),
+            task_file: self
+                .launch
+                .file
+                .then(|| self.task.clone().unwrap_or_default()),
+            batch: self.active_batch.as_ref().map(|b| b.id.clone()),
+            repo: std::env::current_dir()?,
+            branch: self.launch.branch.clone(),
+            start_point: point.commit,
+            root: None,
+            command: vec![self.start_agent().command().into()],
+        }) {
+            Ok(created) => {
+                let task = self.task.take().unwrap_or_default();
+                let sent = workspace::send_started(
+                    &created,
+                    &task,
+                    self.launch.file,
+                    Some(self.start_agent()),
+                );
+                self.error = Some(match sent {
+                    Ok(()) => format!(
+                        "Worker created; task sent; acceptance and implementation unknown. Open window {} to inspect.",
+                        created.window_id
+                    ),
+                    Err(error) => format!(
+                        "{error}; retained window {} pane {} and checkout {}. Open and inspect before deliberate delivery retry.",
+                        created.window_id,
+                        created.pane_id,
+                        created.path.display()
+                    ),
+                });
+                self.workspaces =
+                    discovery::discover().map_err(|error| io::Error::other(error.to_string()))?;
+                self.batches = batch_details(&self.workspaces, self.config.redact_labels);
+                self.refresh_filter();
+            }
+            Err(error) => {
+                let message = error.to_string();
+                if message.starts_with("launch failed:") {
+                    self.task = None;
+                }
+                self.error = Some(message);
+            }
+        }
+        Ok(())
     }
 
     fn begin_batch(&mut self) {
@@ -349,14 +436,158 @@ pub fn run(variant: Variant, start: bool) -> Result<(), CockpitError> {
     app.agent_icon = crate::icons::agent_icon();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let result = event_loop(&mut terminal, &mut app);
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     result
+}
+
+fn edit_text(
+    text: &mut String,
+    cursor: &mut usize,
+    key: KeyCode,
+    paste: Option<&str>,
+    multiline: bool,
+) {
+    *cursor = (*cursor).min(text.len());
+    let previous = text[..*cursor]
+        .char_indices()
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let next = text[*cursor..]
+        .chars()
+        .next()
+        .map(|c| *cursor + c.len_utf8())
+        .unwrap_or(*cursor);
+    if let Some(paste) = paste {
+        let paste: String = paste
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .chars()
+            .filter(|c| !c.is_control() || (multiline && matches!(*c, '\n' | '\t')))
+            .collect();
+        text.insert_str(*cursor, &paste);
+        *cursor += paste.len();
+        return;
+    }
+    match key {
+        KeyCode::Left => *cursor = previous,
+        KeyCode::Right => *cursor = next,
+        KeyCode::Home => *cursor = text[..*cursor].rfind('\n').map(|i| i + 1).unwrap_or(0),
+        KeyCode::End => *cursor += text[*cursor..].find('\n').unwrap_or(text.len() - *cursor),
+        KeyCode::PageUp => *cursor = 0,
+        KeyCode::PageDown => *cursor = text.len(),
+        KeyCode::Up | KeyCode::Down => {
+            let start = text[..*cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let column = text[start..*cursor].chars().count();
+            let destination = if key == KeyCode::Up {
+                start
+                    .checked_sub(1)
+                    .map(|end| (text[..end].rfind('\n').map(|i| i + 1).unwrap_or(0), end))
+            } else {
+                text[*cursor..].find('\n').map(|n| {
+                    let start = *cursor + n + 1;
+                    (
+                        start,
+                        start + text[start..].find('\n').unwrap_or(text.len() - start),
+                    )
+                })
+            };
+            if let Some((start, end)) = destination {
+                *cursor = start
+                    + text[start..end]
+                        .char_indices()
+                        .nth(column)
+                        .map(|(i, _)| i)
+                        .unwrap_or(end - start);
+            }
+        }
+        KeyCode::Backspace => {
+            text.drain(previous..*cursor);
+            *cursor = previous;
+        }
+        KeyCode::Delete => {
+            text.drain(*cursor..next);
+        }
+        KeyCode::Enter if multiline => {
+            text.insert(*cursor, '\n');
+            *cursor += 1;
+        }
+        KeyCode::Char(c) if !c.is_control() => {
+            text.insert(*cursor, c);
+            *cursor += c.len_utf8();
+        }
+        _ => {}
+    }
+}
+
+fn input_view(text: &str, cursor: usize, width: usize) -> (String, usize) {
+    let cursor = cursor.min(text.len());
+    let mut start = 0;
+    while Span::raw(&text[start..cursor]).width() >= width.max(1) {
+        let Some(c) = text[start..cursor].chars().next() else {
+            break;
+        };
+        start += c.len_utf8();
+    }
+    let column = Span::raw(&text[start..cursor]).width();
+    let mut visible = String::new();
+    for c in text[start..].chars() {
+        if Span::raw(visible.as_str()).width() + Span::raw(c.to_string()).width() > width {
+            break;
+        }
+        visible.push(c);
+    }
+    (visible, column)
+}
+
+fn editor_rows(text: &str, cursor: usize, width: usize) -> (Vec<String>, usize, usize) {
+    let mut rows = vec![String::new()];
+    let (mut row, mut col, mut cursor_row, mut cursor_col) = (0, 0, 0, 0);
+    for (i, c) in text.char_indices() {
+        if i == cursor {
+            cursor_row = row;
+            cursor_col = col;
+        }
+        if c == '\n' {
+            rows.push(String::new());
+            row += 1;
+            col = 0;
+        } else {
+            let glyph = if c == '\t' {
+                "    ".into()
+            } else {
+                c.to_string()
+            };
+            let columns = Span::raw(glyph.as_str()).width();
+            if col + columns > width {
+                rows.push(String::new());
+                row += 1;
+                col = 0;
+            }
+            rows[row].push_str(&glyph);
+            col += columns;
+            if col >= width {
+                rows.push(String::new());
+                row += 1;
+                col = 0;
+            }
+        }
+    }
+    if cursor >= text.len() {
+        cursor_row = row;
+        cursor_col = col;
+    }
+    (rows, cursor_row, cursor_col)
 }
 
 fn event_loop(
@@ -368,7 +599,14 @@ fn event_loop(
         if !event::poll(Duration::from_millis(250))? {
             continue;
         }
-        let Event::Key(key) = event::read()? else {
+        let input = event::read()?;
+        if let Event::Paste(text) = &input {
+            if app.task.is_some() && app.batch_form.is_none() {
+                app.launch_edit(KeyCode::Null, Some(text));
+            }
+            continue;
+        }
+        let Event::Key(key) = input else {
             continue;
         };
         if key.kind != KeyEventKind::Press {
@@ -378,51 +616,32 @@ fn event_loop(
             app.batch_key(key.code);
             continue;
         }
-        if let Some(task) = &mut app.task {
+        if app.task.is_some() {
             match key.code {
-                KeyCode::Esc => app.task = None,
-                KeyCode::Backspace => {
-                    task.pop();
+                KeyCode::Esc => {
+                    app.task = None;
                 }
-                KeyCode::Tab | KeyCode::Right => app.next_start_agent(),
+                KeyCode::Tab => app.launch.field = (app.launch.field + 1) % 3,
+                KeyCode::BackTab => app.launch.field = (app.launch.field + 2) % 3,
                 KeyCode::F(3) => app.begin_batch(),
+                KeyCode::F(4) => app.next_start_agent(),
+                KeyCode::F(5) => {
+                    app.launch.file = !app.launch.file;
+                    app.task = Some(String::new());
+                    app.launch.cursors[2] = 0;
+                }
                 KeyCode::F(2) if app.active_batch.is_none() => {
                     app.from_current = !app.from_current;
                     app.resolve_start_point();
                 }
-                KeyCode::Char(character) => task.push(character),
-                KeyCode::Enter if !task.trim().is_empty() => {
-                    let Some(point) = app.start_point.clone() else {
-                        continue;
-                    };
-                    let task_text = std::mem::take(task);
-                    let slug = slug(&task_text);
-                    app.task = None;
-                    match workspace::start(Start {
-                        name: None,
-                        batch: app.active_batch.as_ref().map(|batch| batch.id.clone()),
-                        repo: std::env::current_dir()?,
-                        branch: format!("{}{slug}", app.config.branch_prefix),
-                        start_point: point.commit,
-                        root: None,
-                        command: vec![app.start_agent().command().into()],
-                    }) {
-                        Ok(started) => {
-                            if let Err(error) =
-                                workspace::deliver_task(&started.window_id, &task_text)
-                            {
-                                app.error = Some(error.to_string());
-                            } else {
-                                match crate::navigation::open(Some(&started.window_id), None) {
-                                    Ok(()) => return Ok(()),
-                                    Err(error) => app.error = Some(format!("Open failed: {error}")),
-                                }
-                            }
-                        }
-                        Err(error) => app.error = Some(error.to_string()),
-                    }
+                KeyCode::F(6) => app.launch_worker()?,
+                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.launch_edit(KeyCode::Home, None)
                 }
-                _ => {}
+                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.launch_edit(KeyCode::End, None)
+                }
+                _ => app.launch_edit(key.code, None),
             }
             continue;
         }
@@ -605,98 +824,143 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             modal,
         );
     } else if let Some(task) = &app.task {
-        let modal = centered(area, 70, 15);
-        let label_width = usize::from(modal.width.saturating_sub(10));
-        let branch = slug(task);
-        let task_label = if app.config.redact_labels {
-            "[redacted]".to_owned()
-        } else {
-            format!("{}_", ellipsize(task, label_width.saturating_sub(1)))
-        };
-        let branch_label = if app.config.redact_labels {
-            "[redacted]".to_owned()
-        } else {
-            ellipsize(
-                &format!("{}{branch}", app.config.branch_prefix),
-                label_width,
-            )
-        };
-        let mut text = vec![
-            Line::styled(
-                "START WORKSPACE",
-                Style::default()
-                    .fg(app.theme.rose)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Line::from(""),
-            Line::from(format!("Task   {task_label}")),
-            Line::from(format!("Branch {branch_label}")),
-            Line::from(if app.active_batch.is_some() {
-                "Source Pinned batch (F3 new batch)"
-            } else if app.from_current {
-                "Base   Continue from current branch (F2 change)"
-            } else {
-                "Base   Independent task (F2 change)"
-            }),
-            Line::from(ellipsize(
-                &if app.config.redact_labels {
-                    "       [redacted]".to_owned()
-                } else if let Some(point) = &app.start_point {
-                    format!("       {} ({})", point.reference, &point.commit[..12])
-                } else {
-                    app.start_error
-                        .clone()
-                        .unwrap_or_else(|| "Base unavailable".into())
-                },
-                label_width,
-            )),
-            Line::from("Local ref; remote freshness unknown"),
-            Line::from(format!(
-                "Agent  {}  (Tab change)",
-                app.start_agent().label()
-            )),
-            Line::from(""),
-            if app.start_point.is_some() {
-                if app.active_batch.is_some() {
-                    ui::action_line(
-                        &[
-                            &[("Enter", "Create"), ("Tab", "Agent"), ("F3", "Batch")],
-                            CANCEL_ACTION,
-                        ],
-                        app.theme,
-                    )
-                } else {
-                    ui::action_line(&[CREATE_ACTIONS, CANCEL_ACTION], app.theme)
-                }
-            } else {
-                ui::action_line(&[CREATE_BLOCKED_ACTIONS, CANCEL_ACTION], app.theme)
-            },
-        ];
-        if let Some(batch) = &app.active_batch {
-            text.insert(
-                8,
-                Line::from(if app.config.redact_labels {
-                    "Batch pinned · Destination [redacted]".into()
-                } else {
-                    format!(
-                        "Batch pinned · Destination {} · F3 new batch",
-                        batch.destination
-                    )
-                }),
-            );
-        } else {
-            text.insert(
-                8,
-                Line::from("Batch unknown · F3 choose source and destination"),
-            );
-        }
+        let modal = centered(
+            area,
+            area.width.saturating_sub(4).min(110),
+            area.height.saturating_sub(2),
+        );
         frame.render_widget(Clear, modal);
         frame.render_widget(
-            Paragraph::new(text)
-                .block(Block::default().borders(Borders::ALL))
+            Block::default()
+                .title("START WORKSPACE")
+                .borders(Borders::ALL)
                 .style(Style::default().bg(app.theme.base).fg(app.theme.text)),
             modal,
         );
+        let inner = Rect::new(
+            modal.x + 2,
+            modal.y + 1,
+            modal.width.saturating_sub(4),
+            modal.height.saturating_sub(2),
+        );
+        let private = app.config.redact_labels;
+        let label = |value: &str| {
+            if private {
+                "[redacted]".into()
+            } else {
+                value.to_owned()
+            }
+        };
+        let (name_view, name_column) = input_view(
+            &app.launch.name,
+            app.launch.cursors[0],
+            inner.width.saturating_sub(15) as usize,
+        );
+        let (branch_view, branch_column) = input_view(
+            &app.launch.branch,
+            app.launch.cursors[1],
+            inner.width.saturating_sub(11) as usize,
+        );
+        let source = if app.active_batch.is_some() {
+            "Source Pinned batch (F3 new batch)"
+        } else if app.from_current {
+            "Base   Continue from current branch (F2 change)"
+        } else {
+            "Base   Independent task (F2 change)"
+        };
+        let mut lines = vec![
+            Line::from(format!(
+                "{} Short name: {}",
+                if app.launch.field == 0 { ">" } else { " " },
+                label(&name_view)
+            )),
+            Line::from(format!(
+                "{} Branch: {}",
+                if app.launch.field == 1 { ">" } else { " " },
+                label(&branch_view)
+            )),
+            Line::from(source),
+            Line::from(label(
+                &app.start_point
+                    .as_ref()
+                    .map(|p| format!("{} ({})", p.reference, &p.commit[..12]))
+                    .unwrap_or_else(|| app.start_error.clone().unwrap_or_default()),
+            )),
+            Line::from("Local ref; remote freshness unknown"),
+            Line::from(match &app.active_batch {
+                Some(b) => format!("Batch pinned · Destination {}", label(&b.destination)),
+                None => "Batch unknown · F3 choose source and destination".into(),
+            }),
+            Line::from(format!("Agent {} · F4 change", app.start_agent().label())),
+        ];
+        lines.push(Line::from("Tab fields · F5 text/file · F6 start"));
+        lines.push(Line::from("Enter newline · Esc cancel"));
+        let header = lines.len() as u16;
+        frame.render_widget(
+            Paragraph::new(lines),
+            Rect::new(inner.x, inner.y, inner.width, header.min(inner.height)),
+        );
+        let editor = Rect::new(
+            inner.x,
+            inner.y + header,
+            inner.width,
+            inner.height.saturating_sub(header),
+        );
+        let editor_text = label(task);
+        let editor_width = editor.width.saturating_sub(2).max(1) as usize;
+        // Explicit visual wrapping makes every task character reachable. Cursor
+        // navigation scrolls through the entire input instead of truncating it.
+        let (rows, row, col) = editor_rows(
+            &editor_text,
+            if private { 0 } else { app.launch.cursors[2] },
+            editor_width,
+        );
+        let visible = editor.height.saturating_sub(2).max(1) as usize;
+        let scroll = row.saturating_sub(visible - 1);
+        frame.render_widget(
+            Paragraph::new(rows.join("\n"))
+                .scroll((scroll as u16, 0))
+                .block(
+                    Block::default()
+                        .title(if app.launch.file {
+                            "Repository task file (agent reads it)"
+                        } else {
+                            "Task · arrows/Home/End/PgUp/PgDn edit/review"
+                        })
+                        .borders(Borders::ALL),
+                ),
+            editor,
+        );
+        if app.launch.field == 2 && editor.height > 2 && !private {
+            frame.set_cursor_position((
+                editor.x + 1 + col as u16,
+                editor.y + 1 + (row - scroll) as u16,
+            ));
+        }
+        if app.launch.field < 2 && !private && inner.width > 15 {
+            let (offset, col) = if app.launch.field == 0 {
+                (14, name_column)
+            } else {
+                (10, branch_column)
+            };
+            frame.set_cursor_position((
+                inner.x + offset + col as u16,
+                inner.y + app.launch.field as u16,
+            ));
+        }
+        if let Some(error) = &app.error {
+            frame.render_widget(
+                Paragraph::new(label(error))
+                    .style(Style::default().fg(app.theme.rose))
+                    .wrap(Wrap { trim: false }),
+                Rect::new(
+                    inner.x,
+                    inner.y + inner.height.saturating_sub(3),
+                    inner.width,
+                    3.min(inner.height),
+                ),
+            );
+        }
     } else if app.finishing
         && let Some(workspace) = app.selected_workspace()
     {
@@ -1017,17 +1281,6 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         Paragraph::new(lines).block(Block::default().title(" SELECTED ").borders(Borders::LEFT)),
         area,
     );
-}
-
-fn ellipsize(value: &str, width: usize) -> String {
-    let count = value.chars().count();
-    if count <= width {
-        return value.to_owned();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    value.chars().take(width - 1).chain(['…']).collect()
 }
 
 fn detail_line(label: &'static str, value: String, muted: ratatui::style::Color) -> Line<'static> {
@@ -1435,7 +1688,31 @@ Checkout: /repo/assembled"
     }
 
     #[test]
-    fn start_form_truncates_long_labels_inside_its_border() {
+    fn long_multiline_task_keeps_the_cursor_and_last_line_visible() {
+        for width in [48, 64, 80, 120, 160] {
+            let mut app = App::new(vec![], Variant::Moon, Config::default());
+            let task = (0..20)
+                .map(|n| format!("line {n:02}: private café 界\tinstructions for width {width}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            app.launch.cursors[2] = task.len();
+            app.launch.field = 2;
+            app.task = Some(task);
+            let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+            terminal.draw(|frame| render(frame, &app)).unwrap();
+            let content = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>();
+            assert!(content.contains("line 19:"), "width {width}: {content}");
+        }
+    }
+
+    #[test]
+    fn start_form_wraps_task_for_complete_review() {
         let mut app = App::new(vec![], Variant::Moon, Config::default());
         app.task = Some(
             "Audit workspace lifecycle and worktree edge cases; add regression tests and fix any failures"
@@ -1445,17 +1722,21 @@ Checkout: /repo/assembled"
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, &app)).unwrap();
 
-        let modal = centered(Rect::new(0, 0, 100, 24), 70, 15);
+        let modal = centered(Rect::new(0, 0, 100, 24), 96, 22);
         let buffer = terminal.backend().buffer();
         for y in [modal.y + 3, modal.y + 4] {
             assert_eq!(buffer.cell((modal.right() - 2, y)).unwrap().symbol(), " ");
         }
-        let content = (modal.y..modal.bottom())
-            .flat_map(|y| {
-                (modal.x..modal.right()).map(move |x| buffer.cell((x, y)).unwrap().symbol())
+        let content = (modal.y + 11..modal.bottom() - 2)
+            .map(|y| {
+                (modal.x + 3..modal.right() - 3)
+                    .map(|x| buffer.cell((x, y)).unwrap().symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
             })
             .collect::<String>();
-        assert!(content.contains('…'));
+        assert_eq!(content, app.task.as_deref().unwrap());
     }
     #[test]
     fn start_form_shows_base_commit_and_hides_it_when_redacted() {

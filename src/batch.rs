@@ -378,6 +378,21 @@ pub fn select(id: &str, window: &str) -> Result<(), Error> {
     tmux(&["set-option", "-w", "-t", window, "@drudwyn_batch", id])?;
     Ok(())
 }
+/// Initial launch already owns the exact checkout path. Verify project membership
+/// and repository from that path rather than reinterpreting tmux's display string.
+pub(crate) fn select_created(id: &str, window: &str, checkout: &Path) -> Result<(), Error> {
+    let batch = load(id)?;
+    let windows = tmux(&["list-windows", "-t", &batch.project, "-F", "#{window_id}"])?;
+    if !windows.lines().any(|w| w == window)
+        || coordinator::repository(checkout)? != batch.repository
+    {
+        return Err(invalid(
+            "Created worker does not belong to this batch project",
+        ));
+    }
+    tmux(&["set-option", "-w", "-t", window, "@drudwyn_batch", id])?;
+    Ok(())
+}
 impl Batch {
     pub fn display(&self, redacted: bool) -> String {
         if redacted {

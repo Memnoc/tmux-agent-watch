@@ -28,6 +28,11 @@ printf '%s' "$preview" | grep -Fq "Destination: trunk $initial"
 id="$("$BIN" batch setup --repo "$repo" --session "$session" --yes --expect-source "$initial" --expect-destination "$initial" | sed -n 's/^Batch: //p')"
 [ -n "$id" ]
 "$BIN" batch show "$id" | grep -Fq "Destination: trunk $initial"
+# Valid literal branch/path bytes must survive tmux's directory expansion.
+"$BIN" workspace start --repo "$repo" --batch "$id" --worktree-root "$TMP_DIR/workers" 'suffix-worker-literal-$value' sleep 90 >/dev/null
+literal_window="$(tmux list-windows -t "$session" -F '#{window_id}' | tail -1)"
+[ "$(readlink "/proc/$(tmux display-message -p -t "$literal_window" '#{pane_pid}')/cwd")" = "$TMP_DIR/workers/"'suffix-worker-literal-$value' ]
+printf 'ok: literal dollar-sign worker path launches in its intended checkout\n'
 # Ref movement and navigation cannot make siblings depend on earlier work.
 git -C "$repo" commit -qm moved --allow-empty
 for branch in one two three; do
@@ -38,7 +43,7 @@ for branch in one two three; do
     git -C "$repo" merge -qm integrated one
   fi
 done
-[ "$(tmux list-windows -t "$session" -F '#{@drudwyn_batch}' | grep -Fc "$id")" -eq 3 ]
+[ "$(tmux list-windows -t "$session" -F '#{@drudwyn_batch}' | grep -Fc "$id")" -eq 4 ]
 worker_pane="$(tmux list-panes -a -F '#{pane_id} #{pane_current_path}' | awk -v p="$TMP_DIR/workers/three" '$2 == p { print $1 }')"
 TMUX_PANE="$worker_pane" "$BIN" workspace start --repo "$TMP_DIR/workers/three" --worktree-root "$TMP_DIR/workers" navigated sleep 90 >/dev/null
 [ "$(git -C "$TMP_DIR/workers/navigated" rev-parse HEAD)" = "$initial" ]

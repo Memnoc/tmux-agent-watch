@@ -234,6 +234,60 @@ scripts/worktree-new.sh --from-current feature/dependent codex
 Without either flag, the CLI uses the configured base. These choices apply to
 the default Rust implementation; the legacy fallback retains its existing behavior.
 
+### Naming and instructing a worker (Rust v2)
+
+The launch form keeps **Short name**, **Branch**, and **Task** separate. The
+name (up to 64 characters) suggests the branch; editing the branch makes that
+choice independent. Task prose never becomes a branch or directory name. The
+form shows the batch's pinned source and integration destination.
+
+Use **Tab / Shift-Tab** between fields, **F4** to select the agent, and **F5**
+to switch between task text and a repository-relative task-file reference.
+The task editor accepts multiline bracketed paste and Enter for newlines.
+Arrow keys, Home/End, and Page Up/Page Down let you edit and review the complete
+input; Page Up/Down move to its beginning/end. Long tasks scroll within the
+form. Long names and branches scroll horizontally with their cursor.
+**F6 starts the worker and sends once**; Esc cancels before creation.
+
+Task files must be regular files available at the pinned source and inside the
+resulting worker checkout. An uncommitted planning file is not inherited:
+commit it and explicitly choose a new source, or paste its instructions. Drudwyn
+checks paths and Git tree metadata; the agent reads the selected file. Only the
+deliberately selected reference remains in live tmux metadata.
+
+The command interface supports the same single-action launch:
+
+```sh
+# The referenced file must exist in the chosen source commit.
+tmux-drudwyn workspace start --batch '$3/123-456' --name api \
+  --task-file tasks/api.md work/api codex
+
+# Text comes from stdin, never a prompt argument.
+cat instructions.txt | tmux-drudwyn workspace start --batch '$3/123-456' \
+  --name api --task-stdin work/api codex
+```
+
+Creation and transmission have separate results: **not sent**, **sent**, or
+**uncertain**. A sent result means paste and submission succeeded; agent acceptance
+and implementation remain unknown. Supported agent executable observation is
+bounded to three seconds and does not inspect terminal content or prove editor
+readiness. A delayed/unrecognized process leaves the worker and checkout intact.
+Inspect that pane before deliberately delivering again:
+
+```sh
+cat instructions.txt | tmux-drudwyn workspace deliver-task @42
+tmux-drudwyn workspace deliver-task @42 --task-file tasks/api.md
+# Only after inspecting a prior sent/uncertain attempt:
+cat instructions.txt | tmux-drudwyn workspace deliver-task @42 --retry
+```
+
+Delivery targets the original pane/process even when a different split is active.
+A changed process is refused. Failed or uncertain sends never restart the worker,
+remove its checkout, or automatically resend. Transient buffers are removed on
+success and failure; task text is discarded after the attempt. To retry text,
+supply it again; there is no prompt history. Worker creation does not change either
+terminal's selection or replace the coordinator. Open the reported worker to inspect.
+
 ### Failed worker starts (Rust v2)
 
 A failed start reports the retained worktree path and branch. Once tmux may have
