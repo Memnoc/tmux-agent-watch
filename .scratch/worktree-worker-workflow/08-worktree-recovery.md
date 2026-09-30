@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/2026-09-30-worktree-worker-workflow.md
 
-**Status:** done
+**Status:** done — independently reviewed through `bd2617b`; Standards and Spec clear of blockers
 
 **What to build:** Cockpit exposes surviving worktrees for known repositories
 and allows reopening a shell or deliberately restarting an instructed worker.
@@ -139,3 +139,55 @@ The implementation stays on `work/worktree-worker-workflow`; `main` remains
   correction scenarios passed; independent re-review is not self-cleared.
 
 Independent re-review remains pending after this correction commit.
+
+## Independent final crosscheck receipt — 2026-09-30
+
+Reviewed `git diff 918f088...bd2617b`, including the correction diff
+`6d6d387...bd2617b`, against this ticket, the originating specification and
+implementation plan, CONTRIBUTING.md, CONTEXT.md, privacy documentation and
+the applicable accepted ADRs. Standards and Spec were reviewed sequentially
+under the implementation workflow. The independent reviewer session was reused
+because of the harness thread limit; it reported both original P2 findings and
+did not implement the ticket or its corrections.
+
+Standards: no blocking violation or new material smell found. Existing checkout
+recovery never enters allocation cleanup. The shared launcher retains the
+original pane/process/checkout delivery binding for agents, while shells have
+no agent delivery state. Path and task-reference encodings remain non-content
+live metadata; no task contents, conversation recovery, durable registry or
+filesystem crawl is introduced. Coordinator mutations explicitly receive the
+existing guard, including inheritance by outstanding mutation children; the
+checkout-before-socket order has no reverse coordinator acquisition.
+
+Spec: no outstanding ticket-08 finding. Surviving checkouts, live windows and
+retained stopped panes remain distinct. Open shell and instructed fresh restart
+preserve existing dirty/untracked work and explain missing history. Explicit
+batch choice and deliberate retained-reference reuse do not invent historical
+association. Unavailable resources and competing creations produce retained,
+inspectable failures. Both original P2s are corrected: an intervening coordinator
+selection wins over a pending recovery, and Cockpit resolves a selected ordinary
+agent's literal checkout without treating an escaped display label as a path.
+A vanished selected pane produces an explicit error without borrowing another
+repository. Later global Cockpit, status-bar and integration tickets were not
+treated as missing recovery scope.
+
+Independent frozen-code validation: all 17 recovery integration cases passed
+in 24.243 seconds; log `/tmp/drudwyn-review08-final-recovery.log`. This includes
+the original 12 cases plus distinct-checkout coordinator competition, manual
+selection, orphaned mutation/bounded retry, literal-path UI recovery and vanished
+selection. Both original reproductions were rerun with corrected assertions:
+`/tmp/drudwyn-review08-coordinator-final.py` confirms an explicit conflict,
+unchanged chosen coordinator and preserved new window/checkout;
+`/tmp/drudwyn-review08-literal-final.py` confirms recovery inventory opens for
+`repo $literal` despite tmux displaying its cwd with an escaped dollar. Fixtures
+used disposable repositories, isolated tmux clients and verified fake agents.
+No real installed agent or live user server was used.
+
+The builder's fmt/Rust receipts and frozen full-suite log
+`/tmp/drudwyn-ticket08-corrections-final-suite.log` were inspected; those gates
+were not redundantly rerun or claimed as reviewer-owned full-suite evidence.
+The optional Resurrect skip remains. `git diff --check` passed; the tree was clean
+before this receipt and `main` remained
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`. Runtime evidence is Linux-only;
+other platforms retain the documented known-identity/tmux-cwd fallback and were
+not exercised. This commit changes only the ticket status and review receipt.
