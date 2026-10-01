@@ -171,3 +171,47 @@ receipt followed the passing gates. Runtime evidence remains Linux/tmux 3.4;
 other-platform/lsof behavior and unobservable external writers are not certified.
 No push, deployment, branch deletion, main integration or live user fixture was
 performed. Main remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+## Independent Northstar crosscheck — 2026-10-01
+
+Reviewed `6f69f7fd719d6bdd4b359f0b52890687b8dfabf5` through implementation
+commit `f4328fc7100baca60948aed12db478bc63418682`, running Standards and Spec
+sequentially under the implement-all override. Sources were CONTRIBUTING,
+CONTEXT, the privacy boundary, ADR0002/0003/0005/0006/0007, this ticket and its
+originating spec. All 14 implementation, test and documentation file hashes
+match the reviewed corrected candidate; only this ticket's completion/gate
+receipt changed after that freeze.
+
+**Standards: clear — 0 severe, 1 deferred judgement call.** No hard documented
+standard violation remains. Possible Duplicated Code: the shell executable-name
+list is repeated in process classification and the final window-closure check.
+A shared classification helper could reduce future maintenance drift. This is
+a nonblocking heuristic, not a requirement to broaden this ticket.
+
+**Spec: clear — 0 unresolved severe findings.** The independent public
+reproduction found that an active Bash builtin wait loop was incorrectly treated
+as idle, allowing both checkout removal and window closure. The correction now
+refuses preview and removal while preserving that checkout and running window.
+Reviewer evidence is `/tmp/drudwyn-review14-shell-{before,after}.log`; the unchanged
+reproduction is `/tmp/drudwyn-review14-shell-repro.py`. Regression coverage includes
+interactive/noninteractive shell builtins and invoking-shell background children
+that change cwd. Explicitly stopped panes retain the mixed/coordinator/linked
+window and session safety coverage. Independent promotion verification and
+server-side pane/role/session-change checks also passed.
+
+Final evidence inspected: formatting, all 41 Rust tests, and the complete
+shell/Python suite passed in `/tmp/drudwyn-ticket14-final-{fmt,rust,full}.log`.
+The full run includes all 15 promotion/cleanup cases in 21.849s and the updated
+Global same-name replacement regression. The existing optional Resurrect skip
+remains. Matching reviewed hashes required no redundant full-suite run.
+
+Runtime evidence is Linux/tmux 3.4. Native macOS and its metadata-only lsof path
+remain unverified; the portable process snapshot may conservatively refuse a
+source-shell invocation because a completed probe still appears in its earlier
+snapshot. This is a portability limitation to validate, not evidence of unsafe
+removal. Unobservable outside writers and future external mutations remain
+outside the documented observation guarantee.
+
+This receipt changes only ticket14. Main remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`; no runtime edits, branch integration,
+push or live user fixture were part of the independent review.
