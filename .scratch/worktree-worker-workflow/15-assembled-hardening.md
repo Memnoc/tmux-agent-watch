@@ -78,3 +78,51 @@ release gates remain unverified and are not accepted as shipped. The repository'
 `main` remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`; no push or deployment.
 The final independent Standards/Spec receipt follows separately. Prior receipt
 string and repeated shell-classification maintenance judgments remain nonblocking.
+
+## Independent Northstar crosscheck — 2026-10-01
+
+Reviewed `adb574093a80421caabee73945424246ed3dc568` through implementation
+commit `d5571cbfb46747801a6e9e01475c7ab16d4ec62b`, running Standards and Spec
+sequentially under the implement-all override. Sources were CONTRIBUTING,
+CONTEXT, the privacy boundary, ADR0002/0003/0005/0006/0007, this ticket, the
+approved breakdown and all 22 originating user stories. All seven production
+and test file hashes match the independently reviewed corrected candidate.
+The final report, spec Verification and queue accurately retain the evidence
+and release limitations.
+
+**Standards: clear — 0 severe, 0 new judgement calls.** The scoped rendering
+changes and acceptance harness preserve the documented stateless, content-blind
+boundary and reuse the real Git/tmux command and terminal seams. Earlier
+nonblocking maintenance observations remain: ticket13 receipt strings
+(possible Primitive Obsession), and ticket14 repeated shell classification
+(possible Duplicated Code).
+
+**Spec: clear — 0 unresolved severe findings.** Independent execution reproduced
+the cosmetic regression that erased long selected-shell/coordinator context at
+64/80 columns. The fresh fix session corrected the fallback without inventing
+activity. The unchanged public reproduction now preserves COORD and the bounded
+name; independently decoded ANSI also confirms ordinary-shell and redacted
+coordinator behavior. Evidence is in
+`/tmp/drudwyn-ticket15-independent-context-after.log` and the recorded
+long-context red/green logs and terminal artifacts. No failing case was omitted
+from the final report.
+
+The independent direct-to-base release scenario passed in 12.104s; its log is
+`/tmp/drudwyn-ticket15-independent-direct.log`. The harness selects the actual
+release binary through `scripts/v2.sh`, loads the plugin, verifies controlled
+agent executables, and uses disposable real Git repositories and two attached
+tmux clients. Recovery and cleanup use observed exited panes, not invented
+exit receipts. Both destination scenarios passed in the builder's final frozen
+run (24.641s). Final logs confirm 41 Rust tests and the complete shell/Python,
+privacy, packaging and release checks: 212 Python cases, 211 passed and one
+existing optional Resurrect skip. Runtime hash equality required no duplicate
+full-suite execution. The 22-story tables match the spec verbatim; recorded
+terminal artifacts and 36-worker timings are real runtime evidence.
+
+Acceptance remains scoped to Linux x86_64 / tmux 3.4. Native macOS/ARM64,
+real third-party service sessions and manual release-artifact observations are
+unverified, not accepted as shipped. The previously noted conservative
+non-Linux source-shell Finish veto remains a portability limitation to validate.
+This receipt changes only ticket15; no production edits, branch integration,
+push or live user fixtures were part of the independent review. Main remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
