@@ -172,3 +172,62 @@ All fixtures were disposable Git/tmux with verified fake executables; runtime
 coverage remains Linux/tmux3.4. Independent final-SHA confirmation is pending.
 No ticket13+ work or push was performed; `main` remains
 `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+### Independent final crosscheck receipt — 2026-10-01
+
+Reviewed fixed full-ticket range
+`a0075def1b75fc7e2f053d59cf0537f6b3353bc9..fd83bfaaad507b9e09fd47a8a13bca0c592bd4ad`,
+including the correction from `9be2e544e2ad08f78648b459c95e18cfb895fa14`.
+Standards and Spec were reviewed sequentially by an independent reviewer under
+implement-all, without nested agents or production edits. Sources: CONTRIBUTING,
+CONTEXT, privacy, ADR0005, the originating workflow spec and ticket plan, this
+ticket, and the crosscheck skill's standards/smell baseline.
+
+Standards: no unresolved severe finding or material judgement call. Expected
+operation metadata, ordinary coordinator lifetime/checkout binding, transient
+handoff, guarded recovery ownership, and client-local navigation preserve the
+existing boundaries. Managed task delivery remains separately guarded. Continue
+and Abort retain normal Git behavior and mutation-child destination locking;
+no conflict contents, task history, hidden solver, or verification claims were
+introduced. Prior explicit merge options and checkout environment isolation remain.
+
+Spec: the severe ignored-file overwrite found in the first review is resolved.
+The independent public-seam reproduction renamed target directory `old` to `new`
+while the source added `old/incoming`; Git replaced ignored `new/incoming` bytes
+with source bytes despite the original guard. Evidence:
+`/tmp/drudwyn-review12-directory-rename.log`. Rerunning the unchanged reproduction
+against the correction now refuses before mutation, preserves the original bytes
+and HEAD, and leaves clean status. Evidence:
+`/tmp/drudwyn-review12-directory-rename-corrected.log`. The corrected byte-safe
+filename guard covers direct and conservatively relocated paths in both directions.
+Its possible conservative refusals are documented; it does not claim to predict
+Git's directory-rename result or inspect file similarity/content.
+
+Five focused correction tests passed in 7.757s, including both directions with
+exact/prefix/nested/flattened outputs, split/partial candidates, differing rename
+configuration, preserved unrelated ignored files, and normal merging after removal
+of only the collision. Evidence: `/tmp/drudwyn-review12-correction-focused.log`.
+The final production/test/documentation diff matches the saved reviewed candidate
+exactly. The additional narrow-UI test change only waits within the existing bound
+for the resized footer, then checks redaction and both controls; its settled
+terminal capture and final passing suite were inspected.
+
+Ten other frozen-ticket focused checks passed in 22.935s: ordinary coordinator
+single-send, replaced operation rejection, external completion/abort reconciliation,
+process replacement after paste, orphan Git-child locking, stale completed receipt
+isolation, actual agent recovery/retry/client navigation, narrow redacted
+Continue/Abort, and direct/prefix ignored collisions. Evidence:
+`/tmp/drudwyn-review12-focused.log`. Actual narrow/redacted and recovered-agent
+terminal captures were inspected. No further Standards or Spec findings remain.
+
+Builder final frozen-gate logs were inspected rather than duplicating the full
+suite: `/tmp/drudwyn-ticket12-rename-rust.log` (41 Rust tests), and
+`/tmp/drudwyn-ticket12-rename-full-final.log` (integration20, conflict17, launch15,
+recovery17, Global11, status11, activity39, clients29, navigator13 with one existing
+optional Resurrect skip, settings10, and shell/privacy/packaging/release gates).
+All independent fixtures used disposable Git/tmux and verified fake agents only.
+Runtime evidence is Linux/tmux3.4; other platforms remain unverified.
+
+Final clearance: Standards 0 unresolved severe / 0 material judgement calls;
+Spec 0 unresolved findings. This commit changes only this review receipt;
+`main` remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
