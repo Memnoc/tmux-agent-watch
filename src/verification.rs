@@ -152,7 +152,7 @@ fn alive(binding: &str) -> bool {
         .split_once(':')
         .is_some_and(|(pid, birth)| pid.parse().ok().and_then(lifetime).as_deref() == Some(birth))
 }
-fn binding(pid: u32) -> Result<String, Error> {
+pub(crate) fn binding(pid: u32) -> Result<String, Error> {
     Ok(format!(
         "{pid}:{}",
         lifetime(pid).ok_or_else(|| invalid("Verification runner lifetime unavailable"))?

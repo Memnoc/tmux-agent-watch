@@ -71,8 +71,10 @@ Use the session navigator to find a session, the workspace navigator to find a w
 
 <img src="images/design/lifecycle-flow.png" alt="Lifecycle flow diagram: start task creates a worktree, the agent moves to working, then needs attention when waiting or failed, then review when idle and ready, then finish safely once clean and merged">
 
-Finish refuses primary checkouts, dirty worktrees, and branches not integrated
-into the configured base branch.
+Finish refuses primary checkouts, dirty worktrees, active writers, and branches
+not contained in the chosen destination. A worker's live batch supplies that
+destination; an unassociated worker requires an explicit choice. The legacy
+shortcut uses the configured base when no live batch is attached.
 
 ### Global Cockpit (Rust v2)
 
@@ -106,6 +108,9 @@ exit alone does not establish failure or task completion.
 | `d` | Full details; arrows or `PgUp/PgDn` scroll, `d` or `Esc` returns |
 | `c` | Open the selected project's coordinator |
 | `i` | Preview worker integration into its live batch or an explicit destination |
+| `P` | Preview promotion of the selected batch's assembly (or selected checkout) into the base |
+| `C` / `V` | Conflict controls / explicit assembled checks |
+| `f` | Preview and confirm safe worktree removal; preserve its branch |
 | `r` | Refresh the snapshot |
 
 `*` marks the invoking client's current window; `>` marks the row being
@@ -766,3 +771,72 @@ to Not verified even if Git ancestry still proves integration. No output,
 commands, or historical registry are retained. Check/path/revision labels in
 Drudwyn displays honor label redaction; your explicitly run program controls its
 own visible terminal output.
+
+### Promote an assembly and finish workers (Rust v2)
+
+Promotion is a separate deliberate merge. Press **P** inside Cockpit: the selected
+worker's own live batch supplies its assembly checkout; without a batch, the
+selected checkout is the source. The configured base appears in the fresh preview.
+Use **e** to choose another base, **y** to apply the reviewed state, or **Esc** to
+cancel. It uses the same fast-forward/normal merge, stale-ref, ignored-file,
+conflict, Continue/Abort and destination locking rules as Integrate. A source
+already contained in the base is a no-op. No worker-completion event promotes it.
+
+```sh
+tmux-drudwyn workspace promote --path /path/to/assembly --base main
+# Inspect source, target checkout, both commits and the fresh token first.
+tmux-drudwyn workspace promote --path /path/to/assembly --base main --apply TOKEN
+```
+
+The preview and result show the base checkout's own live verification evidence.
+A successful assembly check never transfers to the base. A new base revision
+makes an earlier base receipt stale; use **V** with that actual base checkout,
+or `workspace verify --path /path/to/base`, to select its checks explicitly.
+Promotion retains all worktrees and branches and neither pushes nor deploys.
+
+Press **f** to review Finish. The selected worker's batch supplies the chosen
+destination. Missing metadata opens destination entry; another batch's target is
+never borrowed. **y** confirms removal; **e** edits the destination; **Esc** cancels.
+Explicitly exit surviving worker shells before Finish; retained exited panes remain
+inspectable. Use **w** to include non-worker windows. Command users
+can select a batch or branch; `--base` remains an alias for `--destination`:
+
+```sh
+tmux-drudwyn workspace finish --path /path/to/worker --batch '$3/123-456' --preview
+tmux-drudwyn workspace finish --path /path/to/worker --batch '$3/123-456' --apply TOKEN --yes
+# Without --preview, confirmation includes the current source and destination.
+tmux-drudwyn workspace finish --path /path/to/worker --destination main
+```
+
+Finish requires a linked, attached, clean checkout with no untracked **or ignored**
+files or unresolved Git operation. Its current branch commit must be contained
+in the chosen destination branch. Unrelated primary-checkout HEAD ancestry is
+insufficient. Changed refs or directory identities invalidate the preview. Removal
+uses normal Git without force; failure preserves windows and the branch for
+inspection, and repeats report that the checkout is unavailable after removal.
+
+Stop agents, commands and other worker shells explicitly first. A shell may be
+waiting in a builtin while still owning pending work, so its executable name and
+lack of child processes never prove it idle. Review state does not prove that a
+writer stopped. Finish observes live process executable/ancestry/lifetime and
+working-directory metadata: associated panes and their descendants, plus readable
+outside-process working directories. It refuses known possible writers and
+unreadable associated process identity; unrelated protected session daemons do not
+authorize or block removal. This is scoped observation, not global proof about
+processes whose cwd is unobservable, processes using absolute paths from elsewhere,
+or an external process starting between observations. Confirmation includes that
+limit. Only the current synchronous invocation and its contiguous shell ancestors are
+exempt; their background children are still checked. An agent or editor invoking
+Finish is still checked. On Linux it uses `/proc`; hosts without
+`/proc` require `lsof` cwd metadata, otherwise Finish refuses. Runtime validation
+for this feature currently covers Linux/tmux 3.4.
+
+Successful cleanup retains the branch. It closes only unchanged windows whose
+panes all belonged to the removed checkout, rechecking pane process births and cwd
+inodes. It preserves coordinator windows across sessions, mixed windows, the
+invoking pane's window, and any session's last window. A preserved shell that used
+the removed directory may need a deliberate `cd` elsewhere. Unrelated linked
+windows and sessions stay open. Source and destination directory guards survive
+in the removal child after supervisor death; an orphaned operation can therefore
+require waiting before retry. No cleanup path deletes branches, pushes, deploys,
+or claims shipment.

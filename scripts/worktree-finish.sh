@@ -6,6 +6,13 @@ PLUGIN_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 v2="$(tmux show-option -gqv @drudwyn-v2 2>/dev/null || true)"
 if [ "${v2:-on}" = on ]; then
   base="$(tmux show-option -gqv @drudwyn-base-branch 2>/dev/null || true)"
+  batch=""
+  if [ -n "${TMUX_PANE:-}" ]; then
+    batch="$(tmux show-option -wqv -t "$TMUX_PANE" @drudwyn_batch 2>/dev/null || true)"
+  fi
+  if [ -n "$batch" ]; then
+    exec "$PLUGIN_DIR/scripts/v2.sh" workspace finish --path "$(pwd)" --batch "$batch"
+  fi
   exec "$PLUGIN_DIR/scripts/v2.sh" workspace finish --path "$(pwd)" --base "${base:-main}"
 fi
 

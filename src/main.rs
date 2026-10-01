@@ -209,6 +209,16 @@ enum WorkspaceCommand {
         #[arg(long)]
         apply: Option<String>,
     },
+    /// Explicitly promote an assembled branch to a selected base, with fresh review.
+    Promote {
+        #[arg(long)]
+        path: PathBuf,
+        /// Existing checked-out local base branch; never inferred from another batch.
+        #[arg(long)]
+        base: String,
+        #[arg(long)]
+        apply: Option<String>,
+    },
     /// Inspect a retained merge; resolve through the coordinator, Continue or Abort.
     Conflict {
         #[arg(long)]
@@ -293,8 +303,22 @@ enum WorkspaceCommand {
     Finish {
         #[arg(long, default_value = ".")]
         path: PathBuf,
-        #[arg(long, default_value = "main")]
-        base: String,
+        /// Explicit destination branch; --base remains a compatibility alias.
+        #[arg(
+            long,
+            visible_alias = "base",
+            required_unless_present = "batch",
+            conflicts_with = "batch"
+        )]
+        destination: Option<String>,
+        #[arg(long)]
+        batch: Option<String>,
+        /// Inspect eligibility and a comparison token without prompting/removal.
+        #[arg(long, conflicts_with_all = ["yes", "apply"])]
+        preview: bool,
+        /// Remove only if this reviewed source/destination is unchanged.
+        #[arg(long)]
+        apply: Option<String>,
         #[arg(long)]
         yes: bool,
     },
@@ -607,6 +631,31 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     )?
                 );
             }
+            WorkspaceCommand::Promote { path, base, apply } => {
+                use tmux_drudwyn::integration::{self, Destination, Request};
+                let redact = Config::load_tmux()?.redact_labels;
+                let preview = integration::preview(Request {
+                    source: path,
+                    destination: Destination::Branch(base),
+                })?;
+                if let Some(token) = apply {
+                    if token != preview.token {
+                        return Err(
+                            "Source or destination changed after preview; review again".into()
+                        );
+                    }
+                    println!("{}", integration::apply(&preview)?);
+                } else {
+                    print!("PROMOTE PREVIEW\n{}", preview.display(redact));
+                    println!(
+                        "Preview only; --apply TOKEN explicitly promotes. No push or deployment."
+                    );
+                }
+                println!(
+                    "Destination verification:\n{}",
+                    tmux_drudwyn::verification::inspect(&preview.target.path, redact)?
+                );
+            }
             WorkspaceCommand::Integrate {
                 path,
                 batch,
@@ -759,8 +808,62 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     println!("Task sent; acceptance and implementation unknown");
                 }
             }
-            WorkspaceCommand::Finish { path, base, yes } => {
-                println!("{}", workspace::finish(&path, &base, yes)?.display())
+            WorkspaceCommand::Finish {
+                path,
+                destination,
+                batch,
+                preview,
+                apply,
+                yes,
+            } => {
+                use tmux_drudwyn::{
+                    cleanup,
+                    integration::{Destination, Request},
+                };
+                let redact = Config::load_tmux()?.redact_labels;
+                let destination = match batch {
+                    Some(id) => Destination::Batch(id),
+                    None => {
+                        Destination::Branch(destination.ok_or("Choose a destination or batch")?)
+                    }
+                };
+                let reviewed = cleanup::preview(Request {
+                    source: path,
+                    destination,
+                })?;
+                if let Some(token) = &apply {
+                    if token != &reviewed.token {
+                        return Err(
+                            "Source or destination changed after preview; review again".into()
+                        );
+                    }
+                }
+                if preview {
+                    print!("{}", reviewed.display(redact));
+                } else {
+                    if !yes {
+                        use std::io::Write;
+                        eprint!(
+                            "{}Remove this linked worktree, retaining its branch? [y/N] ",
+                            reviewed.display(redact)
+                        );
+                        std::io::stderr().flush()?;
+                        let mut answer = String::new();
+                        std::io::stdin().read_line(&mut answer)?;
+                        if !matches!(answer.trim(), "y" | "Y" | "yes" | "YES") {
+                            return Err("cancelled".into());
+                        }
+                    }
+                    let removed = cleanup::apply(&reviewed)?;
+                    println!(
+                        "{}",
+                        if redact {
+                            "[redacted]".into()
+                        } else {
+                            removed.display().to_string()
+                        }
+                    );
+                }
             }
             WorkspaceCommand::DeliverTask {
                 window_id,

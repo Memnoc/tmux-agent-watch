@@ -1,6 +1,7 @@
 pub mod ambient;
 pub mod batch;
 mod brand;
+pub mod cleanup;
 pub mod cockpit;
 pub mod config;
 pub mod coordinator;

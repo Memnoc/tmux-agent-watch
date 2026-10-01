@@ -21,7 +21,7 @@ for sensitive or organisational workflows without a separate assessment.
 |-------------|-------------------|----------|---------|
 | tmux session, window, and pane IDs, explicit project/coordinator association | route navigation and lifecycle updates | current command or tmux session | internal routing and click map |
 | tmux socket path and socket-directory inode | serialize lifecycle snapshots and updates | current command and outstanding mutation child | internal synchronization |
-| process executable name, PID, parent PID, process birth time/state, and derived agent kind | identify Codex, Claude Code, or OpenCode and bind evidence to its lifetime | current scan or tmux session | agent symbol and label |
+| process executable name, UID, PID, parent PID, process birth time/state, and derived agent kind | identify Codex, Claude Code, or OpenCode and bind evidence to its lifetime | current scan or tmux session | agent symbol and label |
 | working directory, Git repository/common directory, worktree, and branch | identify workspaces and enforce safe start/finish | current command or tmux session | cockpit/sidebar unless redacted |
 | batch ID, pinned source ref/commit, destination branch/starting commit/checkout | keep sibling launches and integration choices explicit | current tmux session only | batch commands and Cockpit unless redacted |
 | clean/dirty state, refs/commit IDs, changed-file names and merge ancestry | preview/integrate reviewed commits and prevent unsafe worktree removal | current command | fixed readiness state |
@@ -183,3 +183,29 @@ potential personal data and assess access, employee notice or consultation,
 lawful basis, and any DPIA requirements for their own deployment. Employee
 scoring, performance monitoring, and decisions about people are outside this
 project's intended purpose.
+
+
+Explicit promotion shares integration's content-blind preview, mutation guard,
+conflict receipt and verification boundaries. It creates no promotion registry
+and copies no verification evidence between checkouts.
+
+Finish keeps only an ephemeral comparison token for the selected source/destination
+refs, commits and directory identities. It observes process UID/executable, ancestry,
+birth and cwd metadata to veto known writers; Linux uses `/proc`, with metadata-only
+`lsof -a -u UID -d cwd -F0pn` on hosts without it. It never requests process argv,
+environment values, open-file contents or terminal content. Observation covers
+associated pane/process descendants and readable outside cwd metadata; unrelated
+protected process cwd and unobserved external changes are not certified. Only the current synchronous invocation's shell ancestry is exempt; other source
+shells, including builtin-only waiting loops, remain potential writers. Calling
+agents/editors and background children are not exempt. No process is stopped as a
+precondition of removal. Tracked/untracked/ignored filename metadata and Git
+operations are checked without file contents.
+
+Cleanup locks the existing source and destination (or Git common directory when
+the destination branch has no checkout). The Git removal child inherits both
+descriptors, so parent death cannot release an ongoing removal. After successful
+Git removal, the existing lifecycle guard serializes coordinator-role checks and
+window closure; it is never held during Git. Closure rechecks stable pane IDs,
+process births and cwd inodes, and a tmux-side pane-set comparison prevents a newly
+split/replaced pane being swept into the removal. No branch deletion, force
+removal, durable receipt, push or deployment is added.

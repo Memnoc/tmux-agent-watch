@@ -40,6 +40,7 @@ const COCKPIT_ACTIONS: &[(&str, &str)] = &[
     ("b", "Batch setup"),
     ("c", "Coordinator"),
     ("i", "Integrate"),
+    ("P", "Promote"),
     ("C", "Conflict"),
     ("V", "Verify"),
     ("f", "Finish"),
@@ -57,8 +58,6 @@ const FILTER_ACTIONS: &[(&str, &str)] = &[
     ("Backspace", "Delete"),
     ("Enter/Esc", "Done"),
 ];
-const FINISH_ACTION: &[(&str, &str)] = &[("y", "Finish")];
-const FINISH_CANCEL_ACTION: &[(&str, &str)] = &[("n/Esc", "Cancel")];
 
 #[derive(Debug, Error)]
 pub enum CockpitError {
@@ -85,7 +84,6 @@ pub struct App {
     batch_form: Option<BatchForm>,
     recovery: Option<RecoveryForm>,
     batches: HashMap<String, String>,
-    finishing: Option<(String, String, PathBuf)>,
     integration: Option<IntegrationForm>,
     conflict: Option<ConflictForm>,
     verification: Option<VerificationForm>,
@@ -140,14 +138,35 @@ struct ConflictForm {
     scroll: u16,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CheckoutAction {
+    Integrate,
+    Promote,
+    Finish,
+}
+enum ActionPreview {
+    Merge(crate::integration::Preview),
+    Removal(crate::cleanup::Preview),
+}
+impl ActionPreview {
+    fn display(&self, redact: bool) -> String {
+        match self {
+            Self::Merge(p) => p.display(redact),
+            Self::Removal(p) => p.display(redact),
+        }
+    }
+}
 struct IntegrationForm {
+    action: CheckoutAction,
+    anchor: PathBuf,
+    verification: String,
     window: String,
     pane: String,
     source: PathBuf,
     fields: [String; 2],
     cursors: [usize; 2],
     field: usize,
-    preview: Option<crate::integration::Preview>,
+    preview: Option<ActionPreview>,
     result: Option<String>,
     error: Option<String>,
     scroll: u16,
@@ -185,7 +204,6 @@ impl App {
                 .iter()
                 .position(|agent| *agent == config.default_agent)
                 .unwrap_or(0),
-            finishing: None,
             integration: None,
             conflict: None,
             verification: None,
@@ -340,7 +358,7 @@ impl App {
         }
     }
 
-    fn begin_integration(&mut self) {
+    fn begin_integration(&mut self, action: CheckoutAction) {
         let Some(w) = self.selected_workspace() else {
             self.error = Some("Select an available worker before integration".into());
             return;
@@ -355,25 +373,51 @@ impl App {
             }
         };
         let selected = batch::for_window(&window);
-        let id = selected
+        let mut id = selected
             .as_ref()
             .ok()
             .and_then(|b| b.as_ref())
             .map(|b| b.id.clone())
             .unwrap_or_default();
+        let anchor = source.clone();
+        let mut source = source;
+        let mut branch = String::new();
+        if action == CheckoutAction::Promote {
+            // A worker's own live batch supplies the assembled source. No
+            // unrelated batch is searched when metadata is absent or stale.
+            if let Ok(Some(batch)) = &selected {
+                match crate::integration::batch_destination(batch) {
+                    Ok(target) => source = target.path,
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                        return;
+                    }
+                }
+            } else if selected.is_err() {
+                self.error = Some(
+                    "Selected batch unavailable; explicitly reselect the assembled checkout".into(),
+                );
+                return;
+            }
+            id.clear();
+            branch = self.config.base_branch.clone();
+        }
         self.integration = Some(IntegrationForm {
+            action,
+            anchor,
+            verification: String::new(),
             window,
             pane,
             source,
-            fields: [String::new(), id.clone()],
-            cursors: [0, id.len()],
+            fields: [branch.clone(), id.clone()],
+            cursors: [branch.len(), id.len()],
             field: 0,
             preview: None,
             result: None,
             error: selected.err().map(|e| e.to_string()),
             scroll: 0,
         });
-        if !id.is_empty() {
+        if !id.is_empty() || !branch.is_empty() {
             self.integration_preview();
         }
     }
@@ -393,14 +437,30 @@ impl App {
                 return;
             }
         };
-        match crate::integration::preview(crate::integration::Request {
+        let request = crate::integration::Request {
             source: form.source.clone(),
             destination,
-        }) {
-            Ok(preview) => form.preview = Some(preview),
+        };
+        let preview = if form.action == CheckoutAction::Finish {
+            crate::cleanup::preview(request).map(ActionPreview::Removal)
+        } else {
+            crate::integration::preview(request).map(ActionPreview::Merge)
+        };
+        match preview {
+            Ok(preview) => {
+                if let ActionPreview::Merge(p) = &preview {
+                    form.verification =
+                        crate::verification::inspect(&p.target.path, self.config.redact_labels)
+                            .unwrap_or_else(|_| {
+                                "Not verified · destination evidence unavailable".into()
+                            });
+                }
+                form.preview = Some(preview);
+            }
             Err(error) => form.error = Some(error.to_string()),
         }
     }
+
     fn integration_edit(&mut self, key: KeyCode, paste: Option<&str>) {
         if let Some(form) = &mut self.integration {
             if form.preview.is_none() {
@@ -427,20 +487,48 @@ impl App {
             match key {
                 KeyCode::Char('y') if form.result.is_none() && form.error.is_none() => {
                     let current = crate::recovery::selected_checkout(&form.window, &form.pane);
-                    if !current.is_ok_and(|path| path == form.source) {
-                        form.error = Some("Pending Integrate target changed or disappeared; cancel and inspect again".into());
+                    if !current.is_ok_and(|path| path == form.anchor) {
+                        let action = match form.action {
+                            CheckoutAction::Integrate => "Integrate",
+                            CheckoutAction::Promote => "Promote",
+                            CheckoutAction::Finish => "Finish",
+                        };
+                        form.error = Some(format!(
+                            "Pending {action} target changed or disappeared; cancel and inspect again"
+                        ));
                         return;
                     }
-                    match crate::integration::apply(form.preview.as_ref().unwrap()) {
-                        Ok(result) => form.result = Some(result.into()),
+                    let result = match form.preview.as_ref().unwrap() {
+                        ActionPreview::Merge(preview) => {
+                            crate::integration::apply(preview).map(str::to_owned)
+                        }
+                        ActionPreview::Removal(preview) => {
+                            crate::cleanup::apply(preview).map(|_| {
+                                "Removed worktree; branch retained. No push or deployment.".into()
+                            })
+                        }
+                    };
+                    match result {
+                        Ok(result) => {
+                            form.result = Some(result);
+                            if let Some(ActionPreview::Merge(p)) = &form.preview {
+                                form.verification = crate::verification::inspect(
+                                    &p.target.path,
+                                    self.config.redact_labels,
+                                )
+                                .unwrap_or_else(|_| {
+                                    "Not verified · destination evidence unavailable".into()
+                                });
+                            }
+                        }
                         Err(error) => {
                             form.error = Some(error.to_string());
-                            let path = form.preview.as_ref().unwrap().target.path.clone();
-                            if crate::integration::active_conflict_for(
-                                form.preview.as_ref().unwrap(),
-                            ) {
-                                self.begin_conflict(Some(path));
-                                return;
+                            if let Some(ActionPreview::Merge(p)) = &form.preview {
+                                if crate::integration::active_conflict_for(p) {
+                                    let path = p.target.path.clone();
+                                    self.begin_conflict(Some(path));
+                                    return;
+                                }
                             }
                         }
                     }
@@ -1341,33 +1429,6 @@ fn event_loop(
             }
             continue;
         }
-        if app.finishing.is_some() {
-            match key.code {
-                KeyCode::Char('y') => {
-                    if let Some((window, pane, path)) = app.finishing.take() {
-                        match crate::recovery::selected_checkout(&window, &pane) {
-                            Ok(current) if current == path => {}
-                            _ => {
-                                app.error = Some(
-                                    "Pending Finish target changed; cancel and inspect again"
-                                        .into(),
-                                );
-                                continue;
-                            }
-                        }
-                        match workspace::finish(&path, &app.config.base_branch, true) {
-                            Ok(_) => {
-                                app.refresh();
-                            }
-                            Err(error) => app.error = Some(error.to_string()),
-                        }
-                    }
-                }
-                KeyCode::Esc | KeyCode::Char('n') => app.finishing = None,
-                _ => {}
-            }
-            continue;
-        }
         if app.filtering {
             match key.code {
                 KeyCode::Esc | KeyCode::Enter => app.filtering = false,
@@ -1403,7 +1464,7 @@ fn event_loop(
         if (app.stale || app.refreshing.is_some() || app.selection_changed)
             && matches!(
                 key.code,
-                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o' | 'i' | 'C' | 'V')
+                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o' | 'i' | 'P' | 'C' | 'V')
             )
         {
             app.error = Some(
@@ -1419,7 +1480,8 @@ fn event_loop(
             continue;
         }
         match key.code {
-            KeyCode::Char('i') => app.begin_integration(),
+            KeyCode::Char('i') => app.begin_integration(CheckoutAction::Integrate),
+            KeyCode::Char('P') => app.begin_integration(CheckoutAction::Promote),
             KeyCode::Char('C') => app.begin_conflict(None),
             KeyCode::Char('V') => app.begin_verification(),
             KeyCode::Char('d') => {
@@ -1482,19 +1544,7 @@ fn event_loop(
             KeyCode::Char('n') => {
                 app.begin_start();
             }
-            KeyCode::Char('f')
-                if app.selected_workspace().is_some_and(|item| {
-                    item.checkout.is_linked_worktree && item.checkout.git_state == GitState::Clean
-                }) =>
-            {
-                app.finishing = app.selected_workspace().map(|w| {
-                    (
-                        w.identity.window_id.clone(),
-                        w.identity.pane_id.clone(),
-                        w.checkout.working_directory.clone(),
-                    )
-                })
-            }
+            KeyCode::Char('f') => app.begin_integration(CheckoutAction::Finish),
             KeyCode::Char('c') => {
                 if let Some(workspace) = app.selected_workspace() {
                     let result = if let Some(project) = &workspace.project {
@@ -1835,32 +1885,6 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 ),
             );
         }
-    } else if app.finishing.is_some()
-        && let Some(workspace) = app.selected_workspace()
-    {
-        let branch = app.workspace_label(workspace);
-        let text = vec![
-            Line::styled(
-                "FINISH WORKSPACE",
-                Style::default()
-                    .fg(app.theme.love)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Line::from(""),
-            Line::from(branch.to_owned()),
-            Line::from("Requires a clean worktree integrated into its base."),
-            Line::from("The branch will be retained."),
-            Line::from(""),
-            ui::action_line(&[FINISH_ACTION, FINISH_CANCEL_ACTION], app.theme),
-        ];
-        let modal = centered(area, 70, 11);
-        frame.render_widget(Clear, modal);
-        frame.render_widget(
-            Paragraph::new(text)
-                .block(Block::default().borders(Borders::ALL))
-                .style(Style::default().bg(app.theme.base).fg(app.theme.text)),
-            modal,
-        );
     }
 }
 
@@ -1910,10 +1934,13 @@ fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &Integrat
         Constraint::Length(3),
     ])
     .split(area);
-    let title = if form.preview.is_some() {
-        "INTEGRATE PREVIEW"
-    } else {
-        "INTEGRATE · CHOOSE DESTINATION"
+    let title = match (form.action, form.preview.is_some()) {
+        (CheckoutAction::Integrate, true) => "INTEGRATE PREVIEW",
+        (CheckoutAction::Integrate, false) => "INTEGRATE · CHOOSE DESTINATION",
+        (CheckoutAction::Promote, true) => "PROMOTE PREVIEW",
+        (CheckoutAction::Promote, false) => "PROMOTE · CHOOSE BASE",
+        (CheckoutAction::Finish, true) => "FINISH PREVIEW",
+        (CheckoutAction::Finish, false) => "FINISH · CHOOSE DESTINATION",
     };
     frame.render_widget(
         Paragraph::new(title).style(
@@ -1942,7 +1969,13 @@ fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &Integrat
     }
     if let Some(preview) = &form.preview {
         text.push_str(&preview.display(redact));
-        text.push_str("Worker retained. Integration does not establish checks or completion.\n");
+        if form.action != CheckoutAction::Finish {
+            text.push_str(&format!(
+                "Destination verification:\n{}\n",
+                form.verification
+            ));
+            text.push_str("Worktrees retained. No push, deployment or automatic cleanup.\n");
+        }
     } else {
         text.push_str("Select a destination branch OR a live batch ID.\nMissing metadata never implies a base branch.\n\n");
         for (i, label) in ["Destination branch", "Batch ID"].iter().enumerate() {
@@ -1976,7 +2009,17 @@ fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &Integrat
     } else if form.error.is_some() || form.result.is_some() {
         "r refresh ancestry · e destination · PgUp/PgDn scroll · Esc back"
     } else {
-        "y integrate reviewed state · e destination · PgUp/PgDn scroll · Esc cancel"
+        match form.action {
+            CheckoutAction::Integrate => {
+                "y integrate reviewed state · e destination · PgUp/PgDn scroll · Esc cancel"
+            }
+            CheckoutAction::Promote => {
+                "y promote reviewed state · e base · PgUp/PgDn scroll · Esc cancel"
+            }
+            CheckoutAction::Finish => {
+                "y remove worktree · branch retained · e destination · Esc cancel"
+            }
+        }
     };
     frame.render_widget(
         Paragraph::new(actions)
@@ -2575,7 +2618,7 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     } else if workspace.checkout.git_state != GitState::Clean {
         " f      unavailable · worktree dirty"
     } else {
-        " f      finish · verifies merged branch"
+        " f      finish · selected destination and writer guards"
     };
     lines.push(Line::styled(finish, Style::default().fg(app.theme.muted)));
     // Use the renderer's actual wrapping, including word boundaries and borders,

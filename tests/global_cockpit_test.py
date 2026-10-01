@@ -293,10 +293,19 @@ class GlobalCockpitTest(IndependentNavigation):
         subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-qb', 'pending-finish', str(checkout)], check=True)
         fake = Path(self.tmp.name) / 'fake-worker/codex'
         target = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', 'project', '-n', 'pending-worker', '-c', str(checkout), str(fake), '300')
-        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit', '--search', 'pending-worker')
+        self.tmux('set-option', '-w', '-t', target, 'remain-on-exit', 'on')
+        self.tmux('set-option', '-p', '-t', target, '@drudwyn_recovery_checkout', os.fsencode(checkout).hex())
+        self.tmux('respawn-pane', '-k', '-t', target, '-c', str(checkout), 'true')
+        for _ in range(100):
+            if self.tmux('display-message', '-p', '-t', target, '#{pane_dead}') == '1': break
+            time.sleep(.02)
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit', '--windows', '--search', 'pending-worker')
         self.wait_pane(pane, 'MATCHING 1')
         self.tmux('send-keys', '-t', pane, 'f')
-        self.wait_pane(pane, 'FINISH WORKSPACE')
+        self.wait_pane(pane, 'FINISH · CHOOSE DESTINATION')
+        self.tmux('send-keys', '-t', pane, '-l', 'main')
+        self.tmux('send-keys', '-t', pane, 'Enter')
+        self.wait_pane(pane, 'FINISH PREVIEW')
         self.tmux('kill-window', '-t', target)
         replacement = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', 'project', '-n', 'pending-worker', '-c', str(checkout), str(fake), '300')
         self.tmux('send-keys', '-t', pane, 'y')

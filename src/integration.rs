@@ -25,10 +25,10 @@ pub struct Checkout {
     pub path: PathBuf,
     pub reference: String,
     pub commit: String,
-    git_dir: PathBuf,
-    common: PathBuf,
-    device: u64,
-    inode: u64,
+    pub(crate) git_dir: PathBuf,
+    pub(crate) common: PathBuf,
+    pub(crate) device: u64,
+    pub(crate) inode: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Plan {
@@ -61,7 +61,7 @@ fn invalid(message: &str) -> Error {
 fn command(path: &Path, args: &[&str]) -> Command {
     crate::workspace::checkout_git(path, args)
 }
-fn raw(path: &Path, args: &[&str]) -> Result<Vec<u8>, Error> {
+pub(crate) fn raw(path: &Path, args: &[&str]) -> Result<Vec<u8>, Error> {
     let result = command(path, args).output()?;
     if !result.status.success() {
         return Err(invalid(
@@ -70,9 +70,9 @@ fn raw(path: &Path, args: &[&str]) -> Result<Vec<u8>, Error> {
     }
     Ok(result.stdout)
 }
-fn git(path: &Path, args: &[&str]) -> Result<String, Error> {
+pub(crate) fn git(path: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(raw(path, args)?)
-        .map(|s| s.trim_end_matches('\n').into())
+        .map(|s| s.strip_suffix('\n').unwrap_or(&s).into())
         .map_err(|_| invalid("Git metadata is not valid UTF-8"))
 }
 fn safe(value: &str) -> Result<(), Error> {
@@ -83,15 +83,22 @@ fn safe(value: &str) -> Result<(), Error> {
     }
     Ok(())
 }
-fn canonical(path: &Path) -> Result<PathBuf, Error> {
+pub(crate) fn canonical(path: &Path) -> Result<PathBuf, Error> {
     safe(
         path.to_str()
             .ok_or_else(|| invalid("Checkout path must be UTF-8"))?,
     )?;
-    path.canonicalize()
-        .map_err(|_| invalid("Selected checkout is unavailable; review its current location"))
+    let result = path
+        .canonicalize()
+        .map_err(|_| invalid("Selected checkout is unavailable; review its current location"))?;
+    safe(
+        result
+            .to_str()
+            .ok_or_else(|| invalid("Checkout path must be UTF-8"))?,
+    )?;
+    Ok(result)
 }
-fn checkout(path: &Path) -> Result<Checkout, Error> {
+pub(crate) fn checkout(path: &Path) -> Result<Checkout, Error> {
     let path = canonical(path)?;
     let root = canonical(Path::new(&git(&path, &["rev-parse", "--show-toplevel"])?))?;
     let git_dir = canonical(Path::new(&git(
@@ -130,7 +137,7 @@ fn checkout(path: &Path) -> Result<Checkout, Error> {
         inode: metadata.ino(),
     })
 }
-fn operation(checkout: &Checkout) -> Result<bool, Error> {
+pub(crate) fn operation(checkout: &Checkout) -> Result<bool, Error> {
     for name in [
         "MERGE_HEAD",
         "CHERRY_PICK_HEAD",
@@ -148,7 +155,7 @@ fn operation(checkout: &Checkout) -> Result<bool, Error> {
     }
     Ok(false)
 }
-fn ready(checkout: &Checkout) -> Result<(), Error> {
+pub(crate) fn ready(checkout: &Checkout) -> Result<(), Error> {
     if operation(checkout)? {
         return Err(invalid(
             "An existing Git operation or lock is present; resolve it before integration",
@@ -166,7 +173,7 @@ fn ready(checkout: &Checkout) -> Result<(), Error> {
     }
     Ok(())
 }
-fn ancestor(path: &Path, source: &str, target: &str) -> Result<bool, Error> {
+pub(crate) fn ancestor(path: &Path, source: &str, target: &str) -> Result<bool, Error> {
     let status = command(path, &["merge-base", "--is-ancestor", source, target])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -179,7 +186,11 @@ fn ancestor(path: &Path, source: &str, target: &str) -> Result<bool, Error> {
         )),
     }
 }
-fn destination(repo: &Path, branch: &str, recorded: Option<&Path>) -> Result<Checkout, Error> {
+pub(crate) fn destination(
+    repo: &Path,
+    branch: &str,
+    recorded: Option<&Path>,
+) -> Result<Checkout, Error> {
     safe(branch)?;
     git(repo, &["check-ref-format", &format!("refs/heads/{branch}")])?;
     let reference = format!("refs/heads/{branch}");

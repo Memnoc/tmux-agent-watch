@@ -241,13 +241,13 @@ no_change="$(TMUX="$socket_path,$server_pid,0" DRUDWYN_V2_BIN="$real_binary" \
 [ "$(git -C "$no_change" rev-parse HEAD)" = "$(git -C "$repo" rev-parse ux/pilot)" ] || {
   printf 'not ok: explicit dependent task lost current branch commits\n'; exit 1;
 }
-TMUX="$socket_path,$server_pid,0" "$real_binary" workspace finish \
-  --path "$no_change" --base main --yes >/dev/null
-[ ! -e "$no_change" ] || {
-  printf 'not ok: finish rejected a clean child of the primary checkout branch\n'
+if TMUX="$socket_path,$server_pid,0" "$real_binary" workspace finish \
+  --path "$no_change" --base main --yes >/dev/null 2>&1; then
+  printf 'not ok: finish accepted containment only in unrelated primary HEAD\n'
   exit 1
-}
-printf 'ok: finish accepts work already contained by the primary checkout\n'
+fi
+[ -d "$no_change" ] || { printf 'not ok: refused cleanup removed worktree\n'; exit 1; }
+printf 'ok: finish rejects unrelated primary HEAD ancestry\n'
 
 created="$(TMUX="$socket_path,$server_pid,0" DRUDWYN_V2_BIN="$real_binary" \
   DRUDWYN_WORKTREE_ROOT="$worktree_root" "$ROOT/scripts/worktree-new.sh" \
@@ -257,7 +257,9 @@ created="$(TMUX="$socket_path,$server_pid,0" DRUDWYN_V2_BIN="$real_binary" \
   printf 'not ok: v2 start did not create the expected linked worktree\n'
   exit 1
 }
-created_window="$(tmux -L "$SOCKET" display-message -p -t v2:work-privacy '#{window_id}')"
+created_window="$(tmux -L "$SOCKET" list-windows -t v2 -F '#{window_id}|#{@drudwyn_branch}' |
+  awk -F '|' '$2 == "work/privacy" {print $1}')"
+[ -n "$created_window" ] || { printf 'not ok: created workspace identity unavailable\n'; exit 1; }
 [ "$(tmux -L "$SOCKET" show-option -wqv -t "$created_window" @drudwyn_message)" = '' ] || {
   printf 'not ok: v2 start created content-bearing tmux state\n'
   exit 1
@@ -371,8 +373,14 @@ fi
 [ -d "$created" ] || { printf 'not ok: dirty worktree was lost\n'; exit 1; }
 git -C "$created" restore README.md
 mkdir "$created/nested"
-tmux -L "$SOCKET" respawn-pane -k -t "$created_window" -c "$created/nested" \
-  "$TMP_DIR/codex 30"
+tmux -L "$SOCKET" set-option -w -t "$created_window" remain-on-exit on
+encoded_path="$(printf '%s' "$created/nested" | od -An -tx1 | tr -d ' \n')"
+tmux -L "$SOCKET" set-option -p -t "$created_window" @drudwyn_recovery_checkout "$encoded_path"
+tmux -L "$SOCKET" respawn-pane -k -t "$created_window" -c "$created/nested" true
+for attempt in $(seq 1 100); do
+  [ "$(tmux -L "$SOCKET" display-message -p -t "$created_window" '#{pane_dead}')" = 1 ] && break
+  sleep .02
+done
 empty_tree="$(printf '' | git -C "$repo" mktree)"
 unrelated_commit="$(printf 'unrelated history\n' | git -C "$repo" commit-tree "$empty_tree")"
 git -C "$repo" tag work/privacy "$unrelated_commit"
