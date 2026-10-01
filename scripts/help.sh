@@ -46,8 +46,8 @@ if [ "$(tmux show-option -gqv @drudwyn-v2 2>/dev/null || true)" = off ]; then
   printf '    right  managed agents coloured by lifecycle state\n\n'
 else
 printf '    top    local tabs; selected dot; +N opens all local windows\n'
-printf '    below  selected context and GLOBAL attention badges\n'
-printf '    *      categories overlap; GLOBAL counts unique workers\n'
+printf '    below  selected context and NEED YOU global attention badges\n'
+printf '    *      categories overlap; NEED YOU counts unique workers needing attention\n'
 printf '    STALE  observer metadata expired; open Cockpit or run scan\n\n'
 fi
 printf '  WORKTREES\n'

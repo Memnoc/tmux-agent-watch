@@ -9,6 +9,12 @@ All 15 implementation tickets are complete, including assembled Linux acceptance
 Full-auto implementation resumed on 2026-10-01 for tickets 12–15.
 Implementation branch: `work/worktree-worker-workflow`.
 
+## Live-use follow-up — 2026-10-01
+
+[16 — Screenshot regressions](16-screenshot-regressions.md) addresses the first
+live-use feedback. The earlier acceptance below covered workflow mechanics but
+missed ordinary unregistered sessions and usable inventory space at 84 × 27.
+
 ## Completion checkpoint — 2026-10-01
 
 Tickets 01–15 are implemented on `work/worktree-worker-workflow`.

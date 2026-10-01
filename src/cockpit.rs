@@ -95,6 +95,7 @@ pub struct App {
     refreshing: Option<std::sync::mpsc::Receiver<io::Result<crate::inventory::Snapshot>>>,
     selection_changed: bool,
     details_open: bool,
+    help_open: bool,
     detail_scroll: u16,
     agent_icon: String,
     config: Config,
@@ -215,6 +216,7 @@ impl App {
             refreshing: None,
             selection_changed: false,
             details_open: false,
+            help_open: false,
             detail_scroll: 0,
             agent_icon: "A".into(),
             config,
@@ -1444,6 +1446,13 @@ fn event_loop(
             }
             continue;
         }
+        if app.help_open {
+            // Dismiss help and dispatch an advertised shortcut normally.
+            app.help_open = false;
+            if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
+                continue;
+            }
+        }
         if app.details_open {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('d') => {
@@ -1480,6 +1489,7 @@ fn event_loop(
             continue;
         }
         match key.code {
+            KeyCode::Char('?') => app.help_open = true,
             KeyCode::Char('i') => app.begin_integration(CheckoutAction::Integrate),
             KeyCode::Char('P') => app.begin_integration(CheckoutAction::Promote),
             KeyCode::Char('C') => app.begin_conflict(None),
@@ -1522,7 +1532,9 @@ fn event_loop(
             KeyCode::Char('w') => {
                 app.query.windows = !app.query.windows;
                 if app.query.windows {
-                    app.query.project = app.selected_workspace().and_then(|w| w.project.clone());
+                    app.query.project = app
+                        .selected_workspace()
+                        .map(|w| crate::inventory::project_key(&app.workspaces, w));
                 }
                 app.refresh_filter();
             }
@@ -1627,34 +1639,24 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         return;
     }
     let area = frame.area();
+    if app.help_open {
+        render_help(frame, app, area);
+        return;
+    }
     if app.details_open {
         render_detail(frame, app, area);
         return;
     }
+    let actions_height = overview_actions(app, area.width).len() as u16;
     let footer_height = if let Some(error) = &app.error {
-        let width = frame.area().width.max(1) as usize;
-        // Leave room for word wrapping so retained launch resources are visible.
-        let lines = (error.chars().count() + 10).div_ceil((width / 2).max(1));
-        let actions = ui::action_line(
-            &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
-            app.theme,
-        )
-        .width()
-        .div_ceil(width);
-        (lines as u16 + actions as u16 + 1)
-            .min(frame.area().height.saturating_sub(5))
+        let lines = (error.chars().count() + 10).div_ceil((area.width as usize / 2).max(1));
+        (lines as u16 + actions_height + 1)
+            .min(area.height.saturating_sub(5))
             .max(3)
     } else if app.filtering || !app.filter.is_empty() {
         if area.width < 70 { 4 } else { 3 }
     } else {
-        (ui::action_line(
-            &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
-            app.theme,
-        )
-        .width()
-        .div_ceil(area.width.max(1) as usize) as u16
-            + 1)
-        .min(7)
+        actions_height + 1
     };
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -1665,19 +1667,14 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         ])
         .split(area);
     render_header(frame, app, layout[0]);
-    if area.width < 70 {
+    if area.width < 100 {
+        // At popup widths the inventory owns the body. Full details remain one
+        // keystroke away, instead of consuming 70% of the workers' viewport.
         render_list(frame, app, layout[1]);
     } else {
         let body = Layout::default()
-            .direction(if area.width < 100 {
-                Direction::Vertical
-            } else {
-                Direction::Horizontal
-            })
-            .constraints([
-                Constraint::Percentage(if area.width < 100 { 30 } else { 44 }),
-                Constraint::Min(1),
-            ])
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(44), Constraint::Min(1)])
             .split(layout[1]);
         render_list(frame, app, body[0]);
         render_detail(frame, app, body[1]);
@@ -2275,7 +2272,7 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     }
     let group_key = |w: &Workspace| {
         if app.query.group == crate::inventory::Group::Project {
-            w.project.clone().unwrap_or_else(|| "unassociated".into())
+            crate::inventory::project_key(&app.workspaces, w)
         } else {
             crate::inventory::attention_state(w).label().into()
         }
@@ -2303,7 +2300,11 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                     .unwrap_or(&key)
             };
             lines.push(Line::styled(
-                format!("{label} [{key}] · {} matching", counts[&key]),
+                if app.query.group == crate::inventory::Group::Attention {
+                    format!("{label} [{key}] · {} matching", counts[&key])
+                } else {
+                    format!("{label} · {} matching", counts[&key])
+                },
                 Style::default().fg(app.theme.pine),
             ));
         }
@@ -2335,9 +2336,10 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         ]));
         lines.push(Line::styled(
             format!(
-                "  {} · {}{}",
+                "  {} · {} ({}){}",
                 w.role(),
                 w.lifecycle.label(),
+                w.evidence.label(),
                 if w.process == "exited" && crate::inventory::has_failure(w) {
                     " · Exited (FAILED)"
                 } else if w.process == "exited" {
@@ -2674,6 +2676,50 @@ fn age(since: Option<u64>) -> String {
     }
 }
 
+/// Wrap between whole actions, never between a key and its label.
+fn overview_actions(app: &App, width: u16) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::default()];
+    for action in COCKPIT_NAVIGATION
+        .iter()
+        .chain(
+            COCKPIT_ACTIONS
+                .iter()
+                .filter(|(key, _)| matches!(*key, "d" | "/")),
+        )
+        .chain(std::iter::once(&("?", "Actions")))
+        .chain(CLOSE_ACTION)
+    {
+        let item = ui::action_line(&[&[*action]], app.theme);
+        let line = lines.last_mut().unwrap();
+        if line.width() + item.width() + 1 > width as usize && !line.spans.is_empty() {
+            lines.push(item);
+        } else {
+            if !line.spans.is_empty() {
+                line.spans.push(Span::raw(" "));
+            }
+            line.spans.extend(item.spans);
+        }
+    }
+    lines
+}
+
+fn render_help(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let mut lines = vec![Line::styled(
+        " COCKPIT ACTIONS · Esc / ? back",
+        Style::default()
+            .fg(app.theme.rose)
+            .add_modifier(Modifier::BOLD),
+    )];
+    for (key, label) in COCKPIT_NAVIGATION
+        .iter()
+        .chain(COCKPIT_ACTIONS)
+        .chain(CLOSE_ACTION)
+    {
+        lines.push(Line::from(format!(" {key:<8} {label}")));
+    }
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
 fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     if app.filtering {
         let message = if app.config.redact_labels && !app.filter.is_empty() {
@@ -2695,12 +2741,9 @@ fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
 
     if app.error.is_none() && app.filter.is_empty() {
         frame.render_widget(
-            Paragraph::new(ui::action_line(
-                &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
-                app.theme,
-            ))
-            .wrap(Wrap { trim: false })
-            .block(Block::default().borders(Borders::TOP)),
+            Paragraph::new(overview_actions(app, area.width))
+                .wrap(Wrap { trim: false })
+                .block(Block::default().borders(Borders::TOP)),
             area,
         );
         return;
@@ -2717,13 +2760,11 @@ fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             error.as_str()
         };
         frame.render_widget(
-            Paragraph::new(vec![
-                ui::action_line(
-                    &[COCKPIT_NAVIGATION, COCKPIT_ACTIONS, CLOSE_ACTION],
-                    app.theme,
-                ),
-                Line::from(format!(" ERROR  {message}")),
-            ])
+            Paragraph::new({
+                let mut lines = overview_actions(app, area.width);
+                lines.push(Line::from(format!(" ERROR  {message}")));
+                lines
+            })
             .style(Style::default().fg(app.theme.love))
             .wrap(Wrap { trim: false })
             .block(Block::default().borders(Borders::TOP)),
@@ -2805,7 +2846,10 @@ mod tests {
                 worker.process = process.into();
                 worker.exit_code = code;
                 worker.exit_time = code.map(|_| 1234567890);
-                let app = App::new(vec![worker], Variant::Moon, Config::default());
+                let mut app = App::new(vec![worker], Variant::Moon, Config::default());
+                // Narrow overviews reserve their body for workers; detailed
+                // receipts are inspected through the same full-details surface.
+                app.details_open = width < 100;
                 let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
                 terminal.draw(|frame| render(frame, &app)).unwrap();
                 let content = terminal

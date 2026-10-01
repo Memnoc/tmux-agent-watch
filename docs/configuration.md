@@ -168,7 +168,8 @@ The legacy mode reads pane scrollback. See the [version boundary](privacy.md#ver
 ## Status-bar A (Rust)
 
 The two informative rows show local tabs above selected context and labelled
-GLOBAL attention. **Appearance → Visible status tabs** accepts `1` (selected
+global attention labelled **NEED YOU** (workers needing attention, not all
+workers; **ATTN** below 64 columns). **Appearance → Visible status tabs** accepts `1` (selected
 only), `3`, `4` (default), `6`, or `auto`:
 
 ```tmux
@@ -193,7 +194,7 @@ Ambient jobs reuse the existing lifecycle observer; they do not start scans
 for each client redraw. The context row reads only the selected checkout's
 branch, never full Git details for the global fleet. A successful reconciliation
 publishes its live observation time under the existing lifecycle guard. Missing,
-malformed, future or expired times show **GLOBAL STALE** while retaining the
+malformed, future or expired times show **NEED YOU STALE** while retaining the
 last observed counts. Expiry is twice `@drudwyn-interval` plus five seconds.
 Opening Cockpit refreshes the inventory; `tmux-drudwyn scan` explicitly refreshes
 the projection. Separate row jobs may observe different moments; they do not

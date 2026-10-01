@@ -57,7 +57,7 @@ for expected in \
   'C-s    save all sessions (tmux-resurrect)' \
   'C-w    open the native tmux window tree' \
   'top    local tabs' \
-  'below  selected context and GLOBAL attention' \
+  'below  selected context and NEED YOU global attention' \
   'g      status actions: f failed, i input, r review, a attention, w local windows' \
   'STALE  observer metadata expired' \
   'i      preview worker integration' \

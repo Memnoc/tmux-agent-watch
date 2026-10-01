@@ -78,9 +78,16 @@ shortcut uses the configured base when no live batch is attached.
 
 ### Global Cockpit (Rust v2)
 
+At widths below 100 columns, the inventory uses the full body; `d` opens
+complete details. Wider views keep the side panel. The footer shows navigation,
+search, details, and `?` for the full action list. All existing action shortcuts
+remain available directly.
+
 Cockpit starts with workers across the connected tmux server. Project groups
-include ordinary agents in known project sessions; unassociated agents stay
-reachable. Linked client views count each window once. GLOBAL totals do not
+include ordinary agents in known project sessions. Without a registered project,
+Git repository paths provide display groups, including linked checkouts of the
+same repository. This does not assign a coordinator or batch; those remain
+explicit. Agents without either association stay reachable. Linked client views count each window once. GLOBAL totals do not
 change with filters. Workers exclude the coordinator role; coordinator shells
 and agents remain reachable with `c`, by name search, or the project-window
 inventory. Search results count coordinators separately from matching workers. Live
@@ -105,6 +112,7 @@ exit alone does not establish failure or task completion.
 | `g` | Toggle project / attention grouping |
 | `w` | Toggle all windows in the selected project, including shells outside Git |
 | `x` | Clear filters and return to global worker inventory |
+| `?` | Show all actions; press an action's key to use it, or `Esc` to return |
 | `d` | Full details; arrows or `PgUp/PgDn` scroll, `d` or `Esc` returns |
 | `c` | Open the selected project's coordinator |
 | `i` | Preview worker integration into its live batch or an explicit destination |

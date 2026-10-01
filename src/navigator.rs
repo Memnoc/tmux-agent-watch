@@ -513,7 +513,7 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
                     Style::default().fg(app.theme.text),
                 ),
                 Span::styled(
-                    format!(" {} {}", item.session, branch),
+                    format!("  · session {}  {}", item.session, branch),
                     Style::default().fg(app.theme.muted),
                 ),
             ]))

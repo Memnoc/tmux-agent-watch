@@ -124,7 +124,7 @@ class StatusATest(IndependentNavigation):
             self.assertGreater(len(targets), 0)
             self.assertIn(self.worker, [target.split(':')[-1] for target in targets])
             self.assertIn(f'+{7-len(targets)}', plain(rows[0])) if len(targets) < 7 else None
-            self.assertIn('GLOBAL', plain(rows[1]))
+            self.assertIn('NEED YOU', plain(rows[1]))
             self.assertIn('REVIEW 1', plain(rows[1]))
             self.assertIn('● ', plain(rows[0]))
         self.tmux('set', '-g', '@drudwyn-visible-tabs', '1')
@@ -161,7 +161,7 @@ class StatusATest(IndependentNavigation):
         self.assertIn('COORD', bottom)
         self.assertIn(' · main', bottom)
         self.assertNotIn('(unknown)', bottom)
-        self.assertEqual(bottom.split('GLOBAL')[0].count(' · '), 1)
+        self.assertEqual(bottom.split('NEED YOU')[0].count(' · '), 1)
         Path('/tmp/drudwyn-ticket15-shell.txt').write_text(bottom + '\n')
         Path('/tmp/drudwyn-ticket15-shell.ansi').write_bytes(data)
 
@@ -183,14 +183,15 @@ class StatusATest(IndependentNavigation):
                         rows = plain(self.command('status-bar', '--projection', '--session', session,
                                      '--window', window, '--width', str(width), client=self.clients[0]).stdout).splitlines()
                         top, bottom = rows
-                        context = bottom.split('GLOBAL')[0].strip()
+                        attention_label = 'ATTN' if width < 64 else 'NEED YOU'
+                        context = bottom.split(attention_label)[0].strip()
                         self.assertIn(role, context)
                         if width >= 64:
                             self.assertIn('Workspace' if redacted else name.split()[0], context)
                         self.assertNotIn('(unknown)', context)
                         self.assertFalse(context.endswith('·'), context)
                         self.assertIn('● ' + index + ' ', top)
-                        for count in ['GLOBAL 1', 'FAIL 0', 'INPUT 0', 'REVIEW 1']:
+                        for count in [attention_label + ' 1', 'FAIL 0', 'INPUT 0', 'REVIEW 1']:
                             self.assertIn(count, bottom)
                         for row in rows:
                             self.assertLessEqual(len(row), width)
@@ -214,7 +215,7 @@ class StatusATest(IndependentNavigation):
             self.assertLess(time.monotonic(),deadline)
             time.sleep(.02)
 
-    def terminal(self, client, width, expected='GLOBAL', rows=None):
+    def terminal(self, client, width, expected='NEED YOU', rows=None):
         if not hasattr(self,'screens'):self.screens={}
         if client not in self.screens or self.screens[client][0].width != width:
             self.screens[client]=(TerminalCells(width),len(self.client_output[client]))
@@ -256,7 +257,7 @@ class StatusATest(IndependentNavigation):
                     top,bottom=screen.lines()[-2:]
                     self.assertIn('● ',top)
                     self.assertIn('REVIEW',top)
-                    self.assertIn('GLOBAL',bottom)
+                    self.assertIn('ATTN' if width < 64 else 'NEED YOU',bottom)
                     self.assertIn('FAIL 0',bottom)
                     self.assertIn('INPUT 0',bottom)
                     self.assertIn('REVIEW 1',bottom)
@@ -410,10 +411,10 @@ class StatusATest(IndependentNavigation):
         cockpit=self.command('cockpit','--list',client=self.clients[0]).stdout
         self.assertIn('2 attention (1 failed / 1 input / 1 review; categories overlap)',cockpit)
         rendered=plain(self.render(160))
-        self.assertIn('GLOBAL 2 (overlap)',rendered)
+        self.assertIn('NEED YOU 2 (overlap)',rendered)
         for label in ['FAIL 1','INPUT 1','REVIEW 1']:self.assertIn(label,rendered)
         self.assertNotIn('worker',rendered.splitlines()[0])
-        self.assertIn('GLOBAL 2*',plain(self.render(48)))
+        self.assertIn('ATTN 2*',plain(self.render(48)))
         # Instrument only the public renderer process: no Git details for tabs,
         # and at most the selected checkout's branch for context, never all repos.
         gate=Path(self.tmp.name)/'gitgate';gate.mkdir()
@@ -504,14 +505,14 @@ class StatusATest(IndependentNavigation):
         before=time.monotonic()
         with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(render_for,requests))
         print('36-worker/4-project/39-checkout two-client render wall %.3fs, individual %s' % (time.monotonic()-before,[round(r[0],3) for r in results]),flush=True)
-        for _,output in results:self.assertIn('GLOBAL 1',plain(output))
+        for _,output in results:self.assertIn('NEED YOU 1',plain(output))
         before=time.monotonic()
         self.install()
         first,_=self.converged(self.clients[0],64)
         second,_=self.converged(self.clients[1],160)
         print('36-worker two-client installed rows ready %.3fs' % (time.monotonic()-before),flush=True)
-        self.assertIn('GLOBAL 1',first.lines()[-1])
-        self.assertIn('GLOBAL 1',second.lines()[-1])
+        self.assertIn('NEED YOU 1',first.lines()[-1])
+        self.assertIn('NEED YOU 1',second.lines()[-1])
         self.assertIn('WT',second.lines()[-2])
         Path('/tmp/drudwyn-ticket10-scale-64.txt').write_text('\n'.join(first.lines()[-2:]))
         Path('/tmp/drudwyn-ticket10-scale-160.txt').write_text('\n'.join(second.lines()[-2:]))
@@ -569,7 +570,7 @@ class StatusATest(IndependentNavigation):
         time.sleep(.2)
         self.tmux('set','-g','@drudwyn_scan_at','1')
         screen,data=self.converged(self.clients[0],120)
-        self.assertIn('GLOBAL STALE',screen.lines()[-1])
+        self.assertIn('NEED YOU STALE',screen.lines()[-1])
         self.assertIn('INPUT 1',screen.lines()[-1])
         self.assertEqual(self.tmux('show','-gqv','@drudwyn_scan_at'),'1')
         Path('/tmp/drudwyn-ticket10-stale.txt').write_text('\n'.join(screen.lines()[-2:]))
@@ -578,7 +579,7 @@ class StatusATest(IndependentNavigation):
             self.tmux('set','-g','@drudwyn_scan_at',timestamp)
             session,window=self.selection(self.clients[0]).split(':')
             output=self.command('status-bar','--projection','--session',session,'--window',window,'--width','120',client=self.clients[0]).stdout
-            self.assertIn('GLOBAL STALE',plain(output),timestamp)
+            self.assertIn('NEED YOU STALE',plain(output),timestamp)
         import shutil
         gate=Path(self.tmp.name)/'failed-scan';gate.mkdir()
         wrapper=gate/'tmux';real=shutil.which('tmux')

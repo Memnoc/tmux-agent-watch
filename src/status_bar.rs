@@ -408,7 +408,8 @@ fn context(workspaces: &[Workspace], current: &str, width: usize, style: &Style)
         ("review", "REVIEW", totals.review, Lifecycle::Review),
     ];
     let global = format!(
-        "GLOBAL{} {}{} ",
+        "{}{} {}{} ",
+        if width < 64 { "ATTN" } else { "NEED YOU" },
         if style.stale { " STALE" } else { "" },
         totals.attention,
         if totals.categories_overlap() {

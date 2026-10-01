@@ -78,7 +78,7 @@ pub enum Group {
 }
 #[derive(Clone, Debug, Default, Args)]
 pub struct Query {
-    /// Project session ID or exact name; "unassociated" selects ordinary agents.
+    /// Project session ID/name or repository path; "unassociated" selects unknown projects.
     #[arg(long)]
     pub project: Option<String>,
     #[arg(long, value_enum, default_value_t=State::All)]
@@ -120,6 +120,29 @@ pub fn attention_state(workspace: &Workspace) -> Lifecycle {
     }
 }
 
+/// Display grouping is independent of coordinator/batch association. An ordinary
+/// agent can have a known repository without granting it any managed-session role.
+pub fn project_key(workspaces: &[Workspace], w: &Workspace) -> String {
+    if let Some(project) = &w.project {
+        return project.clone();
+    }
+    if let Some(repo) = &w.checkout.repository {
+        if let Some(project) = workspaces.iter().find_map(|other| {
+            (other.checkout.repository.as_ref() == Some(repo))
+                .then_some(other.project.as_ref())
+                .flatten()
+        }) {
+            return project.clone();
+        }
+        return format!("repo:{}", repo.display());
+    }
+    "unassociated".into()
+}
+
+pub fn project_group_label(key: &str) -> &str {
+    key.strip_prefix("repo:").unwrap_or(key)
+}
+
 #[derive(Default, Clone)]
 pub struct Totals {
     pub workers: usize,
@@ -136,8 +159,9 @@ impl Totals {
         let mut totals = Self::default();
         let mut projects = std::collections::HashSet::new();
         for w in workspaces {
-            if let Some(p) = &w.project {
-                projects.insert(p);
+            let key = project_key(workspaces, w);
+            if key != "unassociated" {
+                projects.insert(key);
             }
             if !is_worker(w) {
                 continue;
@@ -267,6 +291,14 @@ impl Snapshot {
                     .insert(window.into());
             }
         }
+        // Repository groups are display/filter identities only. Never assign
+        // them to Workspace.project, which routes real tmux session actions.
+        for w in &workspaces {
+            let key = project_key(&workspaces, w);
+            if key.starts_with("repo:") {
+                projects.insert(key.clone(), project_group_label(&key).into());
+            }
+        }
         Ok(Self {
             memberships,
             details,
@@ -318,9 +350,9 @@ impl Snapshot {
                         && w.coordinator.as_deref() == Some(w.identity.window_id.as_str())))
                     && project.as_ref().is_none_or(|p| {
                         if p == "unassociated" {
-                            w.project.is_none()
+                            project_key(&self.workspaces, w) == "unassociated"
                         } else {
-                            w.project.as_ref() == Some(p)
+                            project_key(&self.workspaces, w) == *p
                                 || w.identity
                                     .sessions
                                     .iter()
@@ -335,11 +367,15 @@ impl Snapshot {
                             w.identity.session.as_str(),
                             w.checkout.branch.as_deref().unwrap_or(""),
                             w.agent.label(),
-                            w.project
-                                .as_ref()
-                                .and_then(|p| self.projects.get(p))
+                            self.projects
+                                .get(&project_key(&self.workspaces, w))
                                 .map(String::as_str)
                                 .unwrap_or("unassociated"),
+                            w.checkout
+                                .repository
+                                .as_deref()
+                                .and_then(Path::to_str)
+                                .unwrap_or(""),
                             w.lifecycle.label(),
                             attention_state(w).label(),
                             self.details
@@ -366,7 +402,7 @@ impl Snapshot {
             let w = &self.workspaces[*i];
             (
                 if query.group == Group::Project {
-                    w.project.clone().unwrap_or_else(|| "~unassociated".into())
+                    project_key(&self.workspaces, w)
                 } else {
                     String::new()
                 },
@@ -402,9 +438,8 @@ impl Snapshot {
                 if redact {
                     "[redacted]"
                 } else {
-                    w.project
-                        .as_ref()
-                        .and_then(|p| self.projects.get(p))
+                    self.projects
+                        .get(&project_key(&self.workspaces, w))
                         .map(String::as_str)
                         .unwrap_or("unassociated")
                 },
