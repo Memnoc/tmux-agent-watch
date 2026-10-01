@@ -27,6 +27,7 @@ for sensitive or organisational workflows without a separate assessment.
 | clean/dirty state, refs/commit IDs, changed-file names and merge ancestry | preview/integrate reviewed commits and prevent unsafe worktree removal | current command | fixed readiness state |
 | lifecycle state, evidence source, timestamps, and available pane exit code/signal/time | distinguish running, working, attention, and process exit | current tmux session | cockpit, HUD, and sidebar |
 | launch pane/process identity, losslessly encoded checkout path, expected executable and delivery state | bind and serialize a send to its worker and distinguish not sent/sent/uncertain | current tmux session | workspace commands and Cockpit |
+| verification check identity, canonical checkout/inode fingerprint, tested revision, process birth identities, timestamps, exit and stale state | reconcile explicit assembled checks | current tmux server only | verification command and Cockpit, labels redacted |
 | expected merge refs/commits, destination directory identity, MERGE_HEAD inode/timestamps, project and handoff state | guard Continue/Abort and reconcile external resolution | current tmux server only | conflict command and Cockpit, labels redacted |
 | deliberately selected repository task-file reference (including lossless path encoding) | let the agent read the chosen task in its checkout | current tmux session | launch form and live window option |
 | task entered in the start form or stdin | deliver the initial instruction to the selected agent | form/command memory and delete-on-paste tmux buffer | selected third-party agent pane |
@@ -111,6 +112,31 @@ agent recovery starts a new conversation without a task, retains the old window,
 and compares coordinator ownership under the existing lifecycle guard before
 selection. The user then deliberately retries the generated handoff. No agent
 acceptance, resolution, or assembled verification is inferred from transmission.
+
+Assembled verification accepts user-selected commands only in form memory or
+stdin. A noninteractive Bash process receives them through an anonymous pipe;
+Drudwyn neither captures nor interprets its inherited terminal output. It creates
+no script file, history entry or log. The selected script is never placed in
+Drudwyn's or the shell runner's argv or tmux options; tools invoked by that script
+control their own arguments and output.
+The latest receipt lives in one server option per canonical checkout, with only
+check identity, checkout/revision, timestamp/exit state, runner process lifetime,
+and an opaque hash of Git/path/stat metadata. File contents are never hashed.
+Linux runner identity uses `/proc/PID/stat` process birth ticks and exit state;
+other Unix platforms use process birth metadata from `ps`.
+
+The check inherits an advisory lock on the existing destination directory through
+a separate descriptor while stdin carries the script. Child setup uses the held
+directory descriptor as its working directory. Its foreground process tree can
+therefore retain the guard after runner death, without a lock file or registry.
+Inspection reads tracked/untracked filenames and inode, mode, size, modification
+and change timestamps; ignored contents and external environment are not certified.
+Receipt comparison and mutation use the existing bounded lifecycle guard; Git/stat
+observation occurs outside it and stale writes are rejected on comparison. Inventory
+shares one verification observation per unique destination per refresh and skips
+file enumeration when there is no receipt. Losing metadata never restores success
+from Git ancestry or agent activity. Selected commands and third-party tools remain
+responsible for their own effects, files, output and data practices.
 
 Global Cockpit refreshes keep a single in-memory snapshot of known tmux windows,
 projects, process evidence, Git checkout identity/status, changed-file names and

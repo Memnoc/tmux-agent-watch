@@ -1052,6 +1052,11 @@ pub fn finish(path: &Path, base: &str, yes: bool) -> Result<PathBuf, Error> {
 pub(crate) fn checkout_git(path: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     command.arg("-C").arg(path).args(args);
+    isolate_git_namespace(&mut command);
+    command
+}
+
+pub(crate) fn isolate_git_namespace(command: &mut Command) {
     for name in [
         "GIT_DIR",
         "GIT_WORK_TREE",
@@ -1064,7 +1069,6 @@ pub(crate) fn checkout_git(path: &Path, args: &[&str]) -> Command {
     ] {
         command.env_remove(name);
     }
-    command
 }
 
 pub(crate) fn git(path: &Path, args: &[&str]) -> Result<String, Error> {

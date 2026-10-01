@@ -182,6 +182,16 @@ enum CoordinatorCommand {
 
 #[derive(Debug, Subcommand)]
 enum WorkspaceCommand {
+    /// Inspect live assembled evidence, or run explicitly selected checks visibly.
+    Verify {
+        #[arg(long)]
+        path: PathBuf,
+        /// Non-content check identity; commands travel only through stdin.
+        #[arg(long, requires = "command_stdin")]
+        check: Option<String>,
+        #[arg(long, requires = "check")]
+        command_stdin: bool,
+    },
     /// Preview reviewed commits; apply only the token from an unchanged preview.
     Integrate {
         #[arg(long, default_value = ".")]
@@ -533,6 +543,30 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         },
         Command::Settings { theme } => settings::run(theme.into())?,
         Command::Workspace { command } => match command {
+            WorkspaceCommand::Verify {
+                path,
+                check,
+                command_stdin,
+            } => {
+                let redact = Config::load_tmux()?.redact_labels;
+                if command_stdin {
+                    use std::io::Read;
+                    let mut command = String::new();
+                    std::io::stdin().take(65537).read_to_string(&mut command)?;
+                    let (receipt, passed) = tmux_drudwyn::verification::run(
+                        &path,
+                        check.as_deref().unwrap(),
+                        &command,
+                        redact,
+                    )?;
+                    print!("{receipt}");
+                    if !passed {
+                        return Err("Assembled verification did not pass; work preserved; inspect or rerun explicitly".into());
+                    }
+                } else {
+                    print!("{}", tmux_drudwyn::verification::inspect(&path, redact)?);
+                }
+            }
             WorkspaceCommand::Conflict {
                 path,
                 project,

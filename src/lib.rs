@@ -20,4 +20,5 @@ pub mod settings;
 pub mod status_bar;
 pub mod theme;
 mod ui;
+pub mod verification;
 pub mod workspace;

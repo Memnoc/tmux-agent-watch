@@ -710,3 +710,59 @@ If the coordinator completed or aborted independently, current Git metadata
 reconciles the result and repeated actions do not create another commit. Drudwyn
 reads operation/ref/index metadata, never conflict contents or agent scrollback.
 Assembled verification remains a separate action; integration never implies it.
+
+### Verify the assembled checkout (Rust v2)
+
+Press **V Verify** in Cockpit. A validated live batch supplies its actual
+integration checkout; otherwise enter the destination checkout explicitly.
+Checkout paths must be UTF-8 and contain no control characters.
+Review that path, enter a short check identity and your chosen shell commands,
+then press **F5 Run visibly**. **Tab** changes fields, **F6** inspects the latest
+live receipt, and **Esc** cancels. Output runs in the foreground terminal; Enter
+returns to the form when the check ends. The command field is cleared on run.
+Nothing runs automatically after integration or an agent's Review event.
+
+The equivalent command is:
+
+```sh
+tmux-drudwyn workspace verify --path /path/to/destination \
+  --check unit-and-smoke --command-stdin
+# Enter your selected shell program on stdin, then Ctrl-D.
+
+tmux-drudwyn workspace verify --path /path/to/destination
+```
+
+Commands use `bash --noprofile --norc -s`, with inherited Git namespace overrides
+and Bash startup/history settings removed. Drudwyn supplies no project test
+command. Select foreground checks and their desired failure behavior explicitly
+(for example, use `set -e` if your selected multi-command script should stop on
+an error). Stdin supplies the script; checks needing their own input should use
+an explicit redirect. Output goes directly to the terminal and is not captured
+by Drudwyn. A nonzero, interrupted, stale, or unavailable result makes the command
+fail while preserving the checkout and allowing deliberate rerun.
+
+The latest live receipt for each canonical checkout records the check identity,
+tested commit, start/end Unix timestamps, and exit status. **Running**, **Passed**,
+**Failed**, **Stale**, and **Not verified** remain separate from **reported worker
+checks: unknown**. A worker report or Review state cannot manufacture a receipt.
+Cockpit's worker details show evidence for its validated batch destination.
+Receipts are not transferred between checkouts, branches, or later promotions.
+Unavailable process-birth evidence remains Not verified even when an exit code
+is observed; an old completed process need not remain alive for its valid receipt.
+
+Verification is point-in-time. Observed HEAD, branch, checkout identity, or
+tracked/untracked file metadata changes permanently mark that receipt stale,
+even if a later observation looks like the original checkout. Checks may run
+with dirty/untracked application inputs, and those inputs can make an assembled
+check fail despite clean worker branches. Ignored files, symlink targets outside
+the checkout, nested repository contents, external services, deliberately detached
+background work, and changes between observations are not certified. Git's clean
+status does not establish an unchanged environment.
+
+A killed runner cannot leave a provable Running state. Surviving foreground
+processes retain the checkout guard and block another check or integration until
+they exit; inspect them before retrying. Losing tmux receipts resets verification
+to Not verified even if Git ancestry still proves integration. No output,
+commands, or historical registry are retained. Check/path/revision labels in
+Drudwyn displays honor label redaction; your explicitly run program controls its
+own visible terminal output.

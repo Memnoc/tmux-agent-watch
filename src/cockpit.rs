@@ -41,6 +41,7 @@ const COCKPIT_ACTIONS: &[(&str, &str)] = &[
     ("c", "Coordinator"),
     ("i", "Integrate"),
     ("C", "Conflict"),
+    ("V", "Verify"),
     ("f", "Finish"),
     ("/", "Search"),
     ("p/s", "Project/state"),
@@ -87,6 +88,7 @@ pub struct App {
     finishing: Option<(String, String, PathBuf)>,
     integration: Option<IntegrationForm>,
     conflict: Option<ConflictForm>,
+    verification: Option<VerificationForm>,
     snapshot: Option<crate::inventory::Snapshot>,
     query: crate::inventory::Query,
     current_window: String,
@@ -122,6 +124,13 @@ struct RecoveryForm {
     field: usize,
     cursors: [usize; 2],
     error: Option<String>,
+}
+
+struct VerificationForm {
+    fields: [String; 3],
+    cursors: [usize; 3],
+    field: usize,
+    status: String,
 }
 
 struct ConflictForm {
@@ -179,6 +188,7 @@ impl App {
             finishing: None,
             integration: None,
             conflict: None,
+            verification: None,
             snapshot: None,
             query: crate::inventory::Query::default(),
             current_window: String::new(),
@@ -191,6 +201,38 @@ impl App {
             agent_icon: "A".into(),
             config,
             theme: Theme::rose_pine(variant),
+        }
+    }
+
+    fn begin_verification(&mut self) {
+        let destination = self
+            .selected_workspace()
+            .and_then(|w| batch::for_window(&w.identity.window_id).ok().flatten())
+            .and_then(|b| crate::integration::batch_destination(&b).ok())
+            .map(|c| c.path);
+        // Without a validated batch, require an explicit checkout; a selected
+        // worker's branch is never silently treated as the assembled target.
+        let path = destination
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        self.verification = Some(VerificationForm {
+            cursors: [path.len(), 0, 0],
+            fields: [path, String::new(), String::new()],
+            field: 0,
+            status:
+                "Select checkout, check identity and command. F5 runs visibly; no automatic checks."
+                    .into(),
+        });
+    }
+    fn verification_edit(&mut self, key: KeyCode, paste: Option<&str>) {
+        if let Some(form) = &mut self.verification {
+            edit_text(
+                &mut form.fields[form.field],
+                &mut form.cursors[form.field],
+                key,
+                paste,
+                form.field == 2,
+            );
         }
     }
 
@@ -1160,6 +1202,10 @@ fn event_loop(
         }
         let input = event::read()?;
         if let Event::Paste(text) = &input {
+            if app.verification.is_some() {
+                app.verification_edit(KeyCode::Null, Some(text));
+                continue;
+            }
             if app.integration.is_some() {
                 app.integration_edit(KeyCode::Null, Some(text));
                 continue;
@@ -1177,6 +1223,73 @@ fn event_loop(
             continue;
         };
         if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        if app.verification.is_some() {
+            match key.code {
+                KeyCode::Esc => {
+                    app.verification = None;
+                    app.begin_refresh();
+                }
+                KeyCode::Tab => {
+                    let form = app.verification.as_mut().unwrap();
+                    form.field = (form.field + 1) % 3;
+                }
+                KeyCode::BackTab => {
+                    let form = app.verification.as_mut().unwrap();
+                    form.field = (form.field + 2) % 3;
+                }
+                KeyCode::F(5) => {
+                    let form = app.verification.as_mut().unwrap();
+                    let path = PathBuf::from(&form.fields[0]);
+                    let check = form.fields[1].clone();
+                    let command = std::mem::take(&mut form.fields[2]);
+                    form.cursors[2] = 0;
+                    disable_raw_mode()?;
+                    execute!(
+                        terminal.backend_mut(),
+                        DisableBracketedPaste,
+                        LeaveAlternateScreen
+                    )?;
+                    let result =
+                        crate::verification::run(&path, &check, &command, app.config.redact_labels);
+                    let status = match result {
+                        Ok((text, _)) => text,
+                        Err(e) => {
+                            if app.config.redact_labels {
+                                "Verification unavailable; labels hidden".into()
+                            } else {
+                                e.to_string()
+                            }
+                        }
+                    };
+                    println!("{status}\nPress Enter to return to verification.");
+                    enable_raw_mode()?;
+                    loop {
+                        if matches!(event::read()?, Event::Key(k) if k.code == KeyCode::Enter) {
+                            break;
+                        }
+                    }
+                    execute!(
+                        terminal.backend_mut(),
+                        EnterAlternateScreen,
+                        EnableBracketedPaste
+                    )?;
+                    terminal.clear()?;
+                    app.verification.as_mut().unwrap().status = status;
+                }
+                KeyCode::F(6) => {
+                    let form = app.verification.as_mut().unwrap();
+                    form.status = crate::verification::inspect(
+                        std::path::Path::new(&form.fields[0]),
+                        app.config.redact_labels,
+                    )
+                    .unwrap_or_else(|_| {
+                        "Not verified · checkout or live evidence unavailable".into()
+                    });
+                }
+                _ => app.verification_edit(key.code, None),
+            }
             continue;
         }
         if app.conflict.is_some() {
@@ -1290,7 +1403,7 @@ fn event_loop(
         if (app.stale || app.refreshing.is_some() || app.selection_changed)
             && matches!(
                 key.code,
-                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o' | 'i' | 'C')
+                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o' | 'i' | 'C' | 'V')
             )
         {
             app.error = Some(
@@ -1308,6 +1421,7 @@ fn event_loop(
         match key.code {
             KeyCode::Char('i') => app.begin_integration(),
             KeyCode::Char('C') => app.begin_conflict(None),
+            KeyCode::Char('V') => app.begin_verification(),
             KeyCode::Char('d') => {
                 app.selection_changed = false;
                 app.details_open = true;
@@ -1415,6 +1529,41 @@ fn event_loop(
 }
 
 fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
+    if let Some(form) = &app.verification {
+        let sections = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(4),
+        ])
+        .split(frame.area());
+        frame.render_widget(Paragraph::new("ASSEMBLED VERIFICATION"), sections[0]);
+        let mut lines = vec![];
+        for (i, label) in [
+            "Destination checkout",
+            "Check identity",
+            "Command (transient)",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let value = if app.config.redact_labels {
+                "[redacted]"
+            } else {
+                &form.fields[i]
+            };
+            lines.push(format!(
+                "{} {label}: {value}",
+                if form.field == i { ">" } else { " " }
+            ));
+        }
+        lines.push(form.status.clone());
+        frame.render_widget(
+            Paragraph::new(lines.join("\n\n")).wrap(Wrap { trim: false }),
+            sections[1],
+        );
+        frame.render_widget(Paragraph::new("Tab fields · F5 Run visibly\nF6 Inspect live evidence · Esc back\nCommands use bash stdin; no shell history.").wrap(Wrap { trim: false }), sections[2]);
+        return;
+    }
     if let Some(form) = &app.conflict {
         render_conflict(frame, app, form);
         return;
@@ -2384,7 +2533,23 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         .and_then(|detail| detail.integration.as_deref())
         .unwrap_or("unknown · choose a live batch or i explicit destination");
     lines.push(Line::from(format!(" Integration: {integration}")));
-    lines.push(Line::from(" Checks: unknown · not verified"));
+    let verification = app.snapshot.as_ref()
+        .and_then(|s| s.details.get(&workspace.identity.window_id))
+        .and_then(|d| d.verification.as_deref())
+        .unwrap_or("Assembled verification: Not verified · destination unknown\nReported worker checks: unknown (Review is not evidence)");
+    for line in verification.lines() {
+        let value = if private
+            && ["Check:", "Checkout:", "Tested revision:"]
+                .iter()
+                .any(|prefix| line.starts_with(prefix))
+        {
+            format!("{} [redacted]", line.split(':').next().unwrap_or("Label"))
+        } else {
+            line.into()
+        };
+        lines.push(Line::from(value));
+    }
+    lines.push(Line::from(" V verify · explicitly select assembled checks"));
     lines.push(Line::from(
         " i integrate · preview explicit destination and ancestry",
     ));

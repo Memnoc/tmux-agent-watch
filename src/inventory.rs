@@ -178,6 +178,7 @@ impl Totals {
 #[derive(Clone, Default)]
 pub struct Detail {
     pub integration: Option<String>,
+    pub verification: Option<String>,
     pub batch: Option<crate::batch::Batch>,
     pub task_reference: Option<String>,
     pub source_commit: Option<String>,
@@ -544,6 +545,7 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
     let mut details = HashMap::new();
     let mut destinations = HashMap::new();
     let mut containment = HashMap::new();
+    let mut verification = HashMap::new();
     for w in workspaces {
         let mut detail = Detail::default();
         let mut source_common = None;
@@ -621,6 +623,11 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
                     .or_insert_with(|| {
                         crate::integration::batch_destination(batch).map_err(|e| e.to_string())
                     });
+                if let Ok(target) = target {
+                    detail.verification = Some(verification.entry(target.path.clone()).or_insert_with(|| {
+                        crate::verification::inspect(&target.path, false).unwrap_or_else(|_| "Assembled verification: Not verified · metadata unavailable".into())
+                    }).clone());
+                }
                 detail.integration = Some(match target {
                     Ok(target) => containment
                         .entry((target.clone(), common.clone(), commit.clone()))
