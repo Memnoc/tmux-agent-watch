@@ -441,3 +441,21 @@ polish was observed, routed to a fresh fix session, and re-executed after its
 correction. The report retains both failing and passing evidence. Final
 independent review is recorded with ticket15. The project repository's `main`
 remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`; nothing was pushed or deployed.
+
+## Visual follow-up — 2026-10-01
+
+Memnoc approved the project-table Cockpit A from
+`spike/cockpit-layout-20261001` at `df0d33b`, and requested the same masthead,
+palette, separators, spacing and selection language in Workspace and Sessions.
+[Ticket 20](../../.scratch/worktree-worker-workflow/20-approved-cockpit-and-one-row-proposals.md)
+records the implementation and terminal validation. The browser reference is
+archived on that throwaway branch, rather than merged into production.
+
+Memnoc also requested single-row alternatives to the current status bar. The
+three runnable designs live on `spike/single-row-status-20261001` at `316f73d`;
+run `python3 scripts/status-feedback.spike.py` in its worktree and open
+http://127.0.0.1:8788/status-feedback.spike.html?view=bar&variant=A.
+A uses quiet tabs, B focuses on the selected workspace and Git, and C adds
+project activity counts. Git changes and global attention remain visible at
+48/64/80/120/160 columns. No variant has been selected; the two-row production
+bar and ADR-0006 remain unchanged pending that choice.

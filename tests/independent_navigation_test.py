@@ -120,15 +120,23 @@ class IndependentNavigation(unittest.TestCase):
         self.tmux('send-keys', '-t', pane, 'Escape')
         time.sleep(.1)
         if expected:
-            self.assertIn(expected, self.tmux('capture-pane', '-p', '-t', pane))
+            if surface == 'cockpit':
+                self.tmux('send-keys', '-t', pane, 'd')
+                self.wait_pane(pane, 'DETAILS')
+            self.assertIn(expected, self.wait_pane(pane, expected))
+            if surface == 'cockpit':
+                self.tmux('send-keys', '-t', pane, 'd')
+                self.wait_pane(pane, 'MATCHING')
         self.tmux('send-keys', '-t', pane, action)
         time.sleep(.3)
 
     def wait_pane(self, pane, text):
+        previous = None
         for _ in range(250):
             output = self.tmux('capture-pane', '-p', '-t', pane)
-            if text in output:
+            if text in output and output == previous:
                 return output
+            previous = output
             time.sleep(.02)
         self.fail(f'no {text!r}: {output}')
 

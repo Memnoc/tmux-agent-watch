@@ -6,6 +6,10 @@ use ratatui::{layout::Rect, style::Color, widgets::Paragraph};
 const PNG: &[u8] = include_bytes!("../assets/brand/drudwyn-white.png");
 
 fn silhouette(size: usize) -> Option<String> {
+    raster(size, false)
+}
+
+fn raster(size: usize, braille: bool) -> Option<String> {
     let mut reader = png::Decoder::new(Cursor::new(PNG)).read_info().ok()?;
     let mut bytes = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut bytes).ok()?;
@@ -29,6 +33,34 @@ fn silhouette(size: usize) -> Option<String> {
         }
     }
     let mut text = String::new();
+    if braille {
+        for y in (0..size).step_by(4) {
+            for x in (0..size).step_by(2) {
+                let mut bits = 0u32;
+                for (dx, dy, bit) in [
+                    (0, 0, 0),
+                    (0, 1, 1),
+                    (0, 2, 2),
+                    (1, 0, 3),
+                    (1, 1, 4),
+                    (1, 2, 5),
+                    (0, 3, 6),
+                    (1, 3, 7),
+                ] {
+                    if pixels[y + dy][x + dx] {
+                        bits |= 1 << bit;
+                    }
+                }
+                text.push(if bits == 0 {
+                    ' '
+                } else {
+                    char::from_u32(0x2800 + bits).unwrap()
+                });
+            }
+            text.push('\n');
+        }
+        return Some(text);
+    }
     for y in (0..size).step_by(2) {
         for x in 0..size {
             text.push(match (pixels[y][x], pixels[y + 1][x]) {
@@ -47,7 +79,7 @@ pub(crate) fn render(frame: &mut ratatui::Frame<'_>, area: Rect, background: Col
     static ICON: OnceLock<Option<String>> = OnceLock::new();
     static COMPACT: OnceLock<Option<String>> = OnceLock::new();
     let icon = if area.width < 16 || area.height < 8 {
-        COMPACT.get_or_init(|| silhouette(8))
+        COMPACT.get_or_init(|| raster(16, true))
     } else {
         ICON.get_or_init(|| silhouette(16))
     };

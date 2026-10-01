@@ -5,7 +5,7 @@ client="${1:?requesting client required}"
 surface="${2:?surface required}"
 case "$surface" in
   navigator|cockpit) width=90% height=85% ;;
-  sessions) width=96 height=18 ;;
+  sessions) width=80% height=70% ;;
   *) exit 2 ;;
 esac
 shift 2

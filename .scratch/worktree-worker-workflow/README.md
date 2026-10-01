@@ -18,6 +18,8 @@ removes raw IDs from overview rows, and fixes crowded labels and controls.
 enlarges the two inventories and provides three reviewable designs.
 [19 — Codex hook ownership](19-codex-hook-ownership.md) records a reproduced
 live integration failure; its fix remains outstanding.
+[20 — Approved Cockpit and one-row proposals](20-approved-cockpit-and-one-row-proposals.md)
+implements the selected visual direction and explores a more compact status bar.
 The earlier acceptance below covered workflow mechanics but
 missed ordinary unregistered sessions and usable inventory space at 84 × 27.
 

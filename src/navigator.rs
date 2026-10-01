@@ -71,7 +71,6 @@ struct App {
     pending_kill: Option<Window>,
     pending_rename: Option<(String, String)>,
     notice: Option<String>,
-    agent_icon: String,
     theme: Theme,
     redact: bool,
 }
@@ -209,7 +208,6 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
 
 pub fn run(variant: Variant) -> io::Result<()> {
     let current = crate::navigation::context("#{window_id}")?;
-    let agent_icon = crate::icons::agent_icon();
     let windows = discover()?;
     let selected = windows
         .iter()
@@ -224,7 +222,6 @@ pub fn run(variant: Variant) -> io::Result<()> {
         pending_kill: None,
         pending_rename: None,
         notice: None,
-        agent_icon,
         theme: Theme::rose_pine(variant),
         redact: tmux_output(&["show-option", "-gqv", "@drudwyn-redact-labels"])? == "on",
     };
@@ -381,11 +378,23 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         .len() as u16
             + 1
     };
+    frame.render_widget(
+        Block::default().style(Style::default().fg(app.theme.text).bg(app.theme.base)),
+        area,
+    );
+    let shell_count = app
+        .visible
+        .iter()
+        .filter(|i| !app.windows[**i].managed)
+        .count() as u16;
+    let shell_height = (shell_count * 2 + 2)
+        .min(area.height.saturating_sub(5 + footer_height) / 3)
+        .max(2);
     let groups = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Percentage(42),
+            Constraint::Length(5),
+            Constraint::Length(shell_height),
             Constraint::Min(5),
             Constraint::Length(footer_height),
         ])
@@ -396,26 +405,17 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         .iter()
         .filter(|item| item.lifecycle.needs_attention())
         .count();
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " WORKSPACE NAVIGATOR ",
-                Style::default()
-                    .fg(app.theme.rose)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(
-                    "{} windows · {} agents · {} need you",
-                    app.windows.len(),
-                    agents,
-                    attention
-                ),
-                Style::default().fg(app.theme.muted),
-            ),
-        ]))
-        .block(Block::default().borders(Borders::BOTTOM)),
+    ui::masthead(
+        frame,
         groups[0],
+        app.theme,
+        "WORKSPACE NAVIGATOR",
+        &format!(
+            "{} windows · {} agents · {} need you",
+            app.windows.len(),
+            agents,
+            attention
+        ),
     );
 
     render_group(frame, app, groups[1], false, " WORKSPACES ");
@@ -485,75 +485,57 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
     let selected_window = app.visible.get(app.selected).copied();
     let selected =
         selected_window.and_then(|target| indices.iter().position(|index| *index == target));
+    let muted = Style::default().fg(app.theme.muted);
     let items = indices.iter().map(|index| {
         let item = &app.windows[*index];
-        let branch = item.branch.as_deref().unwrap_or("");
+        let available = area.width.saturating_sub(4) as usize;
+        let state_width = if agents { 15 } else { 0 };
+        let label = format!("{}  {} · {}", item.index, item.role, item.name);
+        let mut first = vec![ui::cell(
+            &label,
+            available.saturating_sub(state_width),
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        )];
         if agents {
-            let color = state_color(item.lifecycle, app.theme);
-            let prefix = format!(" {} {}  {} · ", app.agent_icon, item.index, item.role);
-            let state = item.lifecycle.label();
-            let available = area.width.saturating_sub(3) as usize;
-            let name_width =
-                available.saturating_sub(Line::from(prefix.as_str()).width() + state.len() + 3);
-            let name = ui::ellipsize(&item.name, name_width);
-            let pad = name_width.saturating_sub(Line::from(name.as_str()).width());
-            ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(prefix, Style::default().fg(app.theme.muted)),
-                    Span::styled(
-                        name,
-                        Style::default()
-                            .fg(app.theme.text)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" ".repeat(pad + 2)),
-                    Span::styled(
-                        state,
-                        Style::default().fg(color).add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-                Line::styled(
-                    ui::ellipsize(
-                        &format!(
-                            "    session {} · {} · {} · {} {}",
-                            item.session,
-                            item.agent.label(),
-                            item.evidence,
-                            age(item.since),
-                            branch
-                        ),
-                        available,
-                    ),
-                    Style::default().fg(app.theme.muted),
-                ),
-            ])
-        } else {
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!(
-                        " {}  {} · {}",
-                        item.index,
-                        item.role,
-                        truncate(&item.name, 22)
-                    ),
-                    Style::default().fg(app.theme.text),
-                ),
-                Span::styled(
-                    format!("  · session {}  {}", item.session, branch),
-                    Style::default().fg(app.theme.muted),
-                ),
-            ]))
+            first.push(Span::styled(
+                format!(" {} ", ui::activity(item.lifecycle)),
+                ui::activity_style(item.lifecycle, app.theme),
+            ));
         }
+        let context = if agents {
+            format!(
+                "session {} · {} · {} · {} {}",
+                item.session,
+                item.agent.label(),
+                item.evidence,
+                age(item.since),
+                item.branch.as_deref().unwrap_or("")
+            )
+        } else {
+            format!(
+                "session {}  {}",
+                item.session,
+                item.branch.as_deref().unwrap_or("")
+            )
+        };
+        ListItem::new(vec![
+            Line::from(first),
+            Line::styled(ui::ellipsize(&context, available), muted),
+        ])
     });
     let mut state = ListState::default().with_selected(selected);
     let list = List::new(items)
-        .block(Block::default().title(title).borders(Borders::BOTTOM))
-        .highlight_symbol("▶ ")
-        .highlight_style(
-            Style::default()
-                .fg(app.theme.rose)
-                .add_modifier(Modifier::BOLD),
-        );
+        .block(
+            Block::default()
+                .title(title)
+                .title_style(Style::default().fg(app.theme.accent()))
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(app.theme.line())),
+        )
+        .highlight_symbol("▎ ")
+        .highlight_style(Style::default().bg(app.theme.surface()));
     frame.render_stateful_widget(list, area, &mut state);
 }
 
@@ -656,10 +638,6 @@ fn tmux_output(args: &[&str]) -> io::Result<String> {
     }
 }
 
-fn truncate(value: &str, limit: usize) -> String {
-    value.chars().take(limit).collect()
-}
-
 fn age(since: Option<u64>) -> String {
     let Some(since) = since else {
         return String::new();
@@ -677,16 +655,6 @@ fn age(since: Option<u64>) -> String {
         format!("{}h", elapsed / 3600)
     } else {
         format!("{}d", elapsed / 86400)
-    }
-}
-
-fn state_color(state: Lifecycle, theme: Theme) -> ratatui::style::Color {
-    match state {
-        Lifecycle::Waiting => theme.gold,
-        Lifecycle::Review => theme.pine,
-        Lifecycle::Failed => theme.love,
-        Lifecycle::Running | Lifecycle::Working | Lifecycle::Starting => theme.rose,
-        Lifecycle::Unknown => theme.muted,
     }
 }
 
@@ -765,7 +733,6 @@ mod tests {
             pending_kill: None,
             pending_rename: None,
             notice: None,
-            agent_icon: "󰀀".into(),
             theme: Theme::rose_pine(Variant::Moon),
             redact: false,
         };
@@ -783,7 +750,6 @@ mod tests {
             pending_kill: None,
             pending_rename: None,
             notice: None,
-            agent_icon: "A".into(),
             theme: Theme::rose_pine(Variant::Moon),
             redact: false,
         }

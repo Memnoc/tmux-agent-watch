@@ -54,7 +54,7 @@ class ScreenshotRegression(IndependentNavigation):
         self.tmux('resize-window', '-t', pane, '-x', '84', '-y', '27')
         screen = self.wait_pane(pane, 'MATCHING 4')
         self.assertIn('Drudwyn', screen)
-        self.assertRegex(screen, '[█▀▄]')
+        self.assertRegex(screen, '[█▀▄\u2800-\u28ff]')
         self.assertNotRegex(screen, r'@\d+')
         self.assertNotIn(str(self.repo), screen)
         for name in ['worker-0', 'worker-1', 'worker-2']:
@@ -101,6 +101,24 @@ class ScreenshotRegression(IndependentNavigation):
         self.assertIn('session project', agents)
         self.assertIn('session other', agents)
         self.assertNotRegex(agents, r'@\d+')
+
+    def test_approved_cockpit_table_keeps_columns_and_selected_summary(self):
+        self.four_workers(separate_repos=True)
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project',
+                         '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0],
+                         str(BIN), 'cockpit')
+        self.tmux('resize-window', '-t', pane, '-x', '160', '-y', '42')
+        screen = self.wait_pane(pane, 'MATCHING 4')
+        header = next((line for line in screen.splitlines() if 'WORKER' in line and 'ACTIVITY' in line), '')
+        for column in ['WORKER', 'AGENT', 'ACTIVITY', 'BRANCH', 'GIT', 'INTEGRATION']:
+            self.assertIn(column, header)
+        self.assertIn('SELECTED WORKER', screen)
+        for total in ['1 WORK', '3 RUN', '0 UNCONFIRMED']:
+            self.assertIn(total, screen)
+        self.assertIn('0 need you', screen)
+        for name in ['worker-0', 'worker-1', 'worker-2']:
+            self.assertIn(name, screen)
+        self.assertNotRegex(screen, r'@\d+')
 
     def test_status_name_has_gutter_and_is_not_repeated_in_context(self):
         self.worker_hook('userPromptSubmit')

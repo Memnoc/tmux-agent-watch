@@ -855,3 +855,21 @@ windows and sessions stay open. Source and destination directory guards survive
 in the removal child after supervisor death; an orphaned operation can therefore
 require waiting before retry. No cleanup path deletes branches, pushes, deploys,
 or claims shipment.
+
+### Cockpit and navigator presentation
+
+Cockpit uses a project-grouped worker table with aligned activity badges. At
+wide sizes, branch, Git and integration columns accompany a concise selected
+worker panel; narrower windows keep the inventory and expose all details with
+`d`. `UNCONFIRMED` means activity cannot be attributed confidently; it is not a
+failure or completion signal. `RUNNING` confirms process presence only.
+
+Workspace and Session navigators use the same hound masthead, separators and
+selection colors. Workspace/Cockpit popups occupy 90% of the client width and
+85% of its height; Sessions occupies 80% by 70%. Existing keys and confirmation
+flows still apply.
+
+Single-row status designs are under review on the throwaway branch
+`spike/single-row-status-20261001`. The production bar remains two rows pending
+a design selection. Git +/- figures in that preview are simulated tracked-line
+changes against HEAD, not task progress.

@@ -1652,6 +1652,10 @@ fn event_loop(
 }
 
 fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
+    frame.render_widget(
+        Block::default().style(Style::default().fg(app.theme.text).bg(app.theme.base)),
+        frame.area(),
+    );
     if let Some(form) = &app.verification {
         let sections = Layout::vertical([
             Constraint::Length(2),
@@ -1722,7 +1726,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(if area.width < 70 { 8 } else { 9 }),
+            Constraint::Length(9),
             Constraint::Min(5),
             Constraint::Length(footer_height),
         ])
@@ -1735,10 +1739,13 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     } else {
         let body = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(44), Constraint::Min(1)])
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(if area.width >= 140 { 34 } else { 30 }),
+            ])
             .split(layout[1]);
         render_list(frame, app, body[0]);
-        render_detail(frame, app, body[1]);
+        render_summary(frame, app, body[1]);
     }
     render_footer(frame, app, layout[2]);
     if let Some(form) = &app.batch_form {
@@ -2248,56 +2255,22 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 }
 
 fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let theme = app.theme;
     let totals = crate::inventory::Totals::from_workspaces(&app.workspaces);
-    let narrow = area.width < 70;
-    let logo_width = if narrow { 8 } else { 16 };
-    let logo_height = if narrow { 4 } else { 8 };
-    frame.render_widget(
-        Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(app.theme.muted)),
-        area,
-    );
-    crate::brand::render(
+    let top = Rect::new(area.x, area.y, area.width, 5.min(area.height));
+    ui::masthead(
         frame,
-        Rect::new(area.x + 1, area.y, logo_width, logo_height),
-        if app.theme.base == Theme::rose_pine(Variant::Dawn).base {
-            Theme::rose_pine(Variant::Moon).base
-        } else {
-            app.theme.base
-        },
+        top,
+        theme,
+        "WORKSPACE COCKPIT / ALL PROJECTS",
+        &format!(
+            "GLOBAL {} workers · {} live · {} project{}",
+            totals.workers,
+            totals.live,
+            totals.projects,
+            if totals.projects == 1 { "" } else { "s" }
+        ),
     );
-    let offset = logo_width + 4;
-    let text_area = Rect::new(
-        area.x + offset,
-        area.y,
-        area.width.saturating_sub(offset + 1),
-        area.height.saturating_sub(1),
-    );
-    let requested = app
-        .query
-        .local_session
-        .as_deref()
-        .or(app.query.project.as_deref())
-        .unwrap_or("all");
-    let scope = if app.query.local_session.is_some() {
-        "session"
-    } else {
-        "project"
-    };
-    let matching =
-        crate::inventory::matching_label(&app.workspaces, &app.visible, app.query.windows);
-    let fixed_filter = if narrow {
-        format!("state {} · {scope} ", app.query.state.label())
-    } else {
-        format!("{matching} · {scope}  · state {}", app.query.state.label())
-    };
-    let project_width = (text_area.width as usize).saturating_sub(Line::from(fixed_filter).width());
-    let project = if requested == "all" || requested == "unassociated" {
-        ui::ellipsize(requested, project_width)
-    } else {
-        app.project_display_label(requested, project_width)
-    };
     let refresh = if app.refreshing.is_some() {
         "REFRESHING"
     } else if app.stale {
@@ -2305,96 +2278,150 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     } else {
         "Snapshot: r refresh"
     };
-    let title = Style::default()
-        .fg(app.theme.rose)
-        .add_modifier(Modifier::BOLD);
-    let muted = Style::default().fg(app.theme.muted);
-    let summary = format!("GLOBAL {} workers · {} live", totals.workers, totals.live);
-    let mut lines = if narrow {
-        vec![
-            Line::styled("Drudwyn · COCKPIT", title),
-            Line::from(summary),
-            Line::styled(
-                format!("Attention {} · {} exited", totals.attention, totals.exited),
-                Style::default().fg(if totals.attention > 0 {
-                    app.theme.gold
-                } else {
-                    app.theme.pine
-                }),
-            ),
-            Line::from(matching),
-            Line::styled(
-                format!("state {} · {scope} {project}", app.query.state.label()),
-                muted,
-            ),
-        ]
-    } else {
-        vec![
-            Line::styled("Drudwyn", title),
-            Line::styled("WORKSPACE COCKPIT / GLOBAL", muted),
-            Line::from(""),
-            Line::from(format!(
-                "{summary} · {} project{}",
-                totals.projects,
-                if totals.projects == 1 { "" } else { "s" }
-            )),
-            Line::styled(
-                format!(
-                    "Attention {}: {} failed / {} input / {} review",
-                    totals.attention, totals.failed, totals.input, totals.review
-                ),
-                Style::default().fg(if totals.attention > 0 {
-                    app.theme.gold
-                } else {
-                    app.theme.pine
-                }),
-            ),
-            Line::from(""),
-            Line::styled(
-                format!(
-                    "{matching} · {scope} {project} · state {}",
-                    app.query.state.label()
-                ),
-                muted,
-            ),
-        ]
-    };
-    if totals.categories_overlap() {
-        let warning = Line::styled("categories overlap", Style::default().fg(app.theme.gold));
-        if narrow {
-            lines.insert(3, warning);
-        } else {
-            lines[5] = warning;
-        }
-    }
-    lines.push(Line::styled(
-        format!(
-            "{refresh} · {}s · {} exited",
-            app.refreshed.elapsed().as_secs(),
-            totals.exited
+    let mut stats = Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            format!(" {} FAIL ", totals.failed),
+            ui::activity_style(Lifecycle::Failed, theme),
         ),
-        muted,
-    ));
-    // Header rows have fixed roles: never let a long filter/name displace
-    // freshness or attention. Keep explicit ellipses for shortened labels.
-    for line in &mut lines {
-        *line = Line::styled(
-            ui::ellipsize(&line.to_string(), text_area.width as usize),
-            line.style,
-        );
+        Span::raw("  "),
+        Span::styled(
+            format!(" {} INPUT ", totals.input),
+            ui::activity_style(Lifecycle::Waiting, theme),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!(" {} REVIEW ", totals.review),
+            ui::activity_style(Lifecycle::Review, theme),
+        ),
+        Span::styled(
+            format!("  {} need you · {} exited", totals.attention, totals.exited),
+            Style::default().fg(theme.muted),
+        ),
+    ]);
+    if area.width >= 100 {
+        let count = |state| {
+            app.workspaces
+                .iter()
+                .filter(|w| w.is_agent() && w.lifecycle == state)
+                .count()
+        };
+        stats.spans.push(Span::styled(
+            format!(
+                "  {} WORK  {} RUN  {} UNCONFIRMED",
+                count(Lifecycle::Working),
+                count(Lifecycle::Running),
+                count(Lifecycle::Unknown)
+            ),
+            Style::default().fg(theme.muted),
+        ));
     }
-    frame.render_widget(Paragraph::new(lines), text_area);
+    let requested = app
+        .query
+        .local_session
+        .as_deref()
+        .or(app.query.project.as_deref())
+        .unwrap_or("all");
+    let project = if requested == "all" || requested == "unassociated" {
+        requested.to_owned()
+    } else {
+        app.project_display_label(requested, 24)
+    };
+    let matching =
+        crate::inventory::matching_label(&app.workspaces, &app.visible, app.query.windows);
+    let scope = if app.query.local_session.is_some() {
+        "session"
+    } else {
+        "project"
+    };
+    let filters = format!(
+        "  {matching} · {scope} {project} · state {} · / search",
+        app.query.state.label()
+    );
+    let freshness = format!(
+        "  {refresh} · {}s{}",
+        app.refreshed.elapsed().as_secs(),
+        if totals.categories_overlap() {
+            " · categories overlap"
+        } else {
+            ""
+        }
+    );
+    frame.render_widget(
+        Paragraph::new(vec![
+            stats,
+            Line::styled(
+                ui::ellipsize(&filters, area.width as usize),
+                Style::default().fg(theme.accent()),
+            ),
+            Line::styled(
+                ui::ellipsize(&freshness, area.width as usize),
+                Style::default().fg(theme.muted),
+            ),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme.line())),
+        ),
+        Rect::new(
+            area.x,
+            area.y + 5,
+            area.width,
+            area.height.saturating_sub(5),
+        ),
+    );
 }
 
 fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let theme = app.theme;
+    let muted = Style::default().fg(theme.muted);
+    // Optional columns yield before worker identity and activity do.
+    let wide = area.width >= 112;
+    let branch = area.width >= 86;
+    let optional = if wide {
+        20 + 9 + 15
+    } else if branch {
+        22
+    } else {
+        0
+    };
+    let agent_width = if area.width >= 60 { 12 } else { 0 };
+    let name_width = (area.width as usize).saturating_sub(optional + agent_width + 23);
+    let mut columns = vec![ui::cell("  WORKER", name_width, muted)];
+    if agent_width > 0 {
+        columns.push(ui::cell("AGENT", agent_width, muted));
+    }
+    columns.push(ui::cell("ACTIVITY", 23, muted));
+    if branch {
+        columns.push(ui::cell("BRANCH", if wide { 20 } else { 22 }, muted));
+    }
+    if wide {
+        columns.push(ui::cell("GIT", 9, muted));
+        columns.push(ui::cell("INTEGRATION", 15, muted));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(columns)).block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme.line())),
+        ),
+        Rect::new(area.x, area.y, area.width, 2.min(area.height)),
+    );
+    let body = Rect::new(
+        area.x,
+        area.y + 2,
+        area.width,
+        area.height.saturating_sub(2),
+    );
     if app.visible.is_empty() {
         frame.render_widget(
             Paragraph::new(
-                "No workspaces match. x clears filters; n starts a worker; r refreshes.",
+                "  No workspaces match. x clears filters; n starts a worker; r refreshes.",
             )
             .wrap(Wrap { trim: false })
-            .style(Style::default().fg(app.theme.muted)),
-            area,
+            .style(muted),
+            body,
         );
         return;
     }
@@ -2407,7 +2434,10 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     };
     let mut counts = HashMap::new();
     for i in &app.visible {
-        *counts.entry(group_key(&app.workspaces[*i])).or_insert(0) += 1;
+        let w = &app.workspaces[*i];
+        let entry = counts.entry(group_key(w)).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 += usize::from(crate::inventory::attention_state(w).needs_attention());
     }
     let mut previous = String::new();
     let items = app.visible.iter().map(|index| {
@@ -2419,89 +2449,239 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             let label = if app.query.group == crate::inventory::Group::Attention {
                 key.clone()
             } else {
-                app.project_display_label(&key, area.width.saturating_sub(18) as usize)
+                app.project_display_label(&key, area.width.saturating_sub(34) as usize)
             };
             lines.push(Line::styled(
-                if app.query.group == crate::inventory::Group::Attention {
-                    format!("{label} [{key}] · {} matching", counts[&key])
-                } else {
-                    format!("  {} · {} matching", label, counts[&key])
-                },
-                Style::default().fg(app.theme.pine),
+                format!(
+                    "  {label} · {} matching · {} need you",
+                    counts[&key].0, counts[&key].1
+                ),
+                Style::default()
+                    .fg(theme.accent())
+                    .add_modifier(Modifier::BOLD),
             ));
         }
-        let color = match crate::inventory::attention_state(w) {
-            Lifecycle::Waiting => app.theme.gold,
-            Lifecycle::Failed => app.theme.love,
-            Lifecycle::Review => app.theme.pine,
-            Lifecycle::Working | Lifecycle::Starting => app.theme.rose,
-            _ => app.theme.muted,
-        };
-        let state = if w.process == "exited" && crate::inventory::has_failure(w) {
-            format!("{} / EXIT FAILED", w.lifecycle.label())
-        } else if w.process == "exited" {
-            format!("{} / EXIT", w.lifecycle.label())
+        let selected = app.visible.get(app.selected) == Some(index);
+        let row_style = Style::default().bg(if selected {
+            theme.surface()
         } else {
-            w.lifecycle.label().into()
-        };
-        let state_width = Line::from(state.as_str()).width() + 2;
-        let name_width = area.width.saturating_sub(state_width as u16 + 7) as usize;
-        let name = ui::ellipsize(app.workspace_label(w), name_width);
-        let padding = name_width.saturating_sub(Line::from(name.as_str()).width());
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(
-                    " {}{} ",
-                    if app.visible.get(app.selected) == Some(index) {
-                        "›"
-                    } else {
-                        " "
-                    },
-                    if w.identity.window_id == app.current_window {
-                        "•"
-                    } else {
-                        " "
-                    }
-                ),
-                Style::default().fg(app.theme.rose),
-            ),
-            Span::styled(
-                name,
-                Style::default()
-                    .fg(app.theme.text)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" ".repeat(padding + 2)),
-            Span::styled(
-                format!(" {state} "),
-                Style::default().fg(color).bg(app.theme.base),
-            ),
-        ]));
-        let branch = if app.config.redact_labels {
-            "[redacted]"
+            theme.base
+        });
+        let role = if w.coordinator.as_deref() == Some(w.identity.window_id.as_str()) {
+            "COORD"
+        } else if w.checkout.is_linked_worktree {
+            "WT"
+        } else if w.is_agent() {
+            "AGENT"
         } else {
-            w.checkout.branch.as_deref().unwrap_or("branch unknown")
+            "SH"
         };
-        lines.push(Line::styled(
-            ui::ellipsize(
-                &format!(
-                    "     {} · {} · {} · {}",
-                    w.role(),
-                    w.evidence.label(),
-                    w.agent.label(),
-                    branch
-                ),
-                area.width as usize,
-            ),
-            Style::default().fg(app.theme.muted),
+        let name = format!(
+            "{} {role}  {}{}",
+            if selected { "▎" } else { " " },
+            if w.identity.window_id == app.current_window {
+                "• "
+            } else {
+                ""
+            },
+            app.workspace_label(w)
+        );
+        let mut row = vec![ui::cell(
+            &name,
+            name_width,
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        )];
+        if agent_width > 0 {
+            row.push(ui::cell(
+                w.agent.label(),
+                agent_width,
+                Style::default().fg(theme.text),
+            ));
+        }
+        let state = format!(
+            " {}{} ",
+            ui::activity(w.lifecycle),
+            if w.process == "exited" {
+                if crate::inventory::has_failure(w) {
+                    " / EXIT FAILED"
+                } else {
+                    " / EXIT"
+                }
+            } else {
+                ""
+            }
+        );
+        let state = ui::ellipsize(&state, 22);
+        let remaining = 23usize.saturating_sub(Line::from(state.as_str()).width());
+        row.push(Span::styled(
+            state,
+            ui::activity_style(crate::inventory::attention_state(w), theme),
         ));
+        row.push(Span::raw(" ".repeat(remaining)));
+        if branch {
+            row.push(ui::cell(
+                if app.config.redact_labels {
+                    "[redacted]"
+                } else {
+                    w.checkout.branch.as_deref().unwrap_or("unknown")
+                },
+                if wide { 20 } else { 22 },
+                muted,
+            ));
+        }
+        if wide {
+            row.push(ui::cell(
+                match w.checkout.git_state {
+                    GitState::Clean => "clean",
+                    GitState::Dirty => "dirty",
+                    GitState::Unknown => "unknown",
+                },
+                9,
+                muted,
+            ));
+            let integration = app
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.details.get(&w.identity.window_id))
+                .and_then(|d| d.integration.as_deref())
+                .unwrap_or("unknown");
+            row.push(ui::cell(integration, 15, muted));
+        }
+        lines.push(Line::from(row).style(row_style));
+        lines.push(Line::styled(" ".repeat(area.width as usize), row_style));
         ListItem::new(lines)
     });
-    let list = List::new(items)
-        .highlight_style(Style::default())
-        .highlight_symbol("");
     let mut state = ListState::default().with_selected(Some(app.selected));
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(List::new(items), body, &mut state);
+}
+
+fn render_summary(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let theme = app.theme;
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(Style::default().fg(theme.line()));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let content = Rect::new(
+        inner.x + 2,
+        inner.y + 1,
+        inner.width.saturating_sub(4),
+        inner.height.saturating_sub(1),
+    );
+    let Some(w) = app.selected_workspace() else {
+        return;
+    };
+    let private = app.config.redact_labels;
+    let detail = app
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.details.get(&w.identity.window_id));
+    let mut lines = vec![
+        Line::styled("SELECTED WORKER", Style::default().fg(theme.accent())),
+        Line::default(),
+        Line::styled(
+            app.workspace_label(w).to_owned(),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+        Line::default(),
+        Line::from(Span::styled(
+            format!(" {} ", ui::activity(w.lifecycle)),
+            ui::activity_style(w.lifecycle, theme),
+        )),
+        Line::default(),
+    ];
+    let destination = detail
+        .and_then(|d| d.batch.as_ref())
+        .map(|b| b.destination.as_str())
+        .unwrap_or("Not configured");
+    let fields = [
+        (
+            "Project / session",
+            if private {
+                "[redacted]".into()
+            } else {
+                format!(
+                    "{} / {}",
+                    app.project_display_label(
+                        &crate::inventory::project_key(&app.workspaces, w),
+                        content.width as usize
+                    ),
+                    w.identity.session
+                )
+            },
+        ),
+        ("Workspace", w.role().to_owned()),
+        ("Agent", w.agent.label().to_owned()),
+        (
+            "Branch",
+            if private {
+                "[redacted]".into()
+            } else {
+                w.checkout
+                    .branch
+                    .clone()
+                    .unwrap_or_else(|| "unknown".into())
+            },
+        ),
+        (
+            "Integrate into",
+            if private {
+                "[redacted]".into()
+            } else {
+                destination.into()
+            },
+        ),
+        (
+            "Activity evidence",
+            format!("{} · {}", w.evidence.label(), w.process_label()),
+        ),
+        (
+            "Integration",
+            detail
+                .and_then(|d| d.integration.clone())
+                .unwrap_or_else(|| "unknown".into()),
+        ),
+        (
+            "Verification",
+            if private {
+                "[redacted]".into()
+            } else {
+                detail
+                    .and_then(|d| d.verification.clone())
+                    .unwrap_or_else(|| "Not verified".into())
+            },
+        ),
+    ];
+    for (label, value) in fields {
+        lines.push(Line::styled(label, Style::default().fg(theme.muted)));
+        lines.push(Line::from(value));
+        if content.height >= 38 {
+            lines.push(Line::default());
+        }
+    }
+    let footer = vec![
+        Line::styled(
+            "[Enter] Open workspace",
+            Style::default().fg(theme.accent()),
+        ),
+        Line::styled("[d] Full details", Style::default().fg(theme.accent())),
+    ];
+    let body = Rect::new(
+        content.x,
+        content.y,
+        content.width,
+        content.height.saturating_sub(3),
+    );
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), body);
+    frame.render_widget(
+        Paragraph::new(footer),
+        Rect::new(
+            content.x,
+            content.y + body.height + 1,
+            content.width,
+            2.min(content.height),
+        ),
+    );
 }
 
 fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -3006,9 +3186,9 @@ mod tests {
                 worker.exit_code = code;
                 worker.exit_time = code.map(|_| 1234567890);
                 let mut app = App::new(vec![worker], Variant::Moon, Config::default());
-                // Narrow overviews reserve their body for workers; detailed
-                // receipts are inspected through the same full-details surface.
-                app.details_open = width < 100;
+                // The approved overview has a concise sidebar; complete receipts
+                // remain available through the full-details surface at every width.
+                app.details_open = true;
                 let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
                 terminal.draw(|frame| render(frame, &app)).unwrap();
                 let content = terminal
@@ -3079,6 +3259,7 @@ Destination: assembled 123456 (at setup)
 Checkout: /repo/assembled"
                 .into(),
         );
+        app.details_open = true;
         let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
         terminal.draw(|frame| render(frame, &app)).unwrap();
         let content = terminal
@@ -3163,6 +3344,16 @@ Checkout: /repo/assembled"
                     content.contains("1 live"),
                     "coordinator shell counted as an agent"
                 );
+                app.details_open = true;
+                terminal.draw(|frame| render(frame, &app)).unwrap();
+                let content = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>();
+                app.details_open = false;
                 assert!(content.contains("project $7"));
                 if selected == 0 {
                     assert!(content.contains("Coordinator shell"));

@@ -19,6 +19,29 @@ pub struct Theme {
 }
 
 impl Theme {
+    pub fn surface(self) -> Color {
+        if self.base == Self::rose_pine(Variant::Dawn).base {
+            Color::Rgb(242, 233, 225)
+        } else if self.base == Self::rose_pine(Variant::Moon).base {
+            Color::Rgb(57, 53, 82)
+        } else {
+            Color::Rgb(38, 35, 58)
+        }
+    }
+    pub fn accent(self) -> Color {
+        if self.base == Self::rose_pine(Variant::Dawn).base {
+            Color::Rgb(144, 122, 169)
+        } else {
+            Color::Rgb(196, 167, 231)
+        }
+    }
+    pub fn line(self) -> Color {
+        if self.base == Self::rose_pine(Variant::Dawn).base {
+            Color::Rgb(206, 202, 205)
+        } else {
+            Color::Rgb(68, 65, 90)
+        }
+    }
     pub fn rose_pine(variant: Variant) -> Self {
         let rgb = |r, g, b| Color::Rgb(r, g, b);
         match variant {

@@ -10,7 +10,7 @@ use crossterm::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
@@ -418,6 +418,10 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         app
     };
     let area = frame.area();
+    frame.render_widget(
+        Block::default().style(Style::default().fg(app.theme.text).bg(app.theme.base)),
+        area,
+    );
     if let Some(form) = &app.new_session {
         let mut help = action_lines(NEW_ACTIONS, app.theme, area.width);
         help.push(Line::styled(
@@ -428,20 +432,17 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             Style::default().fg(app.theme.muted),
         ));
         let groups = Layout::vertical([
-            Constraint::Length(3),
+            Constraint::Length(5),
             Constraint::Min(4),
             Constraint::Length(help.len() as u16 + 1),
         ])
         .split(area);
-        frame.render_widget(
-            Paragraph::new(" NEW SESSION · Shell")
-                .style(
-                    Style::default()
-                        .fg(app.theme.rose)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(Block::default().borders(Borders::BOTTOM)),
+        ui::masthead(
+            frame,
             groups[0],
+            app.theme,
+            "NEW SESSION / SHELL",
+            "Name your shell and choose its starting directory",
         );
         let field = |label: &str, value: &str, active: bool| {
             Line::styled(
@@ -485,7 +486,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     let groups = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(5),
             Constraint::Min(3),
             Constraint::Length(footer_height),
         ])
@@ -496,61 +497,92 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         .filter(|session| session.attached > 0)
         .count();
 
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " SESSION NAVIGATOR ",
-                Style::default()
-                    .fg(app.theme.rose)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{} sessions · {} attached", app.sessions.len(), attached),
-                Style::default().fg(app.theme.muted),
-            ),
-        ]))
-        .block(Block::default().borders(Borders::BOTTOM)),
+    ui::masthead(
+        frame,
         groups[0],
+        app.theme,
+        "SESSION NAVIGATOR",
+        &format!("{} sessions · {} attached", app.sessions.len(), attached),
     );
-
+    let width = groups[1].width as usize;
+    let windows_width = if width >= 70 { 12 } else { 0 };
+    let connection_width = if width >= 70 {
+        22
+    } else if width >= 40 {
+        12
+    } else {
+        0
+    };
+    let name_width = width.saturating_sub(2 + windows_width + connection_width);
+    let muted = Style::default().fg(app.theme.muted);
+    let mut headings = vec![Span::raw("  "), ui::cell("SESSION", name_width, muted)];
+    if windows_width > 0 {
+        headings.push(ui::cell("WINDOWS", windows_width, muted));
+    }
+    if connection_width > 0 {
+        headings.push(ui::cell("CONNECTION", connection_width, muted));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(headings)).block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(app.theme.line())),
+        ),
+        Rect::new(groups[1].x, groups[1].y, groups[1].width, 2),
+    );
     let items = app.visible.iter().map(|index| {
         let session = &app.sessions[*index];
-        let is_current = session.name == app.current;
-        let marker = if session.attached > 0 { "●" } else { " " };
-        let state = match (session.attached > 0, is_current) {
-            (true, true) => "attached · current".to_owned(),
-            (true, false) => "attached".to_owned(),
-            (false, true) => "current".to_owned(),
-            (false, false) => String::new(),
+        let state = match (session.attached > 0, session.name == app.current) {
+            (true, true) if connection_width >= 22 => "attached · current",
+            (_, true) => "current",
+            (true, false) => "attached",
+            (false, false) => "detached",
         };
-        let window_label = if session.windows == 1 {
-            "window"
-        } else {
-            "windows"
-        };
-        ListItem::new(Line::from(vec![
-            Span::styled(
-                format!(" {marker} {:<26}", truncate(&session.name, 26)),
-                Style::default().fg(if session.attached > 0 {
-                    app.theme.pine
-                } else {
-                    app.theme.text
-                }),
-            ),
-            Span::styled(
-                format!("{:>2} {window_label:<7}  ", session.windows),
-                Style::default().fg(app.theme.muted),
-            ),
-            Span::styled(state, Style::default().fg(app.theme.muted)),
-        ]))
+        let mut cells = vec![ui::cell(
+            &session.name,
+            name_width,
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        )];
+        if windows_width > 0 {
+            cells.push(ui::cell(
+                &format!(
+                    "{} {}",
+                    session.windows,
+                    if session.windows == 1 {
+                        "window"
+                    } else {
+                        "windows"
+                    }
+                ),
+                windows_width,
+                muted,
+            ));
+        }
+        if connection_width > 0 {
+            cells.push(ui::cell(
+                state,
+                connection_width,
+                Style::default().fg(app.theme.pine),
+            ));
+        }
+        ListItem::new(vec![Line::from(cells), Line::default()])
     });
     let mut state = ListState::default().with_selected(Some(app.selected));
-    let list = List::new(items).highlight_symbol("▶ ").highlight_style(
-        Style::default()
-            .fg(app.theme.rose)
-            .add_modifier(Modifier::BOLD),
+    let list = List::new(items)
+        .highlight_symbol("▎ ")
+        .highlight_style(Style::default().bg(app.theme.surface()));
+    frame.render_stateful_widget(
+        list,
+        Rect::new(
+            groups[1].x,
+            groups[1].y + 2,
+            groups[1].width,
+            groups[1].height.saturating_sub(2),
+        ),
+        &mut state,
     );
-    frame.render_stateful_widget(list, groups[1], &mut state);
 
     if let Some(target) = &app.pending_kill {
         let message = format!(
@@ -662,10 +694,6 @@ fn tmux_output(args: &[&str]) -> io::Result<String> {
     }
 }
 
-fn truncate(value: &str, limit: usize) -> String {
-    value.chars().take(limit).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,6 +760,33 @@ mod tests {
             current: String::new(),
             theme: Theme::rose_pine(Variant::Moon),
             redact: false,
+        }
+    }
+
+    #[test]
+    fn narrow_session_picker_preserves_names_before_secondary_columns() {
+        for width in [24, 34, 38, 48, 84] {
+            let mut app = populated_app();
+            app.sessions[0].name = "project-alpha".into();
+            app.sessions[1].name = "project-beta".into();
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
+            terminal.draw(|frame| render(frame, &app)).unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>();
+            assert!(
+                text.contains("project-alpha"),
+                "missing first session at {width}"
+            );
+            assert!(
+                text.contains("project-beta"),
+                "missing second session at {width}"
+            );
         }
     }
 

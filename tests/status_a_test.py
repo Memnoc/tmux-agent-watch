@@ -353,7 +353,7 @@ class StatusATest(IndependentNavigation):
         self.status_key(self.clients[0],b'w')
         self.terminal(self.clients[0],120,'MATCHING 4 windows')
         self.key(self.clients[0],b'p')
-        self.terminal(self.clients[0],120,'project $')
+        self.terminal(self.clients[0],120,'project project')
         self.close_popup(self.clients[0])
         self.status_key(self.clients[0],b'w')
         self.terminal(self.clients[0],120,'MATCHING 4 windows')

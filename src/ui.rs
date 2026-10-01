@@ -125,6 +125,122 @@ fn context_line(context: (&str, &str, FooterTone), theme: Theme) -> Line<'static
     ])
 }
 
+/// A common compact masthead: the bundled hound, identity, and live summary.
+pub(crate) fn masthead(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    theme: Theme,
+    title: &str,
+    summary: &str,
+) {
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(theme.line())),
+        area,
+    );
+    if area.width < 40 || area.height < 5 {
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::styled(title.to_owned(), Style::default().fg(theme.accent())),
+                Line::from(ellipsize(summary, area.width as usize)),
+            ]),
+            area,
+        );
+        return;
+    }
+    let background = if theme.base == Theme::rose_pine(crate::theme::Variant::Dawn).base {
+        Theme::rose_pine(crate::theme::Variant::Moon).base
+    } else {
+        theme.base
+    };
+    crate::brand::render(frame, Rect::new(area.x + 2, area.y, 8, 4), background);
+    let wide = area.width >= 100;
+    let title_x = if wide { 32 } else { 12 };
+    if wide {
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::styled(
+                    "Drudwyn",
+                    Style::default()
+                        .fg(theme.accent())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Line::styled("WORKSPACES", Style::default().fg(theme.muted)),
+            ]),
+            Rect::new(area.x + 12, area.y + 1, 18, 2),
+        );
+    }
+    let text = Rect::new(
+        area.x + title_x,
+        area.y,
+        area.width.saturating_sub(title_x + 2),
+        4,
+    );
+    let lines = if wide {
+        vec![
+            Line::styled(
+                title.to_owned(),
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            ),
+            Line::default(),
+            Line::styled(
+                ellipsize(summary, text.width as usize),
+                Style::default().fg(theme.muted),
+            ),
+        ]
+    } else {
+        vec![
+            Line::styled(
+                "Drudwyn",
+                Style::default()
+                    .fg(theme.accent())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                ellipsize(title, text.width as usize),
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            ),
+            Line::default(),
+            Line::styled(
+                ellipsize(summary, text.width as usize),
+                Style::default().fg(theme.muted),
+            ),
+        ]
+    };
+    frame.render_widget(Paragraph::new(lines), text);
+}
+
+pub(crate) fn cell(value: &str, width: usize, style: Style) -> Span<'static> {
+    let value = ellipsize(value, width.saturating_sub(2));
+    let pad = width.saturating_sub(Line::from(value.as_str()).width());
+    Span::styled(format!("{value}{}", " ".repeat(pad)), style)
+}
+
+pub(crate) fn activity(state: crate::domain::Lifecycle) -> &'static str {
+    use crate::domain::Lifecycle::*;
+    match state {
+        Working => "WORKING",
+        Running => "RUNNING",
+        Waiting => "NEEDS INPUT",
+        Review => "REVIEW",
+        Failed => "FAILED",
+        Starting => "STARTING",
+        Unknown => "UNCONFIRMED",
+    }
+}
+
+pub(crate) fn activity_style(state: crate::domain::Lifecycle, theme: Theme) -> Style {
+    use crate::domain::Lifecycle::*;
+    match state {
+        Failed => Style::default().fg(theme.base).bg(theme.love),
+        Waiting => Style::default().fg(theme.base).bg(theme.gold),
+        Review => Style::default().fg(theme.base).bg(theme.pine),
+        Working | Starting => Style::default().fg(theme.accent()).bg(theme.surface()),
+        _ => Style::default().fg(theme.pine).bg(theme.surface()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
