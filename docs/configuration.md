@@ -25,7 +25,7 @@ not survive a server restart.
 | `@drudwyn-agent`         | `codex` | Agent started for new worktrees            |
 | `@drudwyn-base-branch`   | `main`  | Base for new tasks and finished-work validation      |
 | `@drudwyn-branch-prefix` | `work/` | Prefix for generated branches              |
-| `@drudwyn-theme`         | `moon`  | `rose-pine`, `moon`, or `dawn`             |
+| `@drudwyn-theme`         | `rose-pine`  | `rose-pine`, `moon`, or `dawn`             |
 | `@drudwyn-icon-mode`     | `auto`  | Prefer Nerd Fonts when detected; `nerd` forces them, `safe` uses ASCII |
 | `@drudwyn-agent-icon`    | `auto`  | Agent icon policy; `hound`, `bot`, or a custom glyph overrides all agents |
 | `@drudwyn-redact-labels` | `off`   | Hide workspace labels while screen sharing |
@@ -165,7 +165,28 @@ tmux source-file ~/.tmux.conf
 
 The legacy mode reads pane scrollback. See the [version boundary](privacy.md#version-boundary) before enabling it.
 
-## Status-bar A (Rust)
+## Status layout (Rust)
+
+**Appearance → Status layout** defaults to `focus`: the approved single-row B
+layout. It shows selected workspace role/name and activity, the branch when
+space permits, tracked Git line changes against HEAD, and clickable global
+**NEED N** attention. `*` means attention categories overlap, not extra workers.
+`STALE` marks expired observer evidence. Git counts include staged and unstaged
+tracked text changes; they exclude untracked files and are not task progress.
+Binary changes have no text-line count. `Git ?` means the selected checkout or
+Git evidence is unavailable. Narrow widths retain attention and bound identity.
+
+```tmux
+set -g @drudwyn-status-layout focus
+set -g @drudwyn-theme rose-pine
+```
+
+Rosé Pine is the default palette. `moon` and `dawn` remain explicit choices.
+Select `tabs` to restore the two-row layout described below. Visible-tab and
+per-agent-icon options apply to that layout; focus uses explicit role labels.
+
+### Two-row tabs
+
 
 The two informative rows show local tabs above selected context and labelled
 global attention labelled **NEED YOU** (workers needing attention, not all
@@ -193,8 +214,8 @@ binding at the default key is preserved; choose an unused key in Options in that
 case. `prefix w` and native tree bindings remain available for window movement.
 
 Ambient jobs reuse the existing lifecycle observer; they do not start scans
-for each client redraw. The context row reads only the selected checkout's
-branch, never full Git details for the global fleet. A successful reconciliation
+for each client redraw. Git context reads only the selected checkout: branch in tabs, branch and
+tracked-line totals in focus. It never probes Git changes for the global fleet. A successful reconciliation
 publishes its live observation time under the existing lifecycle guard. Missing,
 malformed, future or expired times show **NEED YOU STALE** while retaining the
 last observed counts. Expiry is twice `@drudwyn-interval` plus five seconds.

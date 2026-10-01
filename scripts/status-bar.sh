@@ -16,7 +16,7 @@ theme="$(tmux show-option -gqv @drudwyn-theme 2>/dev/null || true)"
 agent_icon_choice="$(tmux show-option -gqv @drudwyn-agent-icon 2>/dev/null || true)"
 agent_icon_choice="${agent_icon_choice:-auto}"
 
-case "${theme:-moon}" in
+case "${theme:-rose-pine}" in
   dawn) base='#faf4ed'; surface='#f2e9e1'; highlight='#dfdad9'; text='#575279'; subtle='#797593'; muted='#9893a5'; love='#b4637a'; gold='#ea9d34'; rose='#d7827e'; pine='#286983'; foam='#56949f'; iris='#907aa9' ;;
   rose-pine) base='#191724'; surface='#26233a'; highlight='#403d52'; text='#e0def4'; subtle='#908caa'; muted='#6e6a86'; love='#eb6f92'; gold='#f6c177'; rose='#ebbcba'; pine='#31748f'; foam='#9ccfd8'; iris='#c4a7e7' ;;
   *) base='#232136'; surface='#393552'; highlight='#44415a'; text='#e0def4'; subtle='#908caa'; muted='#6e6a86'; love='#eb6f92'; gold='#f6c177'; rose='#ea9a97'; pine='#3e8fb0'; foam='#9ccfd8'; iris='#c4a7e7' ;;

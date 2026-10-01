@@ -148,7 +148,7 @@ symbol_for_state() {
 
 color_for_state() {
   local theme value name fallback
-  theme="$(tmux_option @drudwyn-theme moon)"
+  theme="$(tmux_option @drudwyn-theme rose-pine)"
   case "$1" in
     working) name=working; fallback='#9ccfd8'; [ "$theme" != dawn ] || fallback='#56949f' ;;
     needs_input) name=needs-input; fallback='#f6c177'; [ "$theme" != dawn ] || fallback='#ea9d34' ;;

@@ -46,6 +46,21 @@ class ScreenshotRegression(IndependentNavigation):
         self.assertIn('IDENTITY ' + self.worker, screen)
         self.assertIn('project unknown', screen)
 
+    def test_wide_cockpit_uses_branch_space_and_complete_sidebar_values(self):
+        branch='work/worktree-worker-workflow'
+        subprocess.run(['git','-C',str(self.repo),'branch','-m',branch],check=True)
+        self.worker_hook('userPromptSubmit')
+        pane=self.tmux('new-window','-d','-P','-F','#{pane_id}','-t','project',
+                       '-c',str(self.repo),'env','DRUDWYN_CLIENT='+self.clients[0],str(BIN),'cockpit')
+        self.tmux('resize-window','-t',pane,'-x','200','-y','38')
+        screen=self.wait_pane(pane,'MATCHING 1')
+        worker_rows=[line for line in screen.splitlines() if 'WORKING' in line and 'AGENT' in line]
+        self.assertTrue(worker_rows,screen)
+        self.assertIn(branch,worker_rows[0])
+        self.assertIn('Verification',screen)
+        self.assertIn('Not verified',screen)
+        self.assertIn('[d] Full details',screen)
+
     def test_branded_overview_hides_raw_ids_and_full_paths(self):
         self.four_workers(separate_repos=True)
         pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project',

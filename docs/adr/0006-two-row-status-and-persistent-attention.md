@@ -60,3 +60,12 @@ The preview proposes four tabs by default, plus selected-only, three, six, and
 automatic-fit choices. The final setting belongs in the existing options editor
 and tmux configuration; its exact default and range are subject to preview
 feedback. Simulated browser rendering does not establish live tmux behavior.
+
+## Amendment — 2026-10-01
+
+After using the two-row layout, Memnoc requested less terminal height and
+selected single-row proposal B. The installed default is now `focus`: selected
+workspace and activity, optional branch, tracked Git +/- and global NEED count.
+Persistent attention and the separation of process, lifecycle and integration
+evidence remain. `@drudwyn-status-layout tabs` retains the prior two-row design
+and visible-tab choices. This supersedes the default row-count decision above.

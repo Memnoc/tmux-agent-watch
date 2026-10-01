@@ -66,7 +66,7 @@ enum Command {
         mode: HudMode,
         session: String,
         window_id: String,
-        #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
+        #[arg(long, value_enum, default_value_t = ThemeArg::RosePine)]
         theme: ThemeArg,
     },
     /// Render one sidebar frame and its click map.
@@ -75,7 +75,7 @@ enum Command {
         current_window: String,
         #[arg(long)]
         expanded: bool,
-        #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
+        #[arg(long, value_enum, default_value_t = ThemeArg::RosePine)]
         theme: ThemeArg,
     },
     /// Open the interactive fleet cockpit.
@@ -88,17 +88,17 @@ enum Command {
         /// Open directly in the new workspace form.
         #[arg(long)]
         start: bool,
-        #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
+        #[arg(long, value_enum, default_value_t = ThemeArg::RosePine)]
         theme: ThemeArg,
     },
     /// Open the grouped tmux window navigator.
     Navigator {
-        #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
+        #[arg(long, value_enum, default_value_t = ThemeArg::RosePine)]
         theme: ThemeArg,
     },
     /// Open the compact tmux session navigator.
     Sessions {
-        #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
+        #[arg(long, value_enum, default_value_t = ThemeArg::RosePine)]
         theme: ThemeArg,
     },
     /// Create an ad hoc shell session in the requesting terminal.
@@ -108,7 +108,7 @@ enum Command {
     },
     /// Open the interactive tmux options editor.
     Settings {
-        #[arg(long, value_enum, default_value_t = ThemeArg::Moon)]
+        #[arg(long, value_enum, default_value_t = ThemeArg::RosePine)]
         theme: ThemeArg,
     },
     Workspace {

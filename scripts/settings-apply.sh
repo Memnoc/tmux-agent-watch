@@ -11,7 +11,7 @@ if [ "$option" = @drudwyn-interval ]; then
 fi
 
 case "$option" in
-  @drudwyn-*-key|@drudwyn-hud|@drudwyn-status|@drudwyn-color-window-names|@drudwyn-sidebar|@drudwyn-v2)
+  @drudwyn-*-key|@drudwyn-hud|@drudwyn-status|@drudwyn-status-layout|@drudwyn-color-window-names|@drudwyn-sidebar|@drudwyn-v2)
     bash "$PLUGIN_DIR/tmux-drudwyn.tmux"
     ;;
 esac

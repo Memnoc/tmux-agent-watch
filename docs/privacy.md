@@ -153,10 +153,13 @@ If a sampled live pane's root is missing from the subsequent process observation
 reconciliation retries both observations before any writes. Persistent uncertainty
 returns an error without clearing evidence or publishing a fresh scan timestamp.
 
-Status-bar A reads the observer's existing content-blind projection. Successful
+Both status layouts read the observer's existing content-blind projection. Successful
 reconciliation publishes only a live scan timestamp under the existing guard;
 it is not a history or file cache. Ambient jobs do not start process scans or
-probe Git per tab. Only selected-branch metadata is queried for the context row.
+probe Git per tab. The selected bound checkout supplies branch metadata and,
+in Focus, tracked-line totals against HEAD. Git produces short statistics only;
+external diff and text conversion are disabled, inherited Git namespace
+variables are cleared, and no diff content is displayed or retained.
 Each row uses explicit client width and stable session/window IDs, with no
 shared mutable rendered-row cache. Click ranges contain fixed action names or
 stable IDs; no label becomes a command. Stale observation timestamps are shown

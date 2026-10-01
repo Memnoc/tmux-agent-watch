@@ -429,7 +429,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 .as_deref()
                 .unwrap_or("Enter a name and starting directory")
                 .to_owned(),
-            Style::default().fg(app.theme.muted),
+            Style::default().fg(app.theme.subtle()),
         ));
         let groups = Layout::vertical([
             Constraint::Length(5),
@@ -514,7 +514,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         0
     };
     let name_width = width.saturating_sub(2 + windows_width + connection_width);
-    let muted = Style::default().fg(app.theme.muted);
+    let muted = Style::default().fg(app.theme.subtle());
     let mut headings = vec![Span::raw("  "), ui::cell("SESSION", name_width, muted)];
     if windows_width > 0 {
         headings.push(ui::cell("WINDOWS", windows_width, muted));
@@ -572,7 +572,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     let mut state = ListState::default().with_selected(Some(app.selected));
     let list = List::new(items)
         .highlight_symbol("▎ ")
-        .highlight_style(Style::default().bg(app.theme.surface()));
+        .highlight_style(Style::default().bg(app.theme.selection()));
     frame.render_stateful_widget(
         list,
         Rect::new(
@@ -613,7 +613,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         let mut lines = action_lines;
         lines.push(Line::styled(
             format!(" STATUS   {notice}"),
-            Style::default().fg(app.theme.muted),
+            Style::default().fg(app.theme.subtle()),
         ));
         frame.render_widget(
             Paragraph::new(lines).block(Block::default().borders(Borders::TOP)),

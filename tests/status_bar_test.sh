@@ -59,7 +59,7 @@ printf '%s' "$identity" | grep -Fq '✣ '
 printf '%s' "$identity" | grep -Fq '✦ '
 printf '%s' "$identity" | grep -Fq '⌬ '
 printf '%s' "$identity" | grep -Fq '#[bg=#f6c177,fg=#191724,bold]'
-printf '%s' "$identity" | grep -Fq '#[bg=#3e8fb0,fg=#faf4ed,bold]'
+printf '%s' "$identity" | grep -Fq '#[bg=#31748f,fg=#faf4ed,bold]'
 tmux -L "$SOCKET" set-option -g @drudwyn-claude-icon 'λ'
 custom_identity="$($ROOT/scripts/status-bar.sh bar "$codex_window" 160)"
 printf '%s' "$custom_identity" | grep -Fq 'λ '

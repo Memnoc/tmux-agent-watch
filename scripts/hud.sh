@@ -6,7 +6,7 @@ PLUGIN_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 v2="$(tmux show-option -gqv @drudwyn-v2 2>/dev/null || true)"
 if [ "${v2:-on}" = on ]; then
   theme="$(tmux show-option -gqv @drudwyn-theme 2>/dev/null || true)"
-  exec "$PLUGIN_DIR/scripts/v2.sh" hud "$1" "${2:-}" "${3:-}" "${theme:-moon}"
+  exec "$PLUGIN_DIR/scripts/v2.sh" hud "$1" "${2:-}" "${3:-}" "${theme:-rose-pine}"
 fi
 
 mode="$1"

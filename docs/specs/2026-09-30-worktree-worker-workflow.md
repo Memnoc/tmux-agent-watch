@@ -457,5 +457,20 @@ run `python3 scripts/status-feedback.spike.py` in its worktree and open
 http://127.0.0.1:8788/status-feedback.spike.html?view=bar&variant=A.
 A uses quiet tabs, B focuses on the selected workspace and Git, and C adds
 project activity counts. Git changes and global attention remain visible at
-48/64/80/120/160 columns. No variant has been selected; the two-row production
-bar and ADR-0006 remain unchanged pending that choice.
+48/64/80/120/160 columns. Memnoc selected B on 2026-10-01. It becomes the default installed single-row
+layout; the existing two-row tabs remain an explicit Appearance option.
+
+The same follow-up corrects the default palette to Rosé Pine (not Moon), gives
+wide Cockpit branches spare table width, improves secondary-text contrast, and
+bounds sidebar values so labels never appear without their value. Full evidence
+remains available with `d`. See ticket 21 for acceptance and verification.
+
+Workspace and Session redesigns are proposals, sharing the approved Cockpit
+masthead, selection rail, quiet table rules, role labels and selected-item
+sidebar. Workspace groups windows by session; Sessions prioritizes session
+identity and explicit shell creation. The runnable, simulated preview is archived
+on `spike/workspace-session-20261001` at `dd1130f` in `/tmp/drudwyn-navigation-spike`.
+Run `python3 scripts/status-feedback.spike.py` and open
+http://127.0.0.1:8789/status-feedback.spike.html?view=workspace or `?view=sessions`.
+These proposed navigation layouts await feedback; this change only applies the
+shared palette to the existing production navigators.

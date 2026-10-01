@@ -51,9 +51,10 @@ provide quick movement and session management.
 
 ### Ambient status
 
-The always-visible two-row tmux bar: stable workspace tabs with worktree and
-lifecycle identity, followed by selected-workspace context and persistent
-global attention counts, including hidden workers. The grouped navigator
+The always-visible tmux bar defaults to single-row Focus B: selected workspace
+role and activity, branch when space permits, tracked Git line counts and
+persistent global attention including hidden workers. Optional two-row tabs
+retain stable window identities above selected context and attention. The grouped navigator
 provides the complete window inventory when the bar limits visible tabs;
 the Workspace Cockpit provides global supervision and lifecycle actions.
 The former sidebar is an opt-in compatibility surface.

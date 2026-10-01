@@ -12,8 +12,8 @@ case "$color" in
   ''|default)
     case "$(tmux show-option -gqv @drudwyn-theme 2>/dev/null || true)" in
       dawn) color='#dfdad9' ;;
-      rose-pine) color='#403d52' ;;
-      *) color='#393552' ;;
+      moon) color='#393552' ;;
+      *) color='#403d52' ;;
     esac
     ;;
 esac

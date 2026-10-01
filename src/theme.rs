@@ -35,11 +35,29 @@ impl Theme {
             Color::Rgb(196, 167, 231)
         }
     }
+    pub fn subtle(self) -> Color {
+        if self.base == Self::rose_pine(Variant::Dawn).base {
+            Color::Rgb(121, 117, 147)
+        } else {
+            Color::Rgb(144, 140, 170)
+        }
+    }
+    pub fn selection(self) -> Color {
+        if self.base == Self::rose_pine(Variant::Dawn).base {
+            Color::Rgb(223, 218, 217)
+        } else if self.base == Self::rose_pine(Variant::Moon).base {
+            Color::Rgb(68, 65, 90)
+        } else {
+            Color::Rgb(64, 61, 82)
+        }
+    }
     pub fn line(self) -> Color {
         if self.base == Self::rose_pine(Variant::Dawn).base {
             Color::Rgb(206, 202, 205)
-        } else {
+        } else if self.base == Self::rose_pine(Variant::Moon).base {
             Color::Rgb(68, 65, 90)
+        } else {
+            Color::Rgb(64, 61, 82)
         }
     }
     pub fn rose_pine(variant: Variant) -> Self {

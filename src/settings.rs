@@ -90,6 +90,9 @@ impl SettingSpec {
             "@drudwyn-redact-labels" => {
                 "Hide workspace, repository and branch labels in Drudwyn views. Reopen other popups to update them."
             }
+            "@drudwyn-status-layout" => {
+                "Focus uses one row for the selected workspace, Git line counts and global attention. Tabs restores the two-row window overview."
+            }
             "@drudwyn-theme" => {
                 "Colour palette for the status bar and popups. Previews here immediately; reopen other popups."
             }
@@ -118,7 +121,7 @@ impl SettingSpec {
                 "On uses Rust supervision. Off uses legacy shell scanning, which reads terminal scrollback."
             }
             "@drudwyn-hud" => {
-                "Show the two-line Drudwyn status bar. Off restores the status layout saved when the HUD was enabled."
+                "Show the Drudwyn status bar in the selected layout. Off restores the status layout saved when the HUD was enabled."
             }
             "@drudwyn-visible-tabs" => {
                 "Maximum local tabs: 1 selected-only, 3, 4 default, 6, or auto. Width may show fewer; +N excludes the cap and opens every local window."
@@ -241,9 +244,16 @@ const SETTINGS: &[SettingSpec] = &[
     },
     SettingSpec {
         category: Category::Appearance,
+        option: "@drudwyn-status-layout",
+        label: "Status layout",
+        default: "focus",
+        kind: SettingKind::Choice(&["focus", "tabs"]),
+    },
+    SettingSpec {
+        category: Category::Appearance,
         option: "@drudwyn-theme",
         label: "Theme",
-        default: "moon",
+        default: "rose-pine",
         kind: SettingKind::Choice(&["rose-pine", "moon", "dawn"]),
     },
     SettingSpec {
@@ -1101,7 +1111,7 @@ mod tests {
             .map(|setting| setting.option)
             .collect::<HashSet<_>>();
         assert_eq!(options.len(), SETTINGS.len());
-        assert_eq!(SETTINGS.len(), 42);
+        assert_eq!(SETTINGS.len(), 43);
         for setting in SETTINGS {
             assert!(!setting.description().is_empty());
         }

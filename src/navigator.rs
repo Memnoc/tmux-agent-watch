@@ -485,7 +485,7 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
     let selected_window = app.visible.get(app.selected).copied();
     let selected =
         selected_window.and_then(|target| indices.iter().position(|index| *index == target));
-    let muted = Style::default().fg(app.theme.muted);
+    let muted = Style::default().fg(app.theme.subtle());
     let items = indices.iter().map(|index| {
         let item = &app.windows[*index];
         let available = area.width.saturating_sub(4) as usize;
@@ -535,7 +535,7 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
                 .border_style(Style::default().fg(app.theme.line())),
         )
         .highlight_symbol("▎ ")
-        .highlight_style(Style::default().bg(app.theme.surface()));
+        .highlight_style(Style::default().bg(app.theme.selection()));
     frame.render_stateful_widget(list, area, &mut state);
 }
 

@@ -2296,7 +2296,7 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         ),
         Span::styled(
             format!("  {} need you · {} exited", totals.attention, totals.exited),
-            Style::default().fg(theme.muted),
+            Style::default().fg(theme.subtle()),
         ),
     ]);
     if area.width >= 100 {
@@ -2313,7 +2313,7 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 count(Lifecycle::Running),
                 count(Lifecycle::Unknown)
             ),
-            Style::default().fg(theme.muted),
+            Style::default().fg(theme.subtle()),
         ));
     }
     let requested = app
@@ -2356,7 +2356,7 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             ),
             Line::styled(
                 ui::ellipsize(&freshness, area.width as usize),
-                Style::default().fg(theme.muted),
+                Style::default().fg(theme.subtle()),
             ),
         ])
         .block(
@@ -2375,7 +2375,7 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
 
 fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let theme = app.theme;
-    let muted = Style::default().fg(theme.muted);
+    let muted = Style::default().fg(theme.subtle());
     // Optional columns yield before worker identity and activity do.
     let wide = area.width >= 112;
     let branch = area.width >= 86;
@@ -2387,14 +2387,24 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         0
     };
     let agent_width = if area.width >= 60 { 12 } else { 0 };
-    let name_width = (area.width as usize).saturating_sub(optional + agent_width + 23);
+    let flexible = (area.width as usize).saturating_sub(agent_width + 23 + 9 + 15);
+    let name_width = if wide {
+        (flexible * 45 / 100).clamp(28, 40)
+    } else {
+        (area.width as usize).saturating_sub(optional + agent_width + 23)
+    };
+    let branch_width = if wide {
+        flexible.saturating_sub(name_width)
+    } else {
+        22
+    };
     let mut columns = vec![ui::cell("  WORKER", name_width, muted)];
     if agent_width > 0 {
         columns.push(ui::cell("AGENT", agent_width, muted));
     }
     columns.push(ui::cell("ACTIVITY", 23, muted));
     if branch {
-        columns.push(ui::cell("BRANCH", if wide { 20 } else { 22 }, muted));
+        columns.push(ui::cell("BRANCH", branch_width, muted));
     }
     if wide {
         columns.push(ui::cell("GIT", 9, muted));
@@ -2463,7 +2473,7 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         }
         let selected = app.visible.get(app.selected) == Some(index);
         let row_style = Style::default().bg(if selected {
-            theme.surface()
+            theme.selection()
         } else {
             theme.base
         });
@@ -2525,7 +2535,7 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 } else {
                     w.checkout.branch.as_deref().unwrap_or("unknown")
                 },
-                if wide { 20 } else { 22 },
+                branch_width,
                 muted,
             ));
         }
@@ -2652,10 +2662,19 @@ fn render_summary(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             },
         ),
     ];
+    let budget = content.height.saturating_sub(3) as usize;
+    // Name and field values have explicit ellipses; d retains full receipts.
+    lines[2] = Line::styled(
+        ui::ellipsize(app.workspace_label(w), content.width as usize),
+        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+    );
     for (label, value) in fields {
-        lines.push(Line::styled(label, Style::default().fg(theme.muted)));
-        lines.push(Line::from(value));
-        if content.height >= 38 {
+        if lines.len() + 2 > budget {
+            break;
+        }
+        lines.push(Line::styled(label, Style::default().fg(theme.subtle())));
+        lines.push(Line::from(ui::ellipsize(&value, content.width as usize)));
+        if budget >= 30 {
             lines.push(Line::default());
         }
     }
@@ -2688,7 +2707,7 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let Some(workspace) = app.selected_workspace() else {
         frame.render_widget(
             Paragraph::new("Select a workspace to inspect it.")
-                .style(Style::default().fg(app.theme.muted))
+                .style(Style::default().fg(app.theme.subtle()))
                 .block(Block::default().title(" SELECTED ").borders(Borders::LEFT)),
             area,
         );
@@ -2745,7 +2764,7 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             Span::styled(workspace.lifecycle.label(), Style::default().fg(color)),
             Span::styled(
                 format!(" · {}", age(workspace.state_since)),
-                Style::default().fg(app.theme.muted),
+                Style::default().fg(app.theme.subtle()),
             ),
         ]),
         detail_line(
@@ -2946,7 +2965,10 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     } else {
         " f      finish · selected destination and writer guards"
     };
-    lines.push(Line::styled(finish, Style::default().fg(app.theme.muted)));
+    lines.push(Line::styled(
+        finish,
+        Style::default().fg(app.theme.subtle()),
+    ));
     // Use the renderer's actual wrapping, including word boundaries and borders,
     // so every last detail remains reachable at narrow widths.
     let block = Block::default()

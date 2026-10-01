@@ -90,7 +90,7 @@ pub(crate) fn action_line(groups: &[&[(&str, &str)]], theme: Theme) -> Line<'sta
     let mut spans = vec![Span::raw(" ")];
     for (group_index, group) in groups.iter().enumerate() {
         if group_index > 0 {
-            spans.push(Span::styled("  │  ", Style::default().fg(theme.muted)));
+            spans.push(Span::styled("  │  ", Style::default().fg(theme.subtle())));
         }
         for (action_index, (key, label)) in group.iter().enumerate() {
             if action_index > 0 {
@@ -121,7 +121,7 @@ fn context_line(context: (&str, &str, FooterTone), theme: Theme) -> Line<'static
             format!(" {label:<9}"),
             Style::default().fg(colour).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(message.to_owned(), Style::default().fg(theme.muted)),
+        Span::styled(message.to_owned(), Style::default().fg(theme.subtle())),
     ])
 }
 
@@ -166,7 +166,7 @@ pub(crate) fn masthead(
                         .fg(theme.accent())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Line::styled("WORKSPACES", Style::default().fg(theme.muted)),
+                Line::styled("WORKSPACES", Style::default().fg(theme.subtle())),
             ]),
             Rect::new(area.x + 12, area.y + 1, 18, 2),
         );
@@ -186,7 +186,7 @@ pub(crate) fn masthead(
             Line::default(),
             Line::styled(
                 ellipsize(summary, text.width as usize),
-                Style::default().fg(theme.muted),
+                Style::default().fg(theme.subtle()),
             ),
         ]
     } else {
@@ -204,7 +204,7 @@ pub(crate) fn masthead(
             Line::default(),
             Line::styled(
                 ellipsize(summary, text.width as usize),
-                Style::default().fg(theme.muted),
+                Style::default().fg(theme.subtle()),
             ),
         ]
     };
@@ -237,6 +237,7 @@ pub(crate) fn activity_style(state: crate::domain::Lifecycle, theme: Theme) -> S
         Waiting => Style::default().fg(theme.base).bg(theme.gold),
         Review => Style::default().fg(theme.base).bg(theme.pine),
         Working | Starting => Style::default().fg(theme.accent()).bg(theme.surface()),
+        Unknown => Style::default().fg(theme.subtle()),
         _ => Style::default().fg(theme.pine).bg(theme.surface()),
     }
 }

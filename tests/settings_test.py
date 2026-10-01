@@ -134,11 +134,23 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(self.tmux("show-option", "-wqv", "-t", window, "@drudwyn_since"), self.state_since)
         self.assertEqual(self.tmux("show-option", "-wqv", "-t", window, "@drudwyn_source"), "hook")
 
+    def test_status_layout_switches_live_and_restores_single_row(self):
+        self.launch()
+        self.keys("l", "Enter")
+        self.wait_text("Applied Status layout = tabs")
+        self.assertEqual(self.tmux("show-option", "-gqv", "status"), "2")
+        self.assertIn("context", self.tmux("show-option", "-gqv", "status-format[1]"))
+        self.keys("Enter")
+        self.wait_text("Applied Status layout = focus")
+        self.assertEqual(self.tmux("show-option", "-gqv", "status"), "on")
+        self.assertIn("focus", self.tmux("show-option", "-gqv", "status-format[0]"))
+        self.assertEqual(self.tmux("show-option", "-gqv", "status-format[1]"), "")
+
     def test_theme_previews_and_descriptions_follow_selection(self):
         self.launch()
         output = self.wait_text("Agent preselected")
         self.assertGreater(output.index("Agent preselected"), output.index("[Esc] Close"))
-        self.keys("l", "Enter")
+        self.keys("l", "j", "Enter", "Enter")
         self.wait_text("Applied Theme = dawn")
         capture = self.tmux("capture-pane", "-e", "-p", "-t", self.pane)
         self.assertIn("48;2;250;244;237", capture)

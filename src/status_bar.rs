@@ -16,6 +16,7 @@ pub enum Row {
     Both,
     Tabs,
     Context,
+    Focus,
 }
 fn cells(s: &str) -> usize {
     Line::from(s).width()
@@ -98,7 +99,8 @@ impl Style {
         let variant = match options.get("@drudwyn-theme").map(String::as_str) {
             Some("dawn") => Variant::Dawn,
             Some("rose-pine") => Variant::RosePine,
-            _ => Variant::Moon,
+            Some("moon") => Variant::Moon,
+            _ => Variant::RosePine,
         };
         let redact = options
             .get("@drudwyn-redact-labels")
@@ -492,6 +494,138 @@ fn context(workspaces: &[Workspace], current: &str, width: usize, style: &Style)
         right
     )
 }
+/// Probe only the selected, bound checkout. Counts are tracked text lines
+/// against HEAD, including staged and unstaged edits; never task progress.
+fn selected_git(w: &Workspace) -> Option<(String, u64, u64)> {
+    let path =
+        crate::recovery::selected_checkout(&w.identity.window_id, &w.identity.pane_id).ok()?;
+    let branch = crate::workspace::checkout_git(&path, &["branch", "--show-current"])
+        .output()
+        .ok()?;
+    if !branch.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8_lossy(&branch.stdout).trim().to_owned();
+    let diff = crate::workspace::checkout_git(
+        &path,
+        &[
+            "diff",
+            "--shortstat",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--ignore-submodules=all",
+            "HEAD",
+            "--",
+        ],
+    )
+    .env("LC_ALL", "C")
+    .output()
+    .ok()?;
+    if !diff.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&diff.stdout);
+    let words: Vec<_> = text.split_whitespace().collect();
+    let count = |label: &str| -> Option<u64> {
+        match words.iter().position(|word| word.starts_with(label)) {
+            Some(i) => i.checked_sub(1).and_then(|n| words[n].parse().ok()),
+            None => Some(0),
+        }
+    };
+    Some((
+        if branch.is_empty() {
+            "detached".into()
+        } else {
+            branch
+        },
+        count("insertion")?,
+        count("deletion")?,
+    ))
+}
+
+fn focus(workspaces: &[Workspace], current: &str, width: usize, style: &Style) -> String {
+    let totals = inventory::Totals::from_workspaces(workspaces);
+    let attention = format!(
+        " NEED {}{}{} ",
+        totals.attention,
+        if totals.categories_overlap() { "*" } else { "" },
+        if style.stale { " STALE" } else { "" }
+    );
+    let mut right_width = cells(&attention);
+    let mut right = range(
+        "attention",
+        &format!(
+            "#[fg={},bold]{}#[nobold]",
+            hex(if totals.attention > 0 {
+                style.theme.gold
+            } else {
+                style.theme.muted
+            }),
+            attention
+        ),
+    );
+    let selected = workspaces.iter().find(|w| w.identity.window_id == current);
+    let git = selected.and_then(selected_git);
+    if width >= 40 {
+        let (plain, styled) = if let Some((_, added, deleted)) = &git {
+            (
+                format!(" +{added} -{deleted}  "),
+                format!(
+                    "#[fg={}] +{added}#[fg={}] -{deleted}  ",
+                    hex(style.theme.pine),
+                    hex(style.theme.love)
+                ),
+            )
+        } else {
+            (
+                String::from(" Git ?  "),
+                format!("#[fg={}] Git ?  ", hex(style.theme.muted)),
+            )
+        };
+        // Huge change counts must not consume the selected workspace identity.
+        if cells(&plain) + right_width + 14 <= width {
+            right_width += cells(&plain);
+            right = format!("{styled}{right}");
+        }
+    }
+    let available = width.saturating_sub(right_width);
+    let left = selected
+        .map(|w| {
+            let name = if style.redact {
+                "Workspace"
+            } else {
+                &w.identity.window_name
+            };
+            let status = context_state(w, width < 100);
+            let status = if status.is_empty() {
+                String::new()
+            } else {
+                format!(" {status}")
+            };
+            let identity = format!(" {} {name}", role(w));
+            let mut label = cut(&identity, available.saturating_sub(cells(&status) + 1));
+            if width >= 100 && !style.redact {
+                if let Some((branch, _, _)) = &git {
+                    let room = available.saturating_sub(cells(&label) + cells(&status) + 4);
+                    if room >= 8 {
+                        label.push_str(&format!(" · {}", cut(branch, room)));
+                    }
+                }
+            }
+            label.push_str(&status);
+            cut(&label, available.saturating_sub(1))
+        })
+        .unwrap_or_else(|| cut(" Selected unavailable", available));
+    format!(
+        "#[bg={},fg={}]{}{}{}#[default]",
+        hex(style.theme.base),
+        hex(style.theme.text),
+        escape(&left),
+        " ".repeat(width.saturating_sub(cells(&left) + right_width)),
+        right
+    )
+}
+
 fn selected_branch(w: &Workspace) -> Option<String> {
     // Presentation cwd may be escaped or empty after exit. Reuse the stable
     // pane/known-checkout resolver; never let an empty path mean our own cwd.
@@ -559,6 +693,9 @@ pub fn render(
             "Selected window membership disappeared; refresh",
         ));
     }
+    if row == Row::Focus {
+        return Ok(focus(&workspaces, current, width, &style));
+    }
     let mut output = Vec::new();
     if row != Row::Context {
         output.push(tabs(&rows, current, session, width, &style));
@@ -606,7 +743,7 @@ pub fn action(target: &str) -> io::Result<()> {
             .get("@drudwyn-theme")
             .filter(|v| matches!(v.as_str(), "moon" | "dawn" | "rose-pine"))
             .cloned()
-            .unwrap_or_else(|| "moon".into()),
+            .unwrap_or_else(|| "rose-pine".into()),
     ]);
     let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
     let command = std::iter::once(std::env::current_exe()?.to_string_lossy().into_owned())

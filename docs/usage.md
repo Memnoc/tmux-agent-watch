@@ -591,7 +591,10 @@ Malformed or older live batch records also require explicit setup and selection;
 reuse the existing destination branch/checkout when setting up again. Literal
 refs and checkout paths, including semicolon and space suffixes, are preserved.
 
-### Two-row status-bar A
+### Optional two-row status-bar A
+
+Select **Appearance → Status layout → tabs** to use this layout. The default
+Focus B uses one row; see the presentation section below.
 
 The top row contains stable local window tabs: `●` marks selection, `COORD`
 identifies a coordinator, `SH` a shell, `WT` a known linked worktree, and `AGENT`
@@ -601,10 +604,10 @@ exit remain labelled. Full selection highlighting and padded badges preserve
 spacing; narrow terminals show fewer tabs before shortening names.
 
 The lower row combines selected context with global Failed/Input/Review badges.
-**GLOBAL N** counts unique workers needing attention across this tmux server,
+**NEED YOU N** counts unique workers needing attention across this tmux server,
 including hidden workers. A failed exit can also retain a Review/Input handoff:
 `(overlap)`, or `*` at narrow widths, marks overlapping categories. Their sum can
-exceed the unique GLOBAL count. No percentage, ETA or task completion is inferred.
+exceed the unique NEED YOU count. No percentage, ETA or task completion is inferred.
 
 Click a tab to open its stable window in the requesting client. Click `+N` for
 all windows in that exact local session, including ordinary shells outside Git,
@@ -625,7 +628,8 @@ tmux-drudwyn status-bar --session '$3' --window '@8' --width 120
 
 The final command explicitly refreshes lifecycle metadata. Installed ambient
 rows use its `--projection` mode with the existing observer and report staleness;
-the two rows refresh independently. See [density and refresh configuration](configuration.md#status-bar-a-rust).
+the optional tabs layout refreshes its two rows independently. See
+[layout and refresh configuration](configuration.md#status-layout-rust).
 The explicit legacy implementation retains its original clustered bar/separator.
 
 
@@ -869,7 +873,9 @@ selection colors. Workspace/Cockpit popups occupy 90% of the client width and
 85% of its height; Sessions occupies 80% by 70%. Existing keys and confirmation
 flows still apply.
 
-Single-row status designs are under review on the throwaway branch
-`spike/single-row-status-20261001`. The production bar remains two rows pending
-a design selection. Git +/- figures in that preview are simulated tracked-line
-changes against HEAD, not task progress.
+The default status bar is the approved single-row B layout: selected workspace,
+activity, branch when space permits, tracked Git +/- against HEAD, and clickable
+`NEED N` for global attention. Git counts exclude untracked files and do not
+measure task progress. `Git ?` means unavailable evidence. Use **Options →
+Appearance → Status layout → tabs** to restore the two-row window overview.
+Rosé Pine is the default; Moon and Dawn remain available.

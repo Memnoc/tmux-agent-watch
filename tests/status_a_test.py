@@ -135,6 +135,7 @@ class StatusATest(IndependentNavigation):
         self.assertEqual(self.selection(self.clients[1]), before)
 
     def install(self):
+        self.tmux('set', '-g', '@drudwyn-status-layout', 'tabs')
         self.tmux('set-environment', '-g', 'DRUDWYN_V2_BIN', str(BIN))
         self.tmux('set', '-g', 'mouse', 'on')
         subprocess.run(['bash', str(ROOT / 'tmux-drudwyn.tmux')], env={**self.env, 'DRUDWYN_V2_BIN': str(BIN)}, capture_output=True, check=True)
@@ -456,7 +457,7 @@ class StatusATest(IndependentNavigation):
             Path('/tmp/drudwyn-ticket10-cap-'+cap+'.txt').write_text('\n'.join(screen.lines()[-2:]))
         pane=self.tmux('new-window','-d','-P','-F','#{pane_id}','-t','project',str(BIN),'settings')
         self.wait_pane(pane,'OPTIONS')
-        self.tmux('send-keys','-t',pane,'l',*(['j']*8),'Enter')
+        self.tmux('send-keys','-t',pane,'l',*(['j']*9),'Enter')
         screen=self.wait_pane(pane,'Applied Visible status tabs')
         self.assertIn('Visible status tabs',screen)
         self.assertIn(self.tmux('show','-gqv','@drudwyn-visible-tabs'),['1','3','4','6','auto'])

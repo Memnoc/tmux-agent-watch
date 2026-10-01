@@ -45,6 +45,12 @@ separator="#($PLUGIN_DIR/scripts/status-separator.sh '#{client_width}')"
 tmux set-option -g status 2
 tmux set-option -g status-style 'bg=default,fg=default'
 if [ "$(tmux show-option -gqv @drudwyn-v2)" != off ]; then
+  if [ "$(tmux show-option -gqv @drudwyn-status-layout)" != tabs ]; then
+    tmux set-option -g status on
+    tmux set-option -g 'status-format[0]' "#($PLUGIN_DIR/scripts/status-a.sh '#{session_id}' '#{window_id}' '#{client_width}' focus)"
+    tmux set-option -gu 'status-format[1]'
+    exit 0
+  fi
   # Both jobs are keyed by this client's stable selection and terminal width.
   # Both rows reuse the observer projection; redraws never start process scans.
   tmux set-option -g 'status-format[0]' "#($PLUGIN_DIR/scripts/status-a.sh '#{session_id}' '#{window_id}' '#{client_width}' tabs)"

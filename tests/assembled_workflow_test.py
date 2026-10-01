@@ -16,7 +16,7 @@ import time
 import unittest
 
 from independent_navigation_test import IndependentNavigation, ROOT
-from status_a_test import StatusATest
+from status_a_test import StatusATest, plain
 from worker_integration_test import WorkerIntegrationTest
 
 BIN = ROOT / 'target/release/tmux-drudwyn'
@@ -27,7 +27,17 @@ class AssembledWorkflowTest(IndependentNavigation):
     token = WorkerIntegrationTest.token
     resize_client = StatusATest.resize_client
     terminal = StatusATest.terminal
-    converged = StatusATest.converged
+    def converged(self, client, width):
+        session,window=self.selection(client).split(':')
+        expected=plain(self.command('status-bar','--projection','--session',session,
+                                   '--window',window,'--width',str(width),'--row','focus',
+                                   client=client).stdout).strip()
+        deadline=time.monotonic()+4
+        while True:
+            screen,data=self.terminal(client,width,'NEED 0')
+            if screen.lines()[-1].strip()==expected:return screen,data
+            self.assertLess(time.monotonic(),deadline,(expected,screen.lines()[-1]))
+
 
     def tmux(self, *args, check=True):
         if args[:3] == ('-f', '/dev/null', 'new-session'):
@@ -267,9 +277,10 @@ class AssembledWorkflowTest(IndependentNavigation):
             self.assertNotIn(secret, metadata)
         self.resize_client(self.clients[0], 160)
         screen, ansi = self.converged(self.clients[0], 160)
-        self.assertIn('COORD', screen.lines()[-2])
+        self.assertIn('COORD', screen.lines()[-1])
+        self.assertEqual(self.tmux('show','-gqv','status'),'on')
         artifact = Path(f'/tmp/drudwyn-ticket15-{flow}')
-        artifact.with_suffix('.txt').write_text('\n'.join(screen.lines()[-2:]) + '\n')
+        artifact.with_suffix('.txt').write_text('\n'.join(screen.lines()[-1:]) + '\n')
         artifact.with_suffix('.ansi').write_bytes(ansi)
         print(f'ASSEMBLED {flow}: two clients, three pinned workers, recovery, conflict Abort/Continue, '
               f'checks, promotion={integration}, guarded cleanup: {time.monotonic() - began:.3f}s', flush=True)
