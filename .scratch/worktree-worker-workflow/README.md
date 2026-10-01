@@ -14,6 +14,10 @@ Implementation branch: `work/worktree-worker-workflow`.
 [16 — Screenshot regressions](16-screenshot-regressions.md) addresses the first
 live-use feedback. [17 — Visual polish](17-visual-polish.md) restores branding,
 removes raw IDs from overview rows, and fixes crowded labels and controls.
+[18 — Popup space and layout proposal](18-popup-space-and-layout-proposal.md)
+enlarges the two inventories and provides three reviewable designs.
+[19 — Codex hook ownership](19-codex-hook-ownership.md) records a reproduced
+live integration failure; its fix remains outstanding.
 The earlier acceptance below covered workflow mechanics but
 missed ordinary unregistered sessions and usable inventory space at 84 × 27.
 
