@@ -7,7 +7,8 @@ from independent_navigation_test import ROOT, BIN
 from status_a_test import plain, StatusATest
 
 class FocusStatus(StatusATest):
-    def test_installed_default_is_one_row_with_git_counts_and_attention(self):
+    def test_explicit_focus_is_one_row_with_git_counts_and_attention(self):
+        self.tmux('set', '-g', '@drudwyn-status-layout', 'focus')
         self.worker_hook('permissionRequest')
         path=self.repo/'lines.txt'
         path.write_text('one\ntwo\nthree\n')

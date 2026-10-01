@@ -167,22 +167,32 @@ The legacy mode reads pane scrollback. See the [version boundary](privacy.md#ver
 
 ## Status layout (Rust)
 
-**Appearance → Status layout** defaults to `focus`: the approved single-row B
-layout. It shows selected workspace role/name and activity, the branch when
-space permits, tracked Git line changes against HEAD, and clickable global
-**NEED N** attention. `*` means attention categories overlap, not extra workers.
-`STALE` marks expired observer evidence. Git counts include staged and unstaged
-tracked text changes; they exclude untracked files and are not task progress.
-Binary changes have no text-line count. `Git ?` means the selected checkout or
-Git evidence is unavailable. Narrow widths retain attention and bound identity.
+**Appearance → Status layout** defaults to `balanced`: the approved three-region
+A layout. Only the current workspace appears at the left, with its bot/shell
+icon, worktree/coordinator role and activity. The selected branch and tracked Git
+line changes sit at the physical center. Global **N NEED** and the agent total
+sit at the right. Click the workspace to open its local overview, NEED for global
+attention, or AGENTS for the global Cockpit. Each action uses the requesting client.
+
+A quiet full-width separator sits next to terminal output; the separator and
+information occupy two terminal rows. Top and bottom status positions are
+supported. Names and branches shorten before the agent total is hidden; attention
+stays visible. Below 40 columns the compact Focus rendering takes over.
+
+`*` means attention categories overlap, not extra workers. `STALE` marks expired
+observer evidence. Git counts include staged and unstaged tracked text changes
+against HEAD; they exclude untracked files and are not task progress. Binary
+changes have no text-line count. `Git ?` means selected Git evidence is unavailable
+or counts cannot fit. Redaction hides workspace names and branches.
 
 ```tmux
-set -g @drudwyn-status-layout focus
+set -g @drudwyn-status-layout balanced
 set -g @drudwyn-theme rose-pine
 ```
 
 Rosé Pine is the default palette. `moon` and `dawn` remain explicit choices.
-Select `dense` for one row of compact tabs, or `tabs` for the two-row layout
+Select `focus` for the earlier compact one-row context bar, `dense` for one row
+of compact tabs, or `tabs` for the two-row layout
 below. Visible-tab and icon options apply to both tab layouts; focus uses role
 labels. To select the denser six-tab design:
 
@@ -226,7 +236,7 @@ case. `prefix w` and native tree bindings remain available for window movement.
 
 Ambient jobs reuse the existing lifecycle observer; they do not start scans
 for each client redraw. Git context reads only the selected checkout: branch in tabs, branch and
-tracked-line totals in focus. It never probes Git changes for the global fleet. A successful reconciliation
+tracked-line totals in Focus, Dense and Balanced. It never probes Git changes for the global fleet. A successful reconciliation
 publishes its live observation time under the existing lifecycle guard. Missing,
 malformed, future or expired times show **NEED YOU STALE** while retaining the
 last observed counts. Expiry is twice `@drudwyn-interval` plus five seconds.

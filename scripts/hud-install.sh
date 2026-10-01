@@ -45,6 +45,18 @@ separator="#($PLUGIN_DIR/scripts/status-separator.sh '#{client_width}')"
 tmux set-option -g status 2
 tmux set-option -g status-style 'bg=default,fg=default'
 if [ "$(tmux show-option -gqv @drudwyn-v2)" != off ]; then
+  layout="$(tmux show-option -gqv @drudwyn-status-layout)"
+  if [ "${layout:-balanced}" = balanced ]; then
+    info="#($PLUGIN_DIR/scripts/status-a.sh '#{session_id}' '#{window_id}' '#{client_width}' balanced)"
+    if [ "$(tmux show-option -gqv status-position)" = bottom ]; then
+      tmux set-option -g 'status-format[0]' "$separator"
+      tmux set-option -g 'status-format[1]' "$info"
+    else
+      tmux set-option -g 'status-format[0]' "$info"
+      tmux set-option -g 'status-format[1]' "$separator"
+    fi
+    exit 0
+  fi
   if [ "$(tmux show-option -gqv @drudwyn-status-layout)" != tabs ]; then
     row=focus
     [ "$(tmux show-option -gqv @drudwyn-status-layout)" != dense ] || row=dense

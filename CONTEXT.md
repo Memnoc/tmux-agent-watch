@@ -51,12 +51,12 @@ provide quick movement and session management.
 
 ### Ambient status
 
-The always-visible tmux bar defaults to single-row Focus B: selected workspace
-role and activity, branch when space permits, tracked Git line counts and
-persistent global attention including hidden workers. A selectable dense single-row layout adds bounded window tabs. Optional two-row
-tabs retain stable window identities above selected context and attention. The grouped navigator
-provides the complete window inventory when the bar limits visible tabs;
-the Workspace Cockpit provides global supervision and lifecycle actions.
+The always-visible tmux bar defaults to Balanced A: a separator plus one
+information row. Current workspace identity/activity anchors the left, selected
+branch and Git line counts stay centered, and global attention and agent totals
+anchor the right. The bar shows only the current workspace; grouped Workspace
+and global Cockpit provide the complete inventory. Focus, Dense and Tabs remain
+selectable layouts. Counts and activity are evidence, not inferred task progress.
 The former sidebar is an opt-in compatibility surface.
 
 ### Content-blind supervision

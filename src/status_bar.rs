@@ -18,6 +18,7 @@ pub enum Row {
     Context,
     Focus,
     Dense,
+    Balanced,
 }
 fn cells(s: &str) -> usize {
     Line::from(s).width()
@@ -627,6 +628,126 @@ fn focus(workspaces: &[Workspace], current: &str, width: usize, style: &Style) -
     )
 }
 
+/// Three anchored regions: one current workspace, centered Git, global attention.
+fn balanced(
+    workspaces: &[Workspace],
+    current: &str,
+    session: &str,
+    width: usize,
+    style: &Style,
+) -> String {
+    if width < 40 {
+        return focus(workspaces, current, width, style);
+    }
+    let totals = inventory::Totals::from_workspaces(workspaces);
+    let attention = format!(
+        "{} NEED{}{}",
+        totals.attention,
+        if totals.categories_overlap() { "*" } else { "" },
+        if style.stale { " STALE" } else { "" }
+    );
+    let selected = workspaces.iter().find(|w| w.identity.window_id == current);
+    let git = selected.and_then(selected_git);
+    let changes = git
+        .as_ref()
+        .map(|(_, added, deleted)| format!("+{added} -{deleted}"))
+        .filter(|text| cells(text) <= width / 3)
+        .unwrap_or_else(|| "Git ?".into());
+    let agents = format!(
+        " · {} AGENTS",
+        workspaces.iter().filter(|w| w.is_agent()).count()
+    );
+    let full_right = cells(&attention) + cells(&agents) + 1;
+    // Reserve totals when they fit beside the minimum Git context; branch text
+    // gets the remaining space, so a long ref cannot prematurely hide agents.
+    let show_agents = 2 * (full_right + 2) + cells(&changes) <= width;
+    let right_width = cells(&attention) + if show_agents { cells(&agents) } else { 0 } + 1;
+    let middle_budget = (width / 3).min(width.saturating_sub(2 * (right_width + 2)));
+    let room = middle_budget.saturating_sub(cells(&changes) + 1);
+    let middle = if let Some((branch, _, _)) = &git {
+        if !style.redact && room >= 2 {
+            format!("{} {changes}", cut(branch, room))
+        } else {
+            cut(&changes, middle_budget)
+        }
+    } else {
+        cut(&changes, middle_budget)
+    };
+    let middle_start = (width - cells(&middle)) / 2;
+    let left_budget = middle_start.saturating_sub(2);
+    let left = selected
+        .map(|w| {
+            let icon = if w.is_agent() {
+                let configured = style.icon(w);
+                if configured.is_empty() {
+                    if style.nerd {
+                        "󰚩"
+                    } else {
+                        "A"
+                    }
+                } else {
+                    configured
+                }
+            } else if style.nerd {
+                ""
+            } else {
+                ">_"
+            };
+            let role = match role(w) {
+                "WT" => "WT ",
+                "COORD" => "COORD ",
+                _ => "",
+            };
+            let name = if style.redact {
+                "Workspace"
+            } else {
+                &w.identity.window_name
+            };
+            let status = context_state(w, true);
+            let suffix = if status.is_empty() {
+                String::new()
+            } else {
+                format!(" {status}")
+            };
+            let identity = cut(
+                &format!(" {icon} {role}{name}"),
+                left_budget.saturating_sub(cells(&suffix)),
+            );
+            cut(&format!("{identity}{suffix}"), left_budget)
+        })
+        .unwrap_or_else(|| cut(" Selected unavailable", left_budget));
+    let bg = hex(style.theme.surface());
+    let mut out = format!("#[bg={bg},fg={}]", hex(style.theme.accent()));
+    out.push_str(&range(&format!("windows:{session}"), &escape(&left)));
+    out.push_str(&" ".repeat(middle_start.saturating_sub(cells(&left))));
+    out.push_str(&format!(
+        "#[fg={}]{}",
+        hex(style.theme.foam()),
+        escape(&middle)
+    ));
+    out.push_str(&" ".repeat(width.saturating_sub(middle_start + cells(&middle) + right_width)));
+    out.push_str(&range(
+        "attention",
+        &format!(
+            "#[fg={}]{}",
+            hex(if totals.attention > 0 {
+                style.theme.gold
+            } else {
+                style.theme.subtle()
+            }),
+            attention
+        ),
+    ));
+    if show_agents {
+        out.push_str(&range(
+            "agents",
+            &format!("#[fg={}]{}", hex(style.theme.subtle()), agents),
+        ));
+    }
+    out.push_str(" #[default]");
+    out
+}
+
 fn selected_branch(w: &Workspace) -> Option<String> {
     // Presentation cwd may be escaped or empty after exit. Reuse the stable
     // pane/known-checkout resolver; never let an empty path mean our own cwd.
@@ -842,6 +963,9 @@ pub fn render(
             "Selected window membership disappeared; refresh",
         ));
     }
+    if row == Row::Balanced {
+        return Ok(balanced(&workspaces, current, session, width, &style));
+    }
     if row == Row::Dense {
         return Ok(dense(&rows, &workspaces, current, session, width, &style));
     }
@@ -884,7 +1008,7 @@ pub fn action(target: &str) -> io::Result<()> {
         args.extend(["--windows".into(), "--local-session".into(), session]);
     } else if matches!(target, "failed" | "input" | "review" | "attention") {
         args.extend(["--state".into(), target.into()]);
-    } else {
+    } else if target != "agents" {
         return Err(io::Error::other("Unknown status action"));
     }
     let style = Style::load()?;

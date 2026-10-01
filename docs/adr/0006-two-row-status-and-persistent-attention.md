@@ -69,3 +69,14 @@ workspace and activity, optional branch, tracked Git +/- and global NEED count.
 Persistent attention and the separation of process, lifecycle and integration
 evidence remain. `@drudwyn-status-layout tabs` retains the prior two-row design
 and visible-tab choices. This supersedes the default row-count decision above.
+
+## Amendment — three-region A, 2026-10-01
+
+After reviewing the denser tab bar, Memnoc requested only the current workspace
+and three anchored regions. Approved prototype `6348923` supersedes the default
+above with `balanced`: current workspace at left, branch/Git physically centered,
+global attention and agents at right. A quiet full-width separator costs one
+additional row, for two rows total; no third bottom-padding row is added.
+Names and branches shorten before hiding agent totals. Very narrow terminals
+(below 40 columns) use compact Focus rendering. Focus, Dense and Tabs remain
+selectable. Process/lifecycle/exit evidence and global attention remain distinct.

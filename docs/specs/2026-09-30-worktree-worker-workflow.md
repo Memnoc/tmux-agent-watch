@@ -510,3 +510,16 @@ end. B emphasizes selected activity centrally; C centers the workspace itself.
 Two rows include the separator; optional bottom padding makes three. No live
 status change occurs before approval. Archive: `spike/three-region-status-20261001`
 at `6348923`. Ticket23 records checks and review evidence.
+
+### Approved three-region status A — 2026-10-01
+
+Memnoc approved A from `6348923`. Implement it as default `balanced`: current
+workspace/icon/role/activity left, selected branch and tracked Git changes
+physically centered, global NEED and agent total right. Keep spaces between
+regions; reduce name/branch widths before dropping total agents. Below 40 columns
+use compact Focus behavior. Respect redaction, stale evidence, separate exit
+state, unique attention and requesting-client navigation. NEED opens global
+attention; agents opens global Cockpit; workspace opens local overview.
+Use two rows including a subtle full-width separator adjacent to terminal output;
+respect top/bottom placement, Rosé Pine and other configured themes. Preserve
+Focus/Tabs/Dense and HUD restoration. Ticket24 records verification and review.

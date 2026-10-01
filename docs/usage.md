@@ -873,12 +873,11 @@ selection colors. Workspace/Cockpit popups occupy 90% of the client width and
 85% of its height; Sessions occupies 80% by 70%. Existing keys and confirmation
 flows still apply.
 
-The default status bar is the approved single-row B layout: selected workspace,
-activity, branch when space permits, tracked Git +/- against HEAD, and clickable
-`NEED N` for global attention. Git counts exclude untracked files and do not
-measure task progress. `Git ?` means unavailable evidence. Use **Options →
-Appearance → Status layout → tabs** to restore the two-row window overview.
-Rosé Pine is the default; Moon and Dawn remain available.
+Balanced A is the default status bar, with current workspace, centered Git and
+global attention in three regions plus a separator. Git counts exclude untracked
+files and do not measure task progress. `Git ?` means unavailable evidence or
+insufficient space for the counts. Use **Options → Appearance → Status layout**
+to choose Focus, Dense or Tabs. Rosé Pine is the default; Moon and Dawn remain.
 
 
 ### Workspace and Sessions
@@ -902,6 +901,13 @@ Selection only inspects; Enter opens in the requesting terminal. Both navigators
 expose `n` for New shell session. Enter a name, Tab to the starting directory,
 then Enter to create. Escape returns without creating a session. Existing
 rename, explicit kill confirmation, coordinator and save actions remain.
+
+The default **Balanced** status layout shows only your current workspace on the
+left, branch and Git +/- in the center, and global NEED plus agent count on the
+right. A subtle separator above the information row uses two rows in total.
+Click the workspace for the local overview, NEED for attention, or AGENTS for the
+global Cockpit. On narrower terminals names shorten and the agent total drops
+before attention; below 40 columns the compact Focus layout is used.
 
 **Appearance → Status layout → dense** selects compact single-row window tabs.
 Set **Visible status tabs** to `6` for the denser layout. Width may reduce the

@@ -30,11 +30,11 @@ class AssembledWorkflowTest(IndependentNavigation):
     def converged(self, client, width):
         session,window=self.selection(client).split(':')
         expected=plain(self.command('status-bar','--projection','--session',session,
-                                   '--window',window,'--width',str(width),'--row','focus',
+                                   '--window',window,'--width',str(width),'--row','balanced',
                                    client=client).stdout).strip()
         deadline=time.monotonic()+4
         while True:
-            screen,data=self.terminal(client,width,'NEED 0')
+            screen,data=self.terminal(client,width,'0 NEED')
             if screen.lines()[-1].strip()==expected:return screen,data
             self.assertLess(time.monotonic(),deadline,(expected,screen.lines()[-1]))
 
@@ -278,7 +278,7 @@ class AssembledWorkflowTest(IndependentNavigation):
         self.resize_client(self.clients[0], 160)
         screen, ansi = self.converged(self.clients[0], 160)
         self.assertIn('COORD', screen.lines()[-1])
-        self.assertEqual(self.tmux('show','-gqv','status'),'on')
+        self.assertEqual(self.tmux('show','-gqv','status'),'2')
         artifact = Path(f'/tmp/drudwyn-ticket15-{flow}')
         artifact.with_suffix('.txt').write_text('\n'.join(screen.lines()[-1:]) + '\n')
         artifact.with_suffix('.ansi').write_bytes(ansi)

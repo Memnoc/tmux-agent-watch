@@ -28,6 +28,13 @@ impl Theme {
             Color::Rgb(38, 35, 58)
         }
     }
+    pub fn foam(self) -> Color {
+        if self.base == Self::rose_pine(Variant::Dawn).base {
+            Color::Rgb(86, 148, 159)
+        } else {
+            Color::Rgb(156, 207, 216)
+        }
+    }
     pub fn accent(self) -> Color {
         if self.base == Self::rose_pine(Variant::Dawn).base {
             Color::Rgb(144, 122, 169)

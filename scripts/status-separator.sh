@@ -18,6 +18,11 @@ case "$color" in
     ;;
 esac
 
-printf '#[fg=%s]' "$color"
+case "$(tmux show-option -gqv @drudwyn-theme 2>/dev/null || true)" in
+  dawn) background='#faf4ed' ;;
+  moon) background='#232136' ;;
+  *) background='#191724' ;;
+esac
+printf '#[fg=%s,bg=%s]' "$color" "$background"
 awk -v width="$width" 'BEGIN { for (column = 0; column < width; column++) printf "─" }'
 printf '#[default]'
