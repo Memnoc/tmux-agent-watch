@@ -5,10 +5,28 @@ Approved by Memnoc on 2026-09-30.
 [Specification](../../docs/specs/2026-09-30-worktree-worker-workflow.md) ·
 [Approved breakdown](../../docs/specs/2026-09-30-worktree-worker-ticket-plan.md)
 
-Work any ready ticket whose blockers are all done. Full-auto implementation resumed on 2026-10-01 for tickets 12–15.
+All 15 implementation tickets are complete, including assembled Linux acceptance.
+Full-auto implementation resumed on 2026-10-01 for tickets 12–15.
 Implementation branch: `work/worktree-worker-workflow`.
 
-## Resumed checkpoint — 2026-10-01
+## Completion checkpoint — 2026-10-01
+
+Tickets 01–15 are implemented on `work/worktree-worker-workflow`.
+[Ticket15](15-assembled-hardening.md) records the frozen complete suite and
+[assembled acceptance report](../../docs/specs/2026-10-01-worktree-worker-acceptance.md).
+Rust: 41 passed, and the complete shell/Python suite passed (212 Python cases, one existing
+optional Resurrect skip), as did both release-plugin assembled workflows.
+All 22 user stories passed in the executed Linux / tmux 3.4 environment. Real terminal
+matrices, 36-worker measurements and the corrected narrow-shell regression are
+recorded in the report; final independent review follows in ticket15's receipt.
+
+Implementation/Linux acceptance does not mean shipped: native macOS and ARM64
+runtime, real third-party service sessions and manual release-artifact gates
+remain unverified. These limitations have not been accepted as a shipping
+decision. `main` remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`; no push,
+publication or deployment occurred. The historical checkpoints below are retained.
+
+## Historical resumed checkpoint — 2026-10-01
 
 The user resumed all remaining tickets on `work/worktree-worker-workflow`.
 Ticket 12 starts at `a0075def1b75fc7e2f053d59cf0537f6b3353bc9`; tickets 13–15

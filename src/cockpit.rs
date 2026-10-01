@@ -2210,8 +2210,11 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Line::from(format!(
-            " GLOBAL {} workers · {} live · {} projects",
-            totals.workers, totals.live, totals.projects
+            " GLOBAL {} workers · {} live · {} project{}",
+            totals.workers,
+            totals.live,
+            totals.projects,
+            if totals.projects == 1 { "" } else { "s" }
         )),
         Line::from(format!(
             " Attention {}: {} failed / {} input / {} review · {} exited{}",

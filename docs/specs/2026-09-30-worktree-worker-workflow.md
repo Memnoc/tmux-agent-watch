@@ -386,3 +386,58 @@ Existing lifecycle/status changes in the working checkout predate this spec.
 Review and preserve them; do not count their unverified behavior as completed
 tickets. [The implementation breakdown](2026-09-30-worktree-worker-ticket-plan.md)
 maps this scope into reviewable vertical slices.
+
+## Verification
+
+2026-10-01: assembled acceptance executed on Linux x86_64 / tmux 3.4, on
+`work/worktree-worker-workflow`. All 22 stories below passed in that environment.
+The [acceptance report](2026-10-01-worktree-worker-acceptance.md) records the
+reproducible release-plugin scenarios, complete suite, terminal artifacts,
+performance measurements, corrected failure, and release limitations.
+
+Final checks: 41 Rust tests passed; complete shell/Python suite passed (212 Python
+cases, one existing optional Resurrect skip); release build and both assembled
+flows passed. The two-client / three-worker flows cover New Session, stable
+coordinator, deliberate recovery, real shared-file conflict/handoff/Abort/Continue,
+untracked-input check failure/rerun, promotion and guarded branch-preserving
+cleanup. Actual terminal checks cover five widths, both icon modes, three themes,
+redaction, and 36 workers across four projects/39 checkouts.
+
+| # | User story (verbatim) | Verdict | Execution evidence |
+| --- | --- | --- | --- |
+| 1 | As a user, I want a short worker name independent of its task, so that a detailed instruction does not become an unreadable branch or window name. | pass (Linux) | Worker launch form/task tests; assembled alpha/beta/gamma names and work/* branches. |
+| 2 | As a user, I want to choose a source branch/ref and inspect its resolved commit, so that workers receive the intended instructions and shared base. | pass (Linux) | Batch source/ref previews, expected-commit confirmation and stale-source refusal; assembled pinned SHA. |
+| 3 | As a user, I want sibling workers to retain that starting commit even after I navigate or integrate another worker, so that accidental dependencies do not appear between independent tasks. | pass (Linux) | Batch tests move source refs between launches; assembled three sibling HEADs equal the pinned SHA. |
+| 4 | As a user, I want to choose direct-to-base integration or an integration branch once per live batch, so that both workflows are supported and the destination remains visible. | pass (Linux) | Both assembled runs; batch setup/reuse/collision and destination visibility tests. |
+| 5 | As a user, I want a comfortable multiline task editor or an explicit task-file reference, so that launch requires no follow-up task paste in normal use. | pass (Linux) | Multiline launch UI and raw receiver tests; assembled multiline stdin and task-file launch/recovery. |
+| 6 | As a user, I want launch, delivery, process exit, and agent activity to have distinct evidence, so that a closed window or successful exit cannot be mistaken for completed work. | pass (Linux) | Launch15, activity39 and status exit/attention cases; assembled retained exited beta and fresh receiver. |
+| 7 | As a user, I want failed launches and recovery to preserve files and commits, so that partial work survives a terminal or agent failure. | pass (Linux) | Startup failure and recovery preservation checks; assembled beta commit survives stop/restart. |
+| 8 | As a user, I want a stable, visibly named coordinator and identifiable worktree/ordinary-agent/shell windows, so that I can return to the right place. | pass (Linux) | Coordinator identity/navigation tests; assembled same coordinator window survives launch, conflict and cleanup. |
+| 9 | As a user with two terminals, I want navigation and session creation in one to leave the other's selection alone, so that both terminals remain useful. | pass (Linux) | Two actual PTY-attached clients in navigation/status and both assembled runs; requester-only New Session and Cockpit Open. |
+| 10 | As a user, I want a New Session command and session-navigator action with a name and directory, so that I can open a shell for editing or other work. | pass (Linux) | Session command and navigator keyboard tests cover directory/default, cancellation and invalid inputs; assembled New Session. |
+| 11 | As a user, I want to reopen an existing worktree without creating a duplicate branch, and deliberately restart or resume its agent, so that recovery does not pretend to restore a lost task or conversation. | pass (Linux) | Recovery tests cover shell/restart/reference/resume availability and metadata loss; assembled deliberate task-file restart. |
+| 12 | As a user, I want a two-row status bar with readable spacing and configurable tab density, so that selection, identity, and attention remain legible. | pass (Linux) | Installed two-row status decoded from real client ANSI at 48/64/80/120/160, 2 icon modes, 3 themes; cap/settings tests. |
+| 13 | As a user, I want persistent attention counts for hidden workers and a route to their matching Cockpit view, so that a small bar does not hide urgent work. | pass (Linux) | Hidden attention, overlap, mouse and keyboard routes, off-screen workers and membership-race tests. |
+| 14 | As a user supervising dozens of agents, I want a global inventory with project and attention grouping, search, filters, and full selected-worker details, so that every worker is reachable without relying on tabs. | pass (Linux) | 36 workers / 4 projects / 39 checkouts; global filters/search/grouping/details and full terminal matrix. |
+| 15 | As a user, I want inspection to differ from opening a window, stable selection during refresh, and a clear unavailable state for a disappeared target, so that an update does not act on the wrong worker or lose my place. | pass (Linux) | Cockpit inspect/Open, selected-ID preservation and vanished-target tests; assembled inspect leaves both clients unchanged. |
+| 16 | As the supervisor, I need to deduplicate linked windows and preserve evidence provenance, so that counts and activity labels remain truthful across views. | pass (Linux) | Linked-client inventory deduplication and lifecycle process-birth/provenance tests; global/status counts reconcile. |
+| 17 | As a user, I want to inspect source and destination commits and initiate integration from Cockpit, so that merging reviewed work is a built-in action. | pass (Linux) | Integration20 includes actual Cockpit preview/cancel/apply and stale IDs/refs; assembled reviewed integration. |
+| 18 | As a coordinator, I want conflicts handed to my agent in the destination checkout with visible Continue/Abort actions, so that resolution remains deliberate and does not require the user to type Git plumbing. | pass (Linux) | Conflict17 covers handoff delivery/retry/recovery, real UI Continue/Abort and replaced operations; both assembled conflicts. |
+| 19 | As a user, I want reported worker checks separated from checks actually run on the assembled checkout, so that branch-level success is not presented as verified integration. | pass (Linux) | Verification10 covers actual visible terminal execution, failure/staleness/missing receipts; assembled untracked-input failure/rerun. |
+| 20 | As a user, I want explicit promotion of an integration branch into the base and guarded cleanup, so that finishing workers does not silently ship or remove work. | pass (Linux) | Promotion/cleanup15, real Cockpit P/f, lock/writer/concurrency safeguards; assembled explicit promotion and branch-preserving cleanup. |
+| 21 | As a user, I want understandable errors and cancellation for invalid names, collisions, dirty targets, stale refs, and unavailable tools, so that retrying does not reset an existing checkout or duplicate an action. | pass (Linux) | All command/UI suites include cancellation, collisions, dirty/stale/ambiguous/missing resources and bounded retry failures. |
+| 22 | As a user, I want the existing content-blind and label-redaction behavior preserved, so that improved supervision does not create a conversation store. | pass (Linux) | Privacy and lifecycle suites, transient delivery checks, metadata-loss cases, full redaction matrix; no production content inspection added. |
+
+Native macOS (x86_64/ARM64), Linux ARM64, real third-party service sessions,
+manual native release-artifact installation/publication, and the unavailable
+optional Resurrect integration are **unverifiable** in this environment. Linux
+fixture execution does not establish those results. Memnoc has not accepted
+these missing observations as a shipping decision; implementation and Linux
+acceptance are complete, but this is not a shipped claim. The report explains
+the process-observation and point-in-time verification limits.
+
+A narrow shell-context regression introduced during the approved cosmetic
+polish was observed, routed to a fresh fix session, and re-executed after its
+correction. The report retains both failing and passing evidence. Final
+independent review is recorded with ticket15. The project repository's `main`
+remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`; nothing was pushed or deployed.

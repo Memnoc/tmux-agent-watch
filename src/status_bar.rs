@@ -249,6 +249,9 @@ fn state(w: &Workspace) -> String {
 }
 fn context_state(w: &Workspace, compact: bool) -> String {
     if w.process != "exited" {
+        if state(w).is_empty() {
+            return String::new();
+        }
         return if compact {
             state(w)
         } else {
@@ -447,16 +450,17 @@ fn context(workspaces: &[Workspace], current: &str, width: usize, style: &Style)
             } else {
                 selected_branch(w).unwrap_or_else(|| "ref ?".into())
             };
-            let full = format!(
-                "{} {name} · {reference} · {}",
-                role(w),
-                context_state(w, false)
-            );
+            let status = context_state(w, false);
+            let mut full = format!("{} {name} · {reference}", role(w));
+            if !status.is_empty() {
+                full.push_str(&format!(" · {status}"));
+            }
             if cells(&full) <= available {
                 full
             } else if available >= 20 {
-                let status = context_state(w, false);
-                if cells(&status) <= available {
+                if status.is_empty() {
+                    cut(&format!("{} {name}", role(w)), available)
+                } else if cells(&status) <= available {
                     status
                 } else {
                     cut(&context_state(w, true), available)

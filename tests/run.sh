@@ -32,3 +32,5 @@ python3 "$ROOT/tests/settings_test.py"
 "$ROOT/tests/privacy_test.sh"
 "$ROOT/tests/package_test.sh"
 "$ROOT/tests/release_workflow_test.sh"
+cargo build --manifest-path "$ROOT/Cargo.toml" --release --locked
+python3 "$ROOT/tests/assembled_workflow_test.py"

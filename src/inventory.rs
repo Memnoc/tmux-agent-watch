@@ -158,10 +158,11 @@ impl Totals {
     }
     pub fn summary(&self) -> String {
         format!(
-            "GLOBAL {} workers · {} live · {} projects · {} exited · {} attention ({} failed / {} input / {} review{})",
+            "GLOBAL {} workers · {} live · {} project{} · {} exited · {} attention ({} failed / {} input / {} review{})",
             self.workers,
             self.live,
             self.projects,
+            if self.projects == 1 { "" } else { "s" },
             self.exited,
             self.attention,
             self.failed,

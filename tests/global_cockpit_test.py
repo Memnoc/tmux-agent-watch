@@ -1,5 +1,6 @@
 """Global inventory and terminal actions with disposable real Git/tmux clients."""
 import os
+from itertools import product
 from pathlib import Path
 import shlex
 import subprocess
@@ -207,20 +208,20 @@ class GlobalCockpitTest(IndependentNavigation):
         secret = 'private-worker-' + 'long-'*20
         self.tmux('rename-window', '-t', self.worker, secret)
         for i in range(45): (self.repo / ('private-file-%02d.txt' % i)).write_text('never read this content')
-        for mode in ['safe', 'nerd']:
+        for mode, theme in product(['safe', 'nerd'], ['moon', 'dawn', 'rose-pine']):
             self.tmux('set-option', '-g', '@drudwyn-icon-mode', mode)
             for redacted in [False, True]:
                 self.tmux('set-option', '-g', '@drudwyn-redact-labels', 'on' if redacted else 'off')
-                pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit')
+                pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit', '--theme', theme)
                 self.wait_pane(pane, 'MATCHING 1')
                 for width in [48,64,80,120,160]:
                     self.tmux('resize-window', '-t', pane, '-x', str(width), '-y', '24')
                     screen = self.wait_pane(pane, self.worker)
                     if redacted: self.assertNotIn('private-', screen)
-                    Path(f'/tmp/drudwyn-ticket09-{mode}-{width}-redact{int(redacted)}.txt').write_text(screen)
+                    Path(f'/tmp/drudwyn-ticket09-{mode}-{theme}-{width}-redact{int(redacted)}.txt').write_text(screen)
                     self.tmux('send-keys', '-t', pane, 'd')
                     screen = self.wait_pane(pane, 'DETAILS')
-                    Path(f'/tmp/drudwyn-ticket09-details-{mode}-{width}-redact{int(redacted)}.txt').write_text(screen)
+                    Path(f'/tmp/drudwyn-ticket09-details-{mode}-{theme}-{width}-redact{int(redacted)}.txt').write_text(screen)
                     frames = screen
                     for _ in range(25):
                         self.tmux('send-keys', '-t', pane, 'PageDown')
@@ -229,7 +230,7 @@ class GlobalCockpitTest(IndependentNavigation):
                     self.assertIn('Assembled verification: Not verified', frames)
                     self.assertIn('Reported worker checks: unknown', frames)
                     self.assertIn('primary checkout', self.tmux('capture-pane', '-p', '-t', pane))
-                    Path(f'/tmp/drudwyn-ticket09-details-end-{mode}-{width}-redact{int(redacted)}.txt').write_text(self.tmux('capture-pane', '-p', '-t', pane))
+                    Path(f'/tmp/drudwyn-ticket09-details-end-{mode}-{theme}-{width}-redact{int(redacted)}.txt').write_text(self.tmux('capture-pane', '-p', '-t', pane))
                     if redacted:
                         self.assertNotIn('private-', frames)
                         self.assertNotIn(str(self.repo), frames)
@@ -273,13 +274,15 @@ class GlobalCockpitTest(IndependentNavigation):
     def test_project_coordinator_action_and_supported_themes(self):
         self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
         counts = self.command('cockpit', '--list', '--search', 'project', client=self.clients[0]).stdout
-        self.assertIn('GLOBAL 1 workers · 1 live · 1 projects', counts)
+        self.assertIn('GLOBAL 1 workers · 1 live · 1 project ·', counts)
         self.assertIn('MATCHING 1 workers · 1 coordinators', counts)
         self.command('navigate', '--window', self.worker, client=self.clients[0])
         other = self.selection(self.clients[1])
         for theme in ['rose-pine', 'moon', 'dawn']:
             pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit', '--theme', theme)
             screen = self.wait_pane(pane, 'MATCHING 1')
+            self.assertIn('1 project', screen)
+            self.assertNotIn('1 projects', screen)
             self.assertIn(self.home + ' · c return', screen)
             self.tmux('send-keys', '-t', pane, 'c')
             for _ in range(100):

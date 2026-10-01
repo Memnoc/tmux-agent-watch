@@ -152,6 +152,61 @@ class StatusATest(IndependentNavigation):
         for key in ['f', 'i', 'r', 'a', 'w']:
             self.assertIn('status-action', self.tmux('list-keys', '-T', 'drudwyn-status', key))
 
+    def test_plain_shell_context_omits_empty_activity(self):
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        self.install()
+        self.resize_client(self.clients[0], 160)
+        screen, data = self.converged(self.clients[0], 160)
+        bottom = screen.lines()[-1]
+        self.assertIn('COORD', bottom)
+        self.assertIn(' · main', bottom)
+        self.assertNotIn('(unknown)', bottom)
+        self.assertEqual(bottom.split('GLOBAL')[0].count(' · '), 1)
+        Path('/tmp/drudwyn-ticket15-shell.txt').write_text(bottom + '\n')
+        Path('/tmp/drudwyn-ticket15-shell.ansi').write_bytes(data)
+
+    def test_long_shell_context_retains_selected_identity_at_all_widths(self):
+        self.install()
+        selected = self.selection(self.clients[0])
+        other = self.selection(self.clients[1])
+        index = self.tmux('display-message', '-p', '-t', self.home, '#{window_index}')
+        for role, name in [('SH', 'editing shell with a deliberately long name'),
+                           ('COORD', 'planning coordinator with a deliberately long name')]:
+            if role == 'COORD':
+                self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+            self.tmux('rename-window', '-t', self.home, name)
+            for redacted in [False, True]:
+                self.tmux('set', '-g', '@drudwyn-redact-labels', 'on' if redacted else 'off')
+                for width in [48, 64, 80, 120, 160]:
+                    with self.subTest(role=role, redacted=redacted, width=width):
+                        session, window = selected.split(':')
+                        rows = plain(self.command('status-bar', '--projection', '--session', session,
+                                     '--window', window, '--width', str(width), client=self.clients[0]).stdout).splitlines()
+                        top, bottom = rows
+                        context = bottom.split('GLOBAL')[0].strip()
+                        self.assertIn(role, context)
+                        if width >= 64:
+                            self.assertIn('Workspace' if redacted else name.split()[0], context)
+                        self.assertNotIn('(unknown)', context)
+                        self.assertFalse(context.endswith('·'), context)
+                        self.assertIn('● ' + index + ' ', top)
+                        for count in ['GLOBAL 1', 'FAIL 0', 'INPUT 0', 'REVIEW 1']:
+                            self.assertIn(count, bottom)
+                        for row in rows:
+                            self.assertLessEqual(len(row), width)
+                            if redacted:
+                                self.assertNotIn(name.split()[0], row)
+                                self.assertNotIn('main', row)
+                        self.resize_client(self.clients[0], width)
+                        screen, data = self.converged(self.clients[0], width)
+                        self.assertEqual([line.rstrip() for line in screen.lines()[-2:]],
+                                         [line.rstrip() for line in rows])
+                        path = Path(f'/tmp/drudwyn-ticket15-long-{role}-{redacted}-{width}')
+                        path.with_suffix('.txt').write_text('\n'.join(screen.lines()[-2:]) + '\n')
+                        path.with_suffix('.ansi').write_bytes(data)
+                        self.assertEqual(self.selection(self.clients[0]), selected)
+                        self.assertEqual(self.selection(self.clients[1]), other)
+
     def resize_client(self, client, width):
         fcntl.ioctl(self.client_fds[client], termios.TIOCSWINSZ, struct.pack('HHHH',40,width,0,0))
         deadline=time.monotonic()+3
