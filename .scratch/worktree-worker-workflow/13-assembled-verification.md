@@ -153,3 +153,35 @@ that freeze. This implementation commit includes code, tests, documentation and
 this done receipt atomically. The coordinating session owns independent final-SHA
 review/receipt and subsequent tickets. No main merge, push or live user fixture
 was performed; platform claims remain Linux/tmux 3.4 only.
+
+## Independent Northstar crosscheck — 2026-10-01
+
+Reviewed `32ac200d981ca8bbd6a499df099917ec358242ba` through implementation
+commit `be32101aca489401a736a8ccd39b4fbdc536b16d`, running Standards and Spec
+sequentially under the implement-all override. The review used CONTRIBUTING,
+CONTEXT, the privacy boundary, ADR0002/0003/0005/0006/0007, this ticket and its
+originating spec. Final implementation/test hashes match the reviewed frozen
+candidate; the subsequent usage-documentation additions accurately describe
+path restrictions and unavailable process-birth evidence.
+
+**Standards: clear — 0 severe, 1 deferred judgement call.** No hard documented
+standard violation remains. Possible Primitive Obsession in `Receipt`: timestamps,
+process bindings and result state use strings and emptiness/literal comparisons.
+Typed internal values with conversion at the tmux boundary could simplify future
+maintenance. This is a nonblocking heuristic, not required redesign for this ticket.
+
+**Spec: clear — 0 unresolved severe findings.** The independently reproduced
+malformed-receipt success claim is fixed: malformed runner/child bindings and
+reversed timestamps now show Not verified, while an intact completed receipt
+still shows Passed. Before/after evidence is in
+`/tmp/drudwyn-review13-receipt-{before,after}.log`; the public reproduction is
+`/tmp/drudwyn-review13-receipt-repro.py`. Independently rerun real-terminal and
+command cases passed for visible Cockpit execution with both client selections
+preserved, surviving-child checkout locking, and execution in the original held
+directory after pathname replacement. The final direct/symlink newline-path
+regression also passed, preserving both the selected checkout and ordinary sibling.
+
+The final frozen gate logs were inspected: Rust41, verification10 and the complete
+shell/Python suite passed, with only the existing optional Resurrect skip.
+No further runtime changes or redundant full-suite run were needed. This receipt
+changes only ticket13; main remains `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
