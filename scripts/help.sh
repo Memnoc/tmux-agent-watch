@@ -31,6 +31,7 @@ printf '    /      search global workers; p project, s state, g grouping, x clea
 printf '    w      project windows including ordinary shells; c coordinator\n'
 printf '    d      full details (PgUp/PgDn scroll); Enter opens; r refreshes\n'
 printf '    i      preview worker integration (Rust v2); y applies, Esc cancels\n'
+printf '    C      conflict: c Continue, a Abort, o Open, v Recover agent, t Retry\n'
 printf '    o      recover an existing worktree (s shell, t restart task, c coordinator)\n\n'
 printf '  INSIDE NAVIGATORS\n'
 printf '    n      new shell session in the session navigator (Tab edits, Esc cancels)\n'

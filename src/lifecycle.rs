@@ -436,13 +436,16 @@ pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
     reconcile(&guard)
 }
 
-struct HookTarget {
-    identity: String,
-    root_birth: String,
+pub(crate) struct HookTarget {
+    pub(crate) identity: String,
+    pub(crate) root_birth: String,
     previous_state: String,
 }
 
-fn observe_hook_target(pane: &str, agent: AgentKind) -> Result<HookTarget, LifecycleError> {
+pub(crate) fn observe_hook_target(
+    pane: &str,
+    agent: AgentKind,
+) -> Result<HookTarget, LifecycleError> {
     let record = tmux_output(&["display-message", "-p", "-t", pane, PANE_FORMAT])?;
     let f: Vec<_> = record.split(SEPARATOR).collect();
     if f.len() != 18 || f[1] != pane || f[4] != "0" {

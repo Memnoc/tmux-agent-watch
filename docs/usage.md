@@ -641,7 +641,9 @@ history. Apply revalidates source/target refs, commits and checkout identities
 under a destination-directory lock. Dirty or untracked work, detached/ambiguous
 checkouts, active Git operations and stale previews block integration. Inherited
 Git repository/index addressing cannot redirect the explicit checkout. Git's
-own locks and ignored-file overwrite protection remain effective; no automatic
+own locks remain effective. A metadata-only guard protects ignored files against
+incoming exact and file/directory collisions in both fast-forward and divergent
+merges; unrelated ignored files remain allowed. No automatic
 stash, reset, squash, rebase, push or cleanup occurs.
 
 A source already contained in the target is a reported no-op. Otherwise Drudwyn
@@ -653,6 +655,52 @@ it does not mean checks passed or the task completed. The worker and branch rema
 
 Conflict or Git-hook failure leaves Git's operation and files in the destination
 for inspection. The error stays visible in Cockpit or returns nonzero from the
-command; closing a popup is not success. Automatic coordinator conflict delivery,
-Continue/Abort and assembled verification are separate subsequent slices. Do not
-start another merge while the destination has an existing Git operation.
+command; closing a popup is not success. Do not start another merge while the
+destination has an existing Git operation.
+
+### Resolve a retained integration conflict (Rust v2)
+
+A failed merge opens the conflict panel. Later, select its batch worker or the
+destination workspace and press **C Conflict**. It shows the source/target refs
+and commits, destination checkout, expected merge state, and handoff receipt.
+**c Continue** completes only that expected merge once all unmerged entries have
+been resolved and staged. **a Abort** asks Git to abort normally; a failure keeps
+resolution edits and reports the error, without resetting or discarding work.
+Checks remain unknown, and the worker checkout remains available.
+
+Drudwyn attempts one initial transient handoff to a unique live coordinator agent
+whose process is verified in the exact destination checkout. **Sent** means
+transmitted, not accepted or finished. Inspection and refresh never resend it.
+Use **o Open** to inspect the coordinator and **t Retry** for a deliberate resend.
+If no suitable agent exists, **F4** selects an agent and **v Recover agent** opens
+a new conversation in the destination and selects it as coordinator, preserving
+the previous window and branch. Recovery sends no task; inspect startup, then use
+**t Retry** to send the generated conflict instruction. A live destination agent
+blocks duplicate recovery: open it and explicitly select it as coordinator first.
+All navigation affects only the invoking terminal.
+
+If the live project association is unavailable, explicitly select the destination
+repository's coordinator using the existing coordinator controls, then use
+**p Use current project** in the conflict panel (or `--project` below). This changes
+routing only after validating the project's repository; it never guesses another
+batch or starts another merge. **r Refresh**, **PgUp/PgDn** and **Esc** inspect,
+scroll and leave the panel. Redaction hides refs, commits and checkout labels.
+
+```sh
+tmux-drudwyn workspace conflict --path /path/to/destination
+tmux-drudwyn workspace conflict --path /path/to/destination --continue
+tmux-drudwyn workspace conflict --path /path/to/destination --abort
+tmux-drudwyn workspace conflict --path /path/to/destination --open
+# Explicit new conversation; no task is sent by recovery.
+tmux-drudwyn workspace conflict --path /path/to/destination --recover-agent codex
+tmux-drudwyn workspace conflict --path /path/to/destination --retry
+# Repair a lost routing association deliberately before retrying.
+tmux-drudwyn workspace conflict --path /path/to/destination --project '$3' --retry
+```
+
+The receipt lives only in tmux. A replaced merge, changed checkout, or lost receipt
+cannot authorize Continue/Abort; inspect Git directly after live history is lost.
+If the coordinator completed or aborted independently, current Git metadata
+reconciles the result and repeated actions do not create another commit. Drudwyn
+reads operation/ref/index metadata, never conflict contents or agent scrollback.
+Assembled verification remains a separate action; integration never implies it.

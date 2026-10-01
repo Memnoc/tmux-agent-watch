@@ -1,7 +1,7 @@
 //! Explicit project associations live only in tmux. Session IDs distinguish
 //! projects even when their repository or window display names are identical.
 use crate::navigation::{self, tmux};
-use std::{io, path::Path, process::Command};
+use std::{io, path::Path};
 
 pub fn project(session: &str) -> io::Result<String> {
     let rows = tmux(&["list-sessions", "-F", "#{session_id}␟#{@drudwyn_view_of}"])?;
@@ -13,11 +13,11 @@ pub fn project(session: &str) -> io::Result<String> {
 }
 
 pub fn repository(path: &Path) -> io::Result<String> {
-    let result = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .output()?;
+    let result = crate::workspace::checkout_git(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .output()?;
     if !result.status.success() {
         return Err(io::Error::other("Coordinator requires a Git checkout"));
     }
@@ -64,6 +64,23 @@ pub(crate) fn restore(window: &str, project: &str, expected: &str) -> io::Result
         return Err(io::Error::other(format!(
             "Coordinator changed during recovery; retained window {window} and checkout. No task sent; open the chosen coordinator instead"
         )));
+    }
+    assign(&guard, window, project)
+}
+
+/// Explicit conflict recovery may select a new coordinator while retaining the
+/// previous window. A concurrent deliberate selection must still win.
+pub(crate) fn replace_after_conflict_recovery(
+    window: &str,
+    project: &str,
+    expected: &str,
+) -> io::Result<()> {
+    let guard = crate::lifecycle::LifecycleGuard::acquire().map_err(io::Error::other)?;
+    let (current, _) = ownership(project)?;
+    if current != expected {
+        return Err(io::Error::other(
+            "Coordinator changed during recovery; new window retained, task not sent; inspect before retry",
+        ));
     }
     assign(&guard, window, project)
 }

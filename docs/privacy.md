@@ -27,6 +27,7 @@ for sensitive or organisational workflows without a separate assessment.
 | clean/dirty state, refs/commit IDs, changed-file names and merge ancestry | preview/integrate reviewed commits and prevent unsafe worktree removal | current command | fixed readiness state |
 | lifecycle state, evidence source, timestamps, and available pane exit code/signal/time | distinguish running, working, attention, and process exit | current tmux session | cockpit, HUD, and sidebar |
 | launch pane/process identity, losslessly encoded checkout path, expected executable and delivery state | bind and serialize a send to its worker and distinguish not sent/sent/uncertain | current tmux session | workspace commands and Cockpit |
+| expected merge refs/commits, destination directory identity, MERGE_HEAD inode/timestamps, project and handoff state | guard Continue/Abort and reconcile external resolution | current tmux server only | conflict command and Cockpit, labels redacted |
 | deliberately selected repository task-file reference (including lossless path encoding) | let the agent read the chosen task in its checkout | current tmux session | launch form and live window option |
 | task entered in the start form or stdin | deliver the initial instruction to the selected agent | form/command memory and delete-on-paste tmux buffer | selected third-party agent pane |
 
@@ -75,6 +76,11 @@ the same explicit-checkout command seam as inventory enrichment. Mutating Git
 and hooks may operate on repository files as normal, but their output is not
 captured, interpreted or retained by the supervisor.
 
+Before mutation, ignored/untracked filename metadata is compared against incoming
+source changes from merge-base metadata, including file/directory path collisions.
+No ignored file contents are read. Unrelated ignored files and unchanged source
+paths deleted at the destination do not block integration.
+
 Apply serializes on the existing canonical destination-directory inode, sharing
 the checkout lock namespace with recovery and task delivery. Competing actions
 return an explicit retry error. The mutating Git process inherits the descriptor
@@ -83,6 +89,24 @@ not release the guard while the child remains able to mutate. Git provides its
 normal hook stdin. No global lifecycle guard is held during Git or hooks, and
 no lock file, durable merge registry or task history is created. Failed/conflicting
 merges remain in Git for deliberate recovery; nothing is automatically reset.
+
+Conflict receipts retain metadata only in server options; they contain no task or
+resolution text. A generated coordinator instruction exists only in command
+memory and the same delete-on-paste transient buffer as worker tasks. The send
+verifies a unique agent's pane, process birth identity, and actual destination
+checkout before paste and before Enter. This scoped binding does not create or
+relax managed worker launch receipts. Uncertainty is recorded before transmission;
+only deliberate Retry can send again. An ordinary coordinator can receive this
+handoff without being relaunched as a managed worker.
+
+Continue/Abort share the destination guard and retain it in the mutating Git
+child; normal hooks run with output discarded. Continue uses a noninteractive Git
+editor. Replaced merge metadata cannot be adopted, and loss of live receipt
+history leaves the operation unavailable to these controls. Explicit conflict
+agent recovery starts a new conversation without a task, retains the old window,
+and compares coordinator ownership under the existing lifecycle guard before
+selection. The user then deliberately retries the generated handoff. No agent
+acceptance, resolution, or assembled verification is inferred from transmission.
 
 Global Cockpit refreshes keep a single in-memory snapshot of known tmux windows,
 projects, process evidence, Git checkout identity/status, changed-file names and

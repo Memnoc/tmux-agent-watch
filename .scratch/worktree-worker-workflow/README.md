@@ -5,10 +5,20 @@ Approved by Memnoc on 2026-09-30.
 [Specification](../../docs/specs/2026-09-30-worktree-worker-workflow.md) ·
 [Approved breakdown](../../docs/specs/2026-09-30-worktree-worker-ticket-plan.md)
 
-Work any ready ticket whose blockers are all done when the user resumes work.
+Work any ready ticket whose blockers are all done. Full-auto implementation resumed on 2026-10-01 for tickets 12–15.
 Implementation branch: `work/worktree-worker-workflow`.
 
-## Pause checkpoint — after ticket 11
+## Resumed checkpoint — 2026-10-01
+
+The user resumed all remaining tickets on `work/worktree-worker-workflow`.
+Ticket 12 starts at `a0075def1b75fc7e2f053d59cf0537f6b3353bc9`; tickets 13–15
+follow their dependencies and independent reviews. The historical pause receipt
+below records the previous stopping point and is superseded by this resumption.
+
+Ticket12 implementation and its final frozen suite are complete. Independent
+Standards/Spec review remains pending before ticket13 proceeds; see its receipt.
+
+## Historical pause checkpoint — after ticket 11
 
 Paused at the user's request after ticket11 independent clearance. Tickets01–11
 are done; reviewed implementation HEAD is

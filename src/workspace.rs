@@ -796,6 +796,33 @@ pub fn deliver(target: &str, task: &str, retry: bool) -> Result<(), Error> {
     if !command.is_empty() && pane.command != command {
         return Err(Error::Invalid("Launch process changed or startup is delayed; task not sent. Inspect before deliberate recovery".into()));
     }
+    transmit_task(
+        &pane.pane,
+        task,
+        None,
+        || same_process(&pane),
+        |state| set_window(&pane.window, "@drudwyn_delivery", state),
+    )
+}
+
+fn transmission(guard: Option<&fs::File>, args: &[&str]) -> Result<(), Error> {
+    let mut command = Command::new("tmux");
+    command.args(args);
+    if let Some(guard) = guard {
+        command.stdin(Stdio::from(guard.try_clone()?));
+    }
+    tmux_ok(&mut command)
+}
+
+/// One transient channel shared by managed tasks and explicitly bound handoffs.
+/// The caller validates routing and owns its receipt; task bytes only enter stdin.
+fn transmit_task(
+    pane: &str,
+    task: &str,
+    guard: Option<&fs::File>,
+    validate: impl Fn() -> Result<(), Error>,
+    receipt: impl Fn(&str) -> Result<(), Error>,
+) -> Result<(), Error> {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -818,28 +845,107 @@ pub fn deliver(target: &str, task: &str, retry: bool) -> Result<(), Error> {
             "Could not load transient task; task not sent; worker retained".into(),
         ));
     }
-    same_process(&pane)?;
+    validate()?;
     // Mark uncertainty before the first potentially transmitting operation. No
     // failure or subsequent invocation may silently resend this task.
-    set_window(&pane.window, "@drudwyn_delivery", "uncertain")?;
+    receipt("uncertain")?;
     let transmit = || -> Result<(), Error> {
-        tmux_ok(Command::new("tmux").args([
-            "paste-buffer",
-            "-d",
-            "-p",
-            "-r",
-            "-b",
-            &buffer.0,
-            "-t",
-            &pane.pane,
-        ]))?;
+        transmission(
+            guard,
+            &[
+                "paste-buffer",
+                "-d",
+                "-p",
+                "-r",
+                "-b",
+                &buffer.0,
+                "-t",
+                pane,
+            ],
+        )?;
         thread::sleep(Duration::from_millis(750));
-        same_process(&pane)?;
-        tmux_ok(Command::new("tmux").args(["send-keys", "-t", &pane.pane, "Enter"]))?;
-        set_window(&pane.window, "@drudwyn_delivery", "sent")?;
+        validate()?;
+        transmission(guard, &["send-keys", "-t", pane, "Enter"])?;
+        receipt("sent")?;
         Ok(())
     };
-    transmit().map_err(|_| Error::Invalid(format!("Worker created; task delivery uncertain; retained window {} pane {}. Inspect it before deliberate retry; nothing automatically resent", pane.window, pane.pane)))
+    transmit().map_err(|_| Error::Invalid("Task delivery uncertain; inspect the coordinator/worker before deliberate retry; nothing automatically resent".into()))
+}
+
+/// A handoff has its own verified lifetime binding. It never invents managed
+/// launch fields or bypasses the ordinary task delivery guard.
+pub(crate) fn deliver_coordinator(
+    window: &str,
+    checkout: &Path,
+    task: &str,
+    guard: &fs::File,
+    operation: impl Fn() -> Result<(), Error>,
+    receipt: impl Fn(&str) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let workspaces =
+        crate::discovery::discover_tmux().map_err(|e| Error::Invalid(e.to_string()))?;
+    let worker = workspaces.iter().find(|w| w.identity.window_id == window && w.process == "running")
+        .ok_or_else(|| Error::Invalid("Coordinator has no unique live agent; Open/recover it in the target checkout before retry".into()))?;
+    let pane = &worker.identity.pane_id;
+    let observe = || {
+        crate::lifecycle::observe_hook_target(pane, worker.agent)
+            .map_err(|e| Error::Invalid(e.to_string()))
+    };
+    let bound = observe()?;
+    let validate = || -> Result<(), Error> {
+        operation()?;
+        let latest =
+            crate::discovery::discover_tmux().map_err(|e| Error::Invalid(e.to_string()))?;
+        if !latest.iter().any(|w| {
+            w.identity.window_id == window
+                && w.identity.pane_id == *pane
+                && w.process == "running"
+                && w.agent == worker.agent
+        }) {
+            return Err(Error::Invalid(
+                "Coordinator agent is no longer unique; inspect before retry".into(),
+            ));
+        }
+        let current = observe()?;
+        if current.identity != bound.identity
+            || current.root_birth != bound.root_birth
+            || crate::navigation::tmux(&["display-message", "-p", "-t", pane, "#{window_id}"])?
+                != window
+        {
+            return Err(Error::Invalid("Coordinator process changed; inspect before retry; nothing routed to a replacement".into()));
+        }
+        let pid = current
+            .identity
+            .split(':')
+            .nth(1)
+            .ok_or_else(|| Error::Invalid("Coordinator process identity unknown".into()))?;
+        let cwd = match fs::read_link(format!("/proc/{pid}/cwd")) {
+            Ok(path) => path,
+            Err(_) if current.identity.split(':').next() == Some(pid) => {
+                crate::recovery::selected_checkout(window, pane)?
+            }
+            Err(_) => {
+                return Err(Error::Invalid(
+                    "Coordinator child checkout cannot be verified; Open/recover explicitly".into(),
+                ));
+            }
+        };
+        let output = checkout_git(&cwd, &["rev-parse", "--show-toplevel"]).output()?;
+        if !output.status.success() {
+            return Err(Error::Invalid("Coordinator checkout unavailable".into()));
+        }
+        let root = PathBuf::from(
+            String::from_utf8(output.stdout)
+                .map_err(|_| Error::Invalid("Coordinator checkout identity unavailable".into()))?
+                .trim_end_matches('\n'),
+        );
+        if root.canonicalize()? != checkout {
+            return Err(Error::Invalid("Coordinator is in another checkout; Open/recover in the integration destination before retry".into()));
+        }
+        Ok(())
+    };
+    validate()?;
+    transmit_task(pane, task, Some(guard), validate, receipt)
 }
 
 pub fn finish(path: &Path, base: &str, yes: bool) -> Result<PathBuf, Error> {

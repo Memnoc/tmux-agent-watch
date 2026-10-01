@@ -199,6 +199,25 @@ enum WorkspaceCommand {
         #[arg(long)]
         apply: Option<String>,
     },
+    /// Inspect a retained merge; resolve through the coordinator, Continue or Abort.
+    Conflict {
+        #[arg(long)]
+        path: PathBuf,
+        /// Start a new coordinator agent conversation in the retained destination; no task yet.
+        #[arg(long, value_enum, conflicts_with_all = ["continue_merge", "abort", "retry", "open"])]
+        recover_agent: Option<AgentArg>,
+        /// Explicitly associate a recovered project session before inspecting/retrying.
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long = "continue", conflicts_with_all = ["abort", "retry", "open"])]
+        continue_merge: bool,
+        #[arg(long, conflicts_with_all = ["continue_merge", "retry", "open"])]
+        abort: bool,
+        #[arg(long, conflicts_with_all = ["continue_merge", "abort", "open"])]
+        retry: bool,
+        #[arg(long, conflicts_with_all = ["continue_merge", "abort", "retry"])]
+        open: bool,
+    },
     /// Open a surviving checkout; never create/reset a worktree.
     Recover {
         #[arg(long)]
@@ -514,6 +533,46 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         },
         Command::Settings { theme } => settings::run(theme.into())?,
         Command::Workspace { command } => match command {
+            WorkspaceCommand::Conflict {
+                path,
+                project,
+                recover_agent,
+                continue_merge,
+                abort,
+                retry,
+                open,
+            } => {
+                use tmux_drudwyn::integration::ConflictAction;
+                if let Some(project) = project {
+                    tmux_drudwyn::integration::select_conflict_project(&path, &project)?;
+                }
+                if let Some(agent) = recover_agent {
+                    println!(
+                        "{}",
+                        tmux_drudwyn::integration::recover_conflict_agent(&path, agent.into())?
+                    );
+                    return Ok(());
+                }
+                let action = if continue_merge {
+                    ConflictAction::Continue
+                } else if abort {
+                    ConflictAction::Abort
+                } else if retry {
+                    ConflictAction::Retry
+                } else if open {
+                    ConflictAction::Open
+                } else {
+                    ConflictAction::Inspect
+                };
+                println!(
+                    "{}",
+                    tmux_drudwyn::integration::conflict(
+                        &path,
+                        action,
+                        Config::load_tmux()?.redact_labels
+                    )?
+                );
+            }
             WorkspaceCommand::Integrate {
                 path,
                 batch,

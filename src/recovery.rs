@@ -340,30 +340,7 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
         _ => {}
     }
     let command = if let Some(agent) = request.agent {
-        // Resolve once in the invoking command's environment, then exec this
-        // exact path. Never silently fall back to an installed different agent.
-        let output = Command::new("sh")
-            .args([
-                "-c",
-                "command -v \"$1\"",
-                "drudwyn-recovery",
-                agent.command(),
-            ])
-            .output()?;
-        let executable = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if !output.status.success() || executable.is_empty() || !Path::new(&executable).is_file() {
-            return Err(Error::Invalid(format!(
-                "Agent {} unavailable; no restart",
-                agent.command()
-            )));
-        }
-        let executable = PathBuf::from(executable);
-        let executable = if executable.is_absolute() {
-            executable
-        } else {
-            std::env::current_dir()?.join(executable)
-        };
-        vec![executable.to_string_lossy().into_owned()]
+        agent_command(agent)?
     } else {
         vec![tmux(&["show-option", "-gv", "default-shell"])?, "-l".into()]
     };
@@ -423,6 +400,33 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
     }
     crate::navigation::open_for(&client, Some(&started.window_id), None)?;
     Ok(started)
+}
+
+pub(crate) fn agent_command(agent: crate::domain::AgentKind) -> Result<Vec<String>, Error> {
+    // Resolve once in the invoking command's environment, then exec this
+    // exact path. Never silently fall back to an installed different agent.
+    let output = Command::new("sh")
+        .args([
+            "-c",
+            "command -v \"$1\"",
+            "drudwyn-recovery",
+            agent.command(),
+        ])
+        .output()?;
+    let executable = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if !output.status.success() || executable.is_empty() || !Path::new(&executable).is_file() {
+        return Err(Error::Invalid(format!(
+            "Agent {} unavailable; no restart",
+            agent.command()
+        )));
+    }
+    let executable = PathBuf::from(executable);
+    let executable = if executable.is_absolute() {
+        executable
+    } else {
+        std::env::current_dir()?.join(executable)
+    };
+    Ok(vec![executable.to_string_lossy().into_owned()])
 }
 
 // Lossless operational path metadata, never a guess at tmux display escaping.

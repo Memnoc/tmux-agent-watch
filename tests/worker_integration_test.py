@@ -202,13 +202,59 @@ class WorkerIntegrationTest(IndependentNavigation):
     def test_ignored_collision_is_not_overwritten(self):
         self.git('config', 'core.excludesFile', str(Path(self.tmp.name)/'ignore'))
         (Path(self.tmp.name)/'ignore').write_text('worker.txt\n')
-        (self.repo/'worker.txt').write_text('irreplaceable ignored work')
+        for divergent in (False, True):
+            if divergent:
+                self.git('commit', '--allow-empty', '-qm', 'divergent target')
+            before = self.git('rev-parse', 'HEAD')
+            for directory in (False, True):
+                with self.subTest(divergent=divergent, directory=directory):
+                    ignored = self.repo/'worker.txt'
+                    if directory:
+                        ignored.mkdir()
+                        ignored = ignored/'private-cache'
+                    ignored.write_text('irreplaceable ignored work')
+                    self.assertEqual(self.git('status', '--porcelain'), '')
+                    preview = self.integrate()
+                    result = self.integrate('--apply', self.token(preview), check=False)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(ignored.read_text(), 'irreplaceable ignored work')
+                    self.assertEqual(self.git('rev-parse', 'HEAD'), before)
+                    ignored.unlink()
+                    if directory:
+                        ignored.parent.rmdir()
+
+    def test_divergent_merge_allows_unrelated_ignored_paths_and_unchanged_source_paths(self):
+        # Target deliberately deletes common.txt; its local ignored replacement
+        # must survive because the source has not changed that path.
+        self.git('rm', 'common.txt')
+        self.git('commit', '-qm', 'target removes unchanged source file')
+        (self.repo/'.git/info/exclude').write_text('common.txt\nnode_modules/\n')
+        (self.repo/'common.txt').write_text('local ignored replacement')
+        dependency = self.repo/'node_modules/dependency'
+        dependency.mkdir(parents=True)
+        (dependency/'cache').write_text('unrelated ignored dependency')
         self.assertEqual(self.git('status', '--porcelain'), '')
-        preview = self.integrate()
-        result = self.integrate('--apply', self.token(preview), check=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual((self.repo/'worker.txt').read_text(), 'irreplaceable ignored work')
-        self.assertEqual(self.git('rev-parse', 'HEAD'), self.base)
+        result = self.integrate('--apply', self.token(self.integrate()))
+        self.assertIn('Integrated', result.stdout)
+        self.assertEqual((self.repo/'common.txt').read_text(), 'local ignored replacement')
+        self.assertEqual((dependency/'cache').read_text(), 'unrelated ignored dependency')
+
+    def test_ignored_file_cannot_become_incoming_directory(self):
+        (self.source/'incoming').mkdir()
+        (self.source/'incoming/file').write_text('source data')
+        self.git('add', '.', path=self.source)
+        self.git('commit', '-qm', 'incoming directory', path=self.source)
+        (self.repo/'.git/info/exclude').write_text('incoming\n')
+        for divergent in (False, True):
+            if divergent:
+                self.git('commit', '--allow-empty', '-qm', 'divergent target')
+            (self.repo/'incoming').write_text('protected ignored file')
+            before = self.git('rev-parse', 'HEAD')
+            result = self.integrate('--apply', self.token(self.integrate()), check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual((self.repo/'incoming').read_text(), 'protected ignored file')
+            self.assertEqual(self.git('rev-parse', 'HEAD'), before)
+            (self.repo/'incoming').unlink()
 
     def test_concurrent_alias_and_orphan_git_child_keep_destination_guard(self):
         import shutil

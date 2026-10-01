@@ -40,6 +40,7 @@ const COCKPIT_ACTIONS: &[(&str, &str)] = &[
     ("b", "Batch setup"),
     ("c", "Coordinator"),
     ("i", "Integrate"),
+    ("C", "Conflict"),
     ("f", "Finish"),
     ("/", "Search"),
     ("p/s", "Project/state"),
@@ -85,6 +86,7 @@ pub struct App {
     batches: HashMap<String, String>,
     finishing: Option<(String, String, PathBuf)>,
     integration: Option<IntegrationForm>,
+    conflict: Option<ConflictForm>,
     snapshot: Option<crate::inventory::Snapshot>,
     query: crate::inventory::Query,
     current_window: String,
@@ -120,6 +122,13 @@ struct RecoveryForm {
     field: usize,
     cursors: [usize; 2],
     error: Option<String>,
+}
+
+struct ConflictForm {
+    path: PathBuf,
+    status: String,
+    error: Option<String>,
+    scroll: u16,
 }
 
 struct IntegrationForm {
@@ -169,6 +178,7 @@ impl App {
                 .unwrap_or(0),
             finishing: None,
             integration: None,
+            conflict: None,
             snapshot: None,
             query: crate::inventory::Query::default(),
             current_window: String::new(),
@@ -181,6 +191,110 @@ impl App {
             agent_icon: "A".into(),
             config,
             theme: Theme::rose_pine(variant),
+        }
+    }
+
+    fn begin_conflict(&mut self, path: Option<PathBuf>) {
+        let path = path.map(Ok).unwrap_or_else(|| {
+            let w = self.selected_workspace().ok_or_else(|| {
+                workspace::Error::Invalid("Select a destination or associated worker".into())
+            })?;
+            if let Some(batch) = batch::for_window(&w.identity.window_id)? {
+                Ok(batch.checkout)
+            } else {
+                crate::recovery::selected_checkout(&w.identity.window_id, &w.identity.pane_id)
+            }
+        });
+        match path {
+            Ok(path) => {
+                let result = crate::integration::conflict(
+                    &path,
+                    crate::integration::ConflictAction::Inspect,
+                    self.config.redact_labels,
+                );
+                self.conflict = Some(ConflictForm {
+                    path,
+                    status: result.as_ref().ok().cloned().unwrap_or_default(),
+                    error: result.err().map(|e| e.to_string()),
+                    scroll: 0,
+                });
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+    fn conflict_key(&mut self, key: KeyCode) -> bool {
+        use crate::integration::ConflictAction;
+        if key == KeyCode::Esc {
+            self.conflict = None;
+            self.integration = None;
+            self.begin_refresh();
+            return false;
+        }
+        let Some(form) = &mut self.conflict else {
+            return false;
+        };
+        let action = match key {
+            KeyCode::Char('c') => ConflictAction::Continue,
+            KeyCode::Char('a') => ConflictAction::Abort,
+            KeyCode::Char('t') => ConflictAction::Retry,
+            KeyCode::Char('o') => ConflictAction::Open,
+            KeyCode::Char('r') => ConflictAction::Inspect,
+            KeyCode::Char('p') => {
+                let result = crate::navigation::context("#{session_id}")
+                    .map_err(workspace::Error::from)
+                    .and_then(|project| {
+                        crate::integration::select_conflict_project(&form.path, &project)
+                    });
+                if let Err(e) = result {
+                    form.error = Some(e.to_string());
+                    return false;
+                }
+                ConflictAction::Inspect
+            }
+            KeyCode::F(4) => {
+                self.next_start_agent();
+                return false;
+            }
+            KeyCode::Char('v') => {
+                let path = form.path.clone();
+                let agent = self.start_agent();
+                match crate::integration::recover_conflict_agent(&path, agent) {
+                    Ok(result) => {
+                        let form = self.conflict.as_mut().unwrap();
+                        form.status = format!("{result}\n{}", form.status);
+                        form.error = None;
+                    }
+                    Err(e) => {
+                        self.conflict.as_mut().unwrap().error = Some(e.to_string());
+                    }
+                }
+                return false;
+            }
+            KeyCode::PageDown | KeyCode::Down => {
+                form.scroll = form.scroll.saturating_add(5);
+                return false;
+            }
+            KeyCode::PageUp | KeyCode::Up => {
+                form.scroll = form.scroll.saturating_sub(5);
+                return false;
+            }
+            KeyCode::Home => {
+                form.scroll = 0;
+                return false;
+            }
+            _ => return false,
+        };
+        match crate::integration::conflict(&form.path, action, self.config.redact_labels) {
+            Ok(status) => {
+                form.status = status;
+                form.error = None;
+                action == ConflictAction::Open
+            }
+            Err(e) => {
+                form.error = Some(e.to_string());
+                form.scroll = 0;
+                false
+            }
         }
     }
 
@@ -277,7 +391,16 @@ impl App {
                     }
                     match crate::integration::apply(form.preview.as_ref().unwrap()) {
                         Ok(result) => form.result = Some(result.into()),
-                        Err(error) => form.error = Some(error.to_string()),
+                        Err(error) => {
+                            form.error = Some(error.to_string());
+                            let path = form.preview.as_ref().unwrap().target.path.clone();
+                            if crate::integration::active_conflict_for(
+                                form.preview.as_ref().unwrap(),
+                            ) {
+                                self.begin_conflict(Some(path));
+                                return;
+                            }
+                        }
                     }
                     form.scroll = 0;
                 }
@@ -320,12 +443,16 @@ impl App {
                 return;
             }
         };
+        self.begin_recovery_at(repo);
+    }
+
+    fn begin_recovery_at(&mut self, repo: PathBuf) {
         match crate::recovery::list(&repo) {
             Ok(checkouts) => {
                 self.recovery = Some(RecoveryForm {
+                    selected: checkouts.iter().position(|c| c.path == repo).unwrap_or(0),
                     repo,
                     checkouts,
-                    selected: 0,
                     restart: false,
                     task: String::new(),
                     file: false,
@@ -1052,6 +1179,12 @@ fn event_loop(
         if key.kind != KeyEventKind::Press {
             continue;
         }
+        if app.conflict.is_some() {
+            if app.conflict_key(key.code) {
+                return Ok(());
+            }
+            continue;
+        }
         if app.integration.is_some() {
             app.integration_key(key.code);
             continue;
@@ -1157,7 +1290,7 @@ fn event_loop(
         if (app.stale || app.refreshing.is_some() || app.selection_changed)
             && matches!(
                 key.code,
-                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o' | 'i')
+                KeyCode::Enter | KeyCode::Char('c' | 'f' | 'n' | 'b' | 'o' | 'i' | 'C')
             )
         {
             app.error = Some(
@@ -1174,6 +1307,7 @@ fn event_loop(
         }
         match key.code {
             KeyCode::Char('i') => app.begin_integration(),
+            KeyCode::Char('C') => app.begin_conflict(None),
             KeyCode::Char('d') => {
                 app.selection_changed = false;
                 app.details_open = true;
@@ -1281,6 +1415,10 @@ fn event_loop(
 }
 
 fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
+    if let Some(form) = &app.conflict {
+        render_conflict(frame, app, form);
+        return;
+    }
     if let Some(form) = &app.integration {
         render_integration(frame, app, form);
         return;
@@ -1575,6 +1713,44 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             modal,
         );
     }
+}
+
+fn render_conflict(frame: &mut ratatui::Frame<'_>, app: &App, form: &ConflictForm) {
+    let sections = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(6),
+    ])
+    .split(frame.area());
+    frame.render_widget(
+        Paragraph::new("INTEGRATION CONFLICT").style(
+            Style::default()
+                .fg(app.theme.rose)
+                .add_modifier(Modifier::BOLD),
+        ),
+        sections[0],
+    );
+    let mut text = String::new();
+    if let Some(error) = &form.error {
+        text.push_str(if app.config.redact_labels {
+            "Action unavailable; inspect coordinator or Git state. Labels hidden."
+        } else {
+            error
+        });
+        text.push_str("\n\n");
+    }
+    text.push_str(&format!(
+        "Recovery agent: {} · F4 changes agent\n",
+        app.start_agent().command()
+    ));
+    text.push_str(&form.status);
+    text.push_str("\nSent means transmitted, not accepted. Inspect before deliberate Retry.\n");
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    let max = paragraph
+        .line_count(sections[1].width)
+        .saturating_sub(sections[1].height as usize) as u16;
+    frame.render_widget(paragraph.scroll((form.scroll.min(max), 0)), sections[1]);
+    frame.render_widget(Paragraph::new("c Continue · a Abort · o Open\nv Recover agent · t Retry · r Refresh\np Use current project · PgUp/PgDn · Esc back").wrap(Wrap { trim: false }).block(Block::default().borders(Borders::TOP)), sections[2]);
 }
 
 fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &IntegrationForm) {
