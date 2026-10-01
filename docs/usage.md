@@ -884,7 +884,9 @@ Rosé Pine is the default; Moon and Dawn remain available.
 ### Workspace and Sessions
 
 Both navigators use the Cockpit's Rosé Pine masthead, quiet table rules and
-selected-item panel. Workspace groups rows by session; `t` cycles All,
+selected-item panel. Workspace groups agents/workers at the top and manual
+shells/editors below, with session labels inside each section. Each section
+scrolls independently, keeping agents visible while inspecting a shell. `t` cycles All,
 Agents/workers and Shells/editors, while `/` searches names, sessions, branches
 and activity. Role labels distinguish COORD, WT, AGENT, SH and EDIT.
 

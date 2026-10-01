@@ -492,3 +492,21 @@ attention. Width may reduce tab count while preserving the selected window and
 an overflow route. Focus and two-row Tabs remain selectable. Actual blank bottom
 padding would cost extra terminal rows; pending feedback, keep one row with a
 contrasting background boundary and internal horizontal spacing.
+
+### Agent grouping and three-region status proposal — 2026-10-01
+
+Memnoc requested agents together in Workspace rather than interleaved with
+manual shells. Keep agent/worktree rows in a top section and manual shells/
+editors below, each retaining session labels. Separate scrolling preserves agent
+visibility while inspecting a manual shell; selection and actions use stable IDs.
+
+The status bar is separately under design review: only the current workspace,
+three anchored regions with spaces, and a separator allowed to occupy a row.
+The simulated prototype at `/tmp/drudwyn-three-region-spike` uses the existing
+`scripts/status-feedback.spike.html?variant=A` route, served on localhost8790
+with `python3 scripts/status-feedback.spike.py`. A (recommended) puts current
+workspace/activity at start, branch/Git in the middle, and global attention at
+end. B emphasizes selected activity centrally; C centers the workspace itself.
+Two rows include the separator; optional bottom padding makes three. No live
+status change occurs before approval. Archive: `spike/three-region-status-20261001`
+at `6348923`. Ticket23 records checks and review evidence.

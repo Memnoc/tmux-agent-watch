@@ -99,6 +99,7 @@ enum NavigationAction {
 
 impl App {
     fn refresh_visible(&mut self) {
+        let selected = self.visible.get(self.selected).copied();
         let query = self.filter.to_lowercase();
         self.visible = self
             .windows
@@ -118,7 +119,9 @@ impl App {
             })
             .map(|(index, _)| index)
             .collect();
-        self.selected = self.selected.min(self.visible.len().saturating_sub(1));
+        self.selected = selected
+            .and_then(|index| self.visible.iter().position(|item| *item == index))
+            .unwrap_or(0);
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -221,12 +224,8 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
             NavigationAction::Continue
         }
         KeyCode::Char('t') => {
-            let selected = app.visible.get(app.selected).copied();
             app.kind = (app.kind + 1) % 3;
             app.refresh_visible();
-            if let Some(at) = selected.and_then(|id| app.visible.iter().position(|i| *i == id)) {
-                app.selected = at;
-            }
             NavigationAction::Continue
         }
         KeyCode::Char('r') => {
@@ -582,14 +581,17 @@ fn role(item: &Window) -> &str {
         "SH"
     }
 }
-fn render_windows(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let theme = app.theme;
-    let muted = Style::default().fg(theme.subtle());
-    let width = area.width as usize;
+fn window_columns(width: usize) -> (usize, usize, usize, usize) {
     let tool = if width >= 72 { 14 } else { 0 };
     let activity = if width >= 48 { 16 } else { 0 };
     let branch = if width >= 100 { (width / 3).min(42) } else { 0 };
     let name = width.saturating_sub(tool + activity + branch + 2);
+    (name, tool, activity, branch)
+}
+fn render_windows(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let theme = app.theme;
+    let muted = Style::default().fg(theme.subtle());
+    let (name, tool, activity, branch) = window_columns(area.width as usize);
     let mut headers = vec![Span::raw("  "), ui::cell("WORKSPACE", name, muted)];
     if tool > 0 {
         headers.push(ui::cell("AGENT / TOOL", tool, muted));
@@ -608,15 +610,73 @@ fn render_windows(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         ),
         Rect::new(area.x, area.y, area.width, 2),
     );
+    let body = Rect::new(
+        area.x,
+        area.y + 2,
+        area.width,
+        area.height.saturating_sub(2),
+    );
+    let agents: Vec<_> = app
+        .visible
+        .iter()
+        .copied()
+        .filter(|i| app.windows[*i].managed)
+        .collect();
+    let manual: Vec<_> = app
+        .visible
+        .iter()
+        .copied()
+        .filter(|i| !app.windows[*i].managed)
+        .collect();
+    if agents.is_empty() && manual.is_empty() {
+        frame.render_widget(
+            Paragraph::new(" No matching workspaces. [/] Change search; [t] Show all.")
+                .style(muted),
+            body,
+        );
+    } else if agents.is_empty() {
+        render_window_group(frame, app, body, &manual, "MANUAL SHELLS / EDITORS");
+    } else if manual.is_empty() {
+        render_window_group(frame, app, body, &agents, "AGENTS / WORKERS");
+    } else {
+        // Separate scroll regions keep agents visible even when a manual shell
+        // is selected. Keyboard order still follows the same agents-first list.
+        let height = (agents.len() as u16 * 3 + 2)
+            .min(body.height * 2 / 3)
+            .max(3)
+            .min(body.height);
+        let groups = Layout::vertical([Constraint::Length(height), Constraint::Min(3)]).split(body);
+        render_window_group(frame, app, groups[0], &agents, "AGENTS / WORKERS");
+        render_window_group(frame, app, groups[1], &manual, "MANUAL SHELLS / EDITORS");
+    }
+}
+fn render_window_group(
+    frame: &mut ratatui::Frame<'_>,
+    app: &App,
+    area: Rect,
+    indices: &[usize],
+    title: &str,
+) {
+    let theme = app.theme;
+    let muted = Style::default().fg(theme.subtle());
+    let width = area.width as usize;
+    let (name, tool, activity, branch) = window_columns(width);
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .title(format!(" {title} "))
+        .title_style(Style::default().fg(theme.accent()))
+        .border_style(Style::default().fg(theme.line()));
+    let body = block.inner(area);
+    frame.render_widget(block, area);
+    let compact = body.height < 3;
     let mut items = Vec::new();
     let mut selected = None;
     let mut session = None;
-    for (at, index) in app.visible.iter().enumerate() {
+    for index in indices {
         let item = &app.windows[*index];
-        if session != Some(item.session.as_str()) {
+        if !compact && session != Some(item.session.as_str()) {
             session = Some(&item.session);
-            let count = app
-                .visible
+            let count = indices
                 .iter()
                 .filter(|i| app.windows[**i].session == item.session)
                 .count();
@@ -630,7 +690,7 @@ fn render_windows(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             )));
         }
-        if at == app.selected {
+        if app.visible.get(app.selected) == Some(index) {
             selected = Some(items.len());
         }
         let label = format!(
@@ -679,24 +739,19 @@ fn render_windows(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 muted,
             ));
         }
-        items.push(ListItem::new(vec![Line::from(cells), Line::default()]));
-    }
-    if items.is_empty() {
-        items.push(ListItem::new(
-            " No matching workspaces. [/] Change search; [t] Show all.",
-        ));
+        let mut lines = vec![Line::from(cells)];
+        if !compact {
+            lines.push(Line::default());
+        }
+        items.push(ListItem::new(lines));
     }
     let mut state = ListState::default().with_selected(selected);
     frame.render_stateful_widget(
         List::new(items)
+            .highlight_spacing(ratatui::widgets::HighlightSpacing::Always)
             .highlight_symbol("▎ ")
             .highlight_style(Style::default().bg(theme.selection())),
-        Rect::new(
-            area.x,
-            area.y + 2,
-            area.width,
-            area.height.saturating_sub(2),
-        ),
+        body,
         &mut state,
     );
 }
@@ -784,6 +839,7 @@ fn discover() -> io::Result<Vec<Window>> {
     windows.retain(|window| seen.insert(window.id.clone()));
     windows.sort_by_key(|item| {
         (
+            !item.managed,
             item.session.clone(),
             item.index.parse::<u32>().unwrap_or(u32::MAX),
         )
