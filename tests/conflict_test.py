@@ -100,7 +100,9 @@ class ConflictTest(WorkerIntegrationTest):
         self.tmux('send-keys', '-t', pane, 'C')
         self.wait_pane(pane, 'INTEGRATION CONFLICT')
         self.tmux('resize-window', '-t', pane, '-x', '48', '-y', '24')
-        output = self.wait_pane(pane, '[redacted]')
+        # Resize can temporarily crop the old frame; wait for the new footer.
+        output = self.wait_pane(pane, 'c Continue')
+        self.assertIn('[redacted]', output)
         self.assertNotIn(str(self.repo), output)
         self.assertNotIn(self.commit, output)
         self.assertIn('c Continue', output)

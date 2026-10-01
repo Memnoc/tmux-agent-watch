@@ -239,6 +239,99 @@ class WorkerIntegrationTest(IndependentNavigation):
         self.assertEqual((self.repo/'common.txt').read_text(), 'local ignored replacement')
         self.assertEqual((dependency/'cache').read_text(), 'unrelated ignored dependency')
 
+    def test_directory_relocation_preserves_ignored_outputs_in_both_directions(self):
+        self.git('config', 'diff.renames', 'false')
+        self.git('config', 'merge.renames', 'true')
+        self.git('config', 'merge.renameLimit', '1')
+        self.git('config', 'branch.main.mergeOptions', '-Xfind-renames=1%')
+        for rename_side in ('target', 'source'):
+            for collision in ('exact', 'ancestor', 'descendant', 'nested', 'flatten'):
+                with self.subTest(rename_side=rename_side, collision=collision):
+                    self.git('reset', '--hard', self.base)
+                    self.git('reset', '--hard', self.base, path=self.source)
+                    old = 'old/deep' if collision == 'nested' else 'old'
+                    new = 'new/deeper' if collision == 'nested' else ('' if collision == 'flatten' else 'new')
+                    anchor = self.repo/old/'existing'
+                    anchor.parent.mkdir(parents=True, exist_ok=True)
+                    anchor.write_text('tracked rename anchor')
+                    self.git('add', '.')
+                    self.git('commit', '-qm', 'shared directory')
+                    self.git('reset', '--hard', 'main', path=self.source)
+                    mover = self.repo if rename_side == 'target' else self.source
+                    writer = self.source if rename_side == 'target' else self.repo
+                    (mover/Path(new).parent).mkdir(parents=True, exist_ok=True)
+                    if collision == 'flatten':
+                        self.git('mv', old+'/existing', 'existing', path=mover)
+                    else:
+                        self.git('mv', old, new, path=mover)
+                    self.git('commit', '-qm', 'rename directory', path=mover)
+                    incoming = 'sub/file' if collision == 'ancestor' else 'incoming'
+                    addition = writer/old/incoming
+                    addition.parent.mkdir(parents=True, exist_ok=True)
+                    addition.write_text('incoming source bytes')
+                    self.git('add', '.', path=writer)
+                    self.git('commit', '-qm', 'add inside previous directory', path=writer)
+                    ignored = 'sub' if collision == 'ancestor' else 'incoming'
+                    protected = self.repo/new/ignored
+                    protected.parent.mkdir(parents=True, exist_ok=True)
+                    if collision == 'descendant':
+                        protected.mkdir()
+                        protected = protected/'private-cache'
+                    protected.write_text('IRREPLACEABLE LOCAL BYTES')
+                    (self.repo/'.git/info/exclude').write_text(f'{new}/{ignored}\nnode_modules/\n')
+                    dependency = self.repo/'node_modules/dependency'
+                    dependency.mkdir(parents=True, exist_ok=True)
+                    (dependency/'cache').write_text('unrelated ignored dependency')
+                    self.assertEqual(self.git('status', '--porcelain'), '')
+                    before = self.git('rev-parse', 'HEAD')
+                    result = self.integrate('--apply', self.token(self.integrate()), check=False)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(protected.read_text(), 'IRREPLACEABLE LOCAL BYTES')
+                    self.assertEqual(self.git('rev-parse', 'HEAD'), before)
+                    self.assertEqual(self.git('rev-parse', '--verify', 'MERGE_HEAD', check=False), '')
+                    protected.unlink()
+                    if collision == 'descendant':
+                        protected.parent.rmdir()
+                    # Allow Git's normal automatic directory relocation once the
+                    # collision is removed; unrelated ignored dependencies stay.
+                    self.git('config', 'merge.directoryRenames', 'true')
+                    result = self.integrate('--apply', self.token(self.integrate()))
+                    self.assertIn('Integrated', result.stdout)
+                    self.assertEqual((dependency/'cache').read_text(), 'unrelated ignored dependency')
+                    merged = self.repo/new/incoming
+                    if not merged.exists():
+                        merged = self.repo/old/incoming
+                    self.assertEqual(merged.read_text(), 'incoming source bytes')
+
+    def test_split_partial_directory_moves_preserve_possible_ignored_outputs(self):
+        self.git('reset', '--hard', self.base, path=self.source)
+        (self.repo/'old').mkdir()
+        for name in ('a', 'b', 'retained'):
+            (self.repo/'old'/name).write_text('unique tracked anchor '+name)
+        self.git('add', '.')
+        self.git('commit', '-qm', 'shared directory')
+        self.git('reset', '--hard', 'main', path=self.source)
+        for old, new in (('a', 'left'), ('b', 'right')):
+            (self.repo/new).mkdir()
+            self.git('mv', 'old/'+old, new+'/'+old)
+        self.git('commit', '-qm', 'split partial directory movement')
+        (self.source/'old/incoming').write_text('incoming addition')
+        self.git('add', '.', path=self.source)
+        self.git('commit', '-qm', 'source addition', path=self.source)
+        (self.repo/'.git/info/exclude').write_text('left/incoming\nright/incoming\n')
+        for directory in ('left', 'right'):
+            (self.repo/directory/'incoming').write_text('protected '+directory)
+        before = self.git('rev-parse', 'HEAD')
+        for directory in ('left', 'right'):
+            result = self.integrate('--apply', self.token(self.integrate()), check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('possible ignored destination path collision', result.stderr)
+            self.assertEqual((self.repo/directory/'incoming').read_text(), 'protected '+directory)
+            self.assertEqual(self.git('rev-parse', 'HEAD'), before)
+            self.assertEqual(self.git('status', '--porcelain'), '')
+            self.assertEqual(self.git('rev-parse', '--verify', 'MERGE_HEAD', check=False), '')
+            (self.repo/directory/'incoming').unlink()
+
     def test_ignored_file_cannot_become_incoming_directory(self):
         (self.source/'incoming').mkdir()
         (self.source/'incoming/file').write_text('source data')

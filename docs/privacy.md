@@ -78,8 +78,12 @@ captured, interpreted or retained by the supervisor.
 
 Before mutation, ignored/untracked filename metadata is compared against incoming
 source changes from merge-base metadata, including file/directory path collisions.
-No ignored file contents are read. Unrelated ignored files and unchanged source
-paths deleted at the destination do not block integration.
+Deletion and addition/change names conservatively identify possible directory
+relocations in both directions; no rename similarity calculation or merge preview
+is invoked. Root is never a relocation source, but a directory can be flattened
+into it. A possible relocated collision is refused before mutation. No ignored
+file contents are read. Unrelated ignored files outside these candidate paths and
+unchanged source paths deleted at the destination do not block integration.
 
 Apply serializes on the existing canonical destination-directory inode, sharing
 the checkout lock namespace with recovery and task delivery. Competing actions

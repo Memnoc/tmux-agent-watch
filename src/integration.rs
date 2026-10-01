@@ -375,12 +375,88 @@ impl Preview {
         text
     }
 }
+/// Filename metadata only; disabling rename detection avoids similarity reads
+/// and makes the safety check independent of the merge's rename settings.
+fn changed_paths(path: &Path, base: &str, head: &str, filter: &str) -> Result<Vec<Vec<u8>>, Error> {
+    Ok(raw(
+        path,
+        &[
+            "diff",
+            "--name-only",
+            &format!("--diff-filter={filter}"),
+            "--no-renames",
+            "-z",
+            base,
+            head,
+            "--",
+        ],
+    )?
+    .split(|b| *b == 0)
+    .filter(|p| !p.is_empty())
+    .map(Vec::from)
+    .collect())
+}
+fn path_collision(changed: &[u8], local: &[u8]) -> bool {
+    let parent = |a: &[u8], b: &[u8]| b.starts_with(a) && b.get(a.len()) == Some(&b'/');
+    changed == local || parent(changed, local) || parent(local, changed)
+}
+fn directory_prefixes(
+    paths: &[Vec<u8>],
+    include_root: bool,
+) -> std::collections::BTreeSet<Vec<u8>> {
+    let mut directories = std::collections::BTreeSet::new();
+    if include_root && !paths.is_empty() {
+        directories.insert(Vec::new());
+    }
+    for path in paths {
+        for (index, byte) in path.iter().enumerate() {
+            if *byte == b'/' {
+                directories.insert(path[..index].to_vec());
+            }
+        }
+    }
+    directories
+}
+/// Deletions and additions/changes can denote directory moves, even when Git's
+/// similarity thresholds or rename limits differ. Consider every relevant
+/// ancestor mapping rather than claiming to predict Git's rename resolution.
+/// Root is never a move source, but a real directory may be flattened into it.
+fn relocated_collision(
+    incoming: &[Vec<u8>],
+    removed: &[Vec<u8>],
+    destinations: &[Vec<u8>],
+    ignored: &[Vec<u8>],
+) -> bool {
+    let old_dirs = directory_prefixes(removed, false);
+    let new_dirs = directory_prefixes(destinations, true);
+    for path in incoming {
+        for old in &old_dirs {
+            if !path.starts_with(old) || path.get(old.len()) != Some(&b'/') {
+                continue;
+            }
+            let suffix = &path[old.len() + 1..];
+            for new in &new_dirs {
+                let mut candidate = new.clone();
+                if !candidate.is_empty() {
+                    candidate.push(b'/');
+                }
+                candidate.extend_from_slice(suffix);
+                if ignored
+                    .iter()
+                    .any(|local| path_collision(&candidate, local))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
 /// Git's --no-overwrite-ignore does not protect every divergent merge path.
-/// Compare names only, including file/directory collisions, before mutation.
-/// Using changes from each merge base avoids treating unchanged source paths
-/// deliberately deleted at the target as incoming writes.
+/// Check direct writes and conservative directory-relocated outputs in both
+/// directions without reading bodies, invoking a merge preview, or mutating Git.
 fn protect_ignored(target: &Checkout, source: &Checkout) -> Result<(), Error> {
-    let ignored = raw(
+    let ignored: Vec<Vec<u8>> = raw(
         &target.path,
         &[
             "ls-files",
@@ -389,7 +465,11 @@ fn protect_ignored(target: &Checkout, source: &Checkout) -> Result<(), Error> {
             "--exclude-standard",
             "-z",
         ],
-    )?;
+    )?
+    .split(|b| *b == 0)
+    .filter(|p| !p.is_empty())
+    .map(Vec::from)
+    .collect();
     if ignored.is_empty() {
         return Ok(());
     }
@@ -398,28 +478,20 @@ fn protect_ignored(target: &Checkout, source: &Checkout) -> Result<(), Error> {
         &["merge-base", "--all", &target.commit, &source.commit],
     )?;
     for base in bases.lines() {
-        let incoming = raw(
-            &target.path,
-            &[
-                "diff",
-                "--name-only",
-                "--diff-filter=ACMRT",
-                "--no-renames",
-                "-z",
-                base,
-                &source.commit,
-                "--",
-            ],
-        )?;
-        for changed in incoming.split(|b| *b == 0).filter(|p| !p.is_empty()) {
-            for local in ignored.split(|b| *b == 0).filter(|p| !p.is_empty()) {
-                let parent = |a: &[u8], b: &[u8]| b.starts_with(a) && b.get(a.len()) == Some(&b'/');
-                if changed == local || parent(changed, local) || parent(local, changed) {
-                    return Err(invalid(
-                        "Git merge blocked by ignored destination path collision; destination and worker retained; no mutation attempted",
-                    ));
-                }
-            }
+        let incoming = changed_paths(&target.path, base, &source.commit, "ACMRT")?;
+        let target_changes = changed_paths(&target.path, base, &target.commit, "ACMRT")?;
+        let target_removed = changed_paths(&target.path, base, &target.commit, "D")?;
+        let source_removed = changed_paths(&target.path, base, &source.commit, "D")?;
+        let direct = incoming
+            .iter()
+            .any(|changed| ignored.iter().any(|local| path_collision(changed, local)));
+        if direct
+            || relocated_collision(&incoming, &target_removed, &target_changes, &ignored)
+            || relocated_collision(&target_changes, &source_removed, &incoming, &ignored)
+        {
+            return Err(invalid(
+                "Git merge blocked by possible ignored destination path collision, including directory relocation; destination and worker retained; no mutation attempted. Inspect or move only the colliding local work before retry",
+            ));
         }
     }
     Ok(())

@@ -109,3 +109,66 @@ crosscheck by the coordinating session is pending; this receipt does not
 self-clear that review. No ticket13+ work, push, deployment, or main integration
 was performed. `main` remains
 `eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.
+
+
+## Independent-review correction — directory-relocated ignored outputs
+
+Review of `9be2e544e2ad08f78648b459c95e18cfb895fa14` identified one severe
+preservation gap. If the destination renamed `old/` to `new/`, Git could relocate
+an incoming source addition `old/incoming` to `new/incoming`, overwriting ignored
+local bytes even while returning a merge conflict. The original independent
+`/tmp/drudwyn-review12-directory-rename.py` reproduction was rerun red, confirming
+actual byte replacement with unchanged HEAD. This was not inferred from a merge
+exit status alone.
+
+The destination guard now checks conservative directory-relocated output paths
+in both directions against ignored filenames, in addition to direct outputs.
+For each merge base, name-only diffs with rename detection disabled provide
+removed and added/changed paths. Nonempty deleted-directory ancestors form
+possible origins, and changed-directory ancestors form possible destinations.
+Incoming source changes are mapped through target-side candidates; target
+changes are mapped through source-side candidates. Root is never a move origin;
+flattening a real directory into root remains covered. Exact, parent-file and
+child-directory collisions are refused before Git mutation.
+
+This deliberately does not predict Git's rename resolution, read file bodies,
+calculate similarity, invoke a hidden merge preview, or depend on Git rename
+limits/thresholds. Ambiguous possible collisions can conservatively refuse a
+merge even when Git would choose another path. Usage/privacy documentation
+states that limitation. Unrelated ignored paths outside candidate outputs still
+allow normal integration.
+
+Validation:
+
+- The original independent reproduction passes after the correction: ignored
+  bytes, HEAD and clean Git state are preserved; no merge is started.
+- Three focused public integration tests passed in 5.916s, including ten cases
+  covering both rename directions with exact/ancestor/descendant/nested/flattened
+  outputs, split/partial moves, differing diff/merge rename configuration and
+  branch similarity options. Removing only the collision allows normal merges
+  while unrelated ignored dependency bytes remain intact.
+- Independent reviewer12 reported its correction checks passed in 7.757s and
+  provisionally cleared Standards/Spec, pending the final committed SHA and gates.
+  The coordinating session owns the final review receipt.
+- `cargo fmt --check`, `git diff --check`, and 41 Rust tests passed. Rust log:
+  `/tmp/drudwyn-ticket12-rename-rust.log`.
+- The first correction full run reached integration20, then exposed a UI-test
+  synchronization race: immediately after resizing, the old frame could be
+  cropped before Cockpit drew its footer. A bounded real-terminal probe confirmed
+  the complete settled frame (`/tmp/drudwyn-ticket12-resize-settled.txt`). Only the
+  test was changed to wait for that footer, retain the existing timeout, and
+  separately assert redaction. Three fresh-fixture repetitions passed in 8.193s;
+  no runtime UI behavior or assertion was relaxed. Reviewer12 received that exact
+  test-only diff.
+- The final frozen complete suite passed:
+  `/tmp/drudwyn-ticket12-rename-full-final.log`. Counts: launch15, recovery17,
+  integration20, conflict17, Global11, status11, activity39, clients29,
+  navigator13 (one existing optional Resurrect skip), settings10, and every
+  shell/privacy/packaging/release-workflow gate. The earlier failed fixture run is
+  retained as `/tmp/drudwyn-ticket12-rename-full.log`.
+
+The correction, tests, documentation and this receipt are committed together.
+All fixtures were disposable Git/tmux with verified fake executables; runtime
+coverage remains Linux/tmux3.4. Independent final-SHA confirmation is pending.
+No ticket13+ work or push was performed; `main` remains
+`eaf24469290cbf77dd1d2a6176fbd54f7ace1868`.

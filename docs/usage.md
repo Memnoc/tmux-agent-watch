@@ -643,7 +643,13 @@ checkouts, active Git operations and stale previews block integration. Inherited
 Git repository/index addressing cannot redirect the explicit checkout. Git's
 own locks remain effective. A metadata-only guard protects ignored files against
 incoming exact and file/directory collisions in both fast-forward and divergent
-merges; unrelated ignored files remain allowed. No automatic
+merges. It also checks possible directory-relocated outputs in both directions,
+including nested moves and flattening into the root. The filename check is
+conservative: deletion/addition metadata can imply multiple possible mappings,
+so a possible ignored-path collision may require inspecting or moving the local
+file even when Git would choose another output path. It does not predict Git's
+rename result or read file similarity/content. Unrelated ignored files outside
+these candidate paths remain allowed. No automatic
 stash, reset, squash, rebase, push or cleanup occurs.
 
 A source already contained in the target is a reported no-op. Otherwise Drudwyn
