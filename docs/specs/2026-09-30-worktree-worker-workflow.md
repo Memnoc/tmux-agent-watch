@@ -472,5 +472,23 @@ identity and explicit shell creation. The runnable, simulated preview is archive
 on `spike/workspace-session-20261001` at `dd1130f` in `/tmp/drudwyn-navigation-spike`.
 Run `python3 scripts/status-feedback.spike.py` and open
 http://127.0.0.1:8789/status-feedback.spike.html?view=workspace or `?view=sessions`.
-These proposed navigation layouts await feedback; this change only applies the
-shared palette to the existing production navigators.
+Memnoc subsequently approved these navigation layouts; ticket22 implements
+them using the production navigation and session-creation commands.
+
+### Approved navigation implementation and denser status — 2026-10-01
+
+Memnoc approved both Workspace/Sessions proposals at dd1130f. Ticket 22 implements
+session-grouped Workspace rows, selected-item sidebars, responsive columns and
+shared shell-creation forms, while retaining stable navigation and confirmations.
+Narrow layouts expose wrapping, scrollable details with d. Sessions reports live
+agent/attention counts and starting-directory metadata, not invented purpose.
+
+Subsequent feedback restores bot icons for agent-owned workspaces and terminal
+icons for manual shells/editors across all three surfaces, respecting safe-font
+fallbacks. Sessions with agents use bot identity; connection remains distinct.
+A selectable dense status layout shows up to six configured tabs in one row,
+with padded names, quiet tab separators, selected lifecycle, Git +/- and global
+attention. Width may reduce tab count while preserving the selected window and
+an overflow route. Focus and two-row Tabs remain selectable. Actual blank bottom
+padding would cost extra terminal rows; pending feedback, keep one row with a
+contrasting background boundary and internal horizontal spacing.

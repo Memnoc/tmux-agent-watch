@@ -46,8 +46,10 @@ tmux set-option -g status 2
 tmux set-option -g status-style 'bg=default,fg=default'
 if [ "$(tmux show-option -gqv @drudwyn-v2)" != off ]; then
   if [ "$(tmux show-option -gqv @drudwyn-status-layout)" != tabs ]; then
+    row=focus
+    [ "$(tmux show-option -gqv @drudwyn-status-layout)" != dense ] || row=dense
     tmux set-option -g status on
-    tmux set-option -g 'status-format[0]' "#($PLUGIN_DIR/scripts/status-a.sh '#{session_id}' '#{window_id}' '#{client_width}' focus)"
+    tmux set-option -g 'status-format[0]' "#($PLUGIN_DIR/scripts/status-a.sh '#{session_id}' '#{window_id}' '#{client_width}' $row)"
     tmux set-option -gu 'status-format[1]'
     exit 0
   fi

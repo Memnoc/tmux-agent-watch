@@ -175,10 +175,18 @@ class Activity(unittest.TestCase):
         for command in ('cockpit', 'navigator'):
             ui = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', str(BIN), command)
             self.tmux('resize-window', '-t', ui, '-x', '160', '-y', '40')
+            for _ in range(150):
+                if 'Drudwyn' in self.tmux('capture-pane','-p','-t',ui):break
+                time.sleep(.02)
+            self.tmux('send-keys','-t',ui,'/')
+            self.tmux('send-keys','-t',ui,'-l','worker')
+            self.tmux('send-keys','-t',ui,'Escape')
+            time.sleep(.12) # Keep Escape separate from the following key's Alt prefix.
+            self.tmux('send-keys','-t',ui,'d')
             deadline = time.monotonic() + 5
             while True:
                 output = self.tmux('capture-pane', '-p', '-t', ui)
-                if 'NEEDS INPUT' in output and 'hook' in output:
+                if 'INPUT' in output and 'hook' in output:
                     break
                 self.assertLess(time.monotonic(), deadline, 'retained attention missing from UI')
                 time.sleep(.03)
@@ -764,12 +772,20 @@ os.execv(real, [real, *args])
         for command in ('cockpit', 'navigator'):
             ui = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', str(BIN), command)
             self.tmux('resize-window', '-t', ui, '-x', '160', '-y', '40')
+            for _ in range(150):
+                if 'Drudwyn' in self.tmux('capture-pane','-p','-t',ui):break
+                time.sleep(.02)
+            self.tmux('send-keys','-t',ui,'/')
+            self.tmux('send-keys','-t',ui,'-l','worker')
+            self.tmux('send-keys','-t',ui,'Escape')
+            time.sleep(.12) # Keep Escape separate from the following key's Alt prefix.
+            self.tmux('send-keys','-t',ui,'d')
             for _ in range(100):
                 output = self.tmux('capture-pane', '-p', '-t', ui)
-                if 'NEEDS INPUT' in output and 'hook' in output:
+                if 'INPUT' in output and 'hook' in output:
                     break
                 time.sleep(.03)
-            self.assertIn('NEEDS INPUT', output)
+            self.assertIn('INPUT', output)
             self.assertIn('hook', output)
             self.tmux('send-keys', '-t', ui, 'j', 'k')
             self.tmux('send-keys', '-t', ui, 'Escape')

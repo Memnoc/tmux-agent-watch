@@ -46,6 +46,52 @@ class ScreenshotRegression(IndependentNavigation):
         self.assertIn('IDENTITY ' + self.worker, screen)
         self.assertIn('project unknown', screen)
 
+    def test_bot_and_manual_shell_identity_in_all_surfaces(self):
+        self.worker_hook('permissionRequest')
+        self.tmux('new-session','-d','-s','manual','-c',str(self.repo),'sleep','300')
+        self.tmux('set','-g','@drudwyn-agent-icon','bot')
+        for mode,bot,shell in [('safe','A ','>_'),('nerd','󰚩','')]:
+            self.tmux('set','-g','@drudwyn-icon-mode',mode)
+            for command in [('navigator',),('sessions',),('cockpit','--windows')]:
+                pane=self.tmux('new-window','-d','-P','-F','#{pane_id}','-t','project',
+                               '-c',str(self.repo),'env','DRUDWYN_CLIENT='+self.clients[0],str(BIN),*command)
+                self.tmux('resize-window','-t',pane,'-x','160','-y','42')
+                screen=self.wait_pane(pane,bot)
+                self.assertIn(shell,screen)
+                self.tmux('kill-pane','-t',pane)
+
+    def test_workspace_proposal_groups_and_inspects_without_switching(self):
+        self.worker_hook('permissionRequest')
+        before=[self.selection(c) for c in self.clients]
+        pane=self.tmux('new-window','-d','-P','-F','#{pane_id}','-t','project',
+                       '-c',str(self.repo),'env','DRUDWYN_CLIENT='+self.clients[0],str(BIN),'navigator')
+        self.tmux('resize-window','-t',pane,'-x','160','-y','42')
+        screen=self.wait_pane(pane,'SELECTED WORKSPACE')
+        for label in ['AGENT / TOOL','ACTIVITY','BRANCH','New shell session','Session','Activity evidence']:
+            self.assertIn(label,screen)
+        self.tmux('send-keys','-t',pane,'/');self.tmux('send-keys','-t',pane,'-l','worker')
+        self.tmux('send-keys','-t',pane,'Escape')
+        screen=self.wait_pane(pane,'1 shown')
+        self.assertIn('INPUT',screen)
+        self.assertEqual([self.selection(c) for c in self.clients],before)
+
+    def test_sessions_proposal_counts_and_creation_cancel(self):
+        self.worker_hook('permissionRequest')
+        before=[self.selection(c) for c in self.clients]
+        pane=self.tmux('new-window','-d','-P','-F','#{pane_id}','-t','project',
+                       '-c',str(self.repo),'env','DRUDWYN_CLIENT='+self.clients[0],str(BIN),'sessions')
+        self.tmux('resize-window','-t',pane,'-x','160','-y','42')
+        screen=self.wait_pane(pane,'SELECTED SESSION')
+        for label in ['WINDOWS','AGENTS','CONNECTION','New shell session','Need you','Starting directory']:
+            self.assertIn(label,screen)
+        sessions=self.tmux('list-sessions','-F','#{session_id}')
+        self.tmux('send-keys','-t',pane,'n')
+        self.wait_pane(pane,'NEW SESSION / SHELL')
+        self.tmux('send-keys','-t',pane,'Escape')
+        self.wait_pane(pane,'SELECTED SESSION')
+        self.assertEqual(self.tmux('list-sessions','-F','#{session_id}'),sessions)
+        self.assertEqual([self.selection(c) for c in self.clients],before)
+
     def test_wide_cockpit_uses_branch_space_and_complete_sidebar_values(self):
         branch='work/worktree-worker-workflow'
         subprocess.run(['git','-C',str(self.repo),'branch','-m',branch],check=True)
@@ -112,7 +158,7 @@ class ScreenshotRegression(IndependentNavigation):
                          'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'navigator')
         self.tmux('resize-window', '-t', pane, '-x', '84', '-y', '27')
         screen = self.wait_pane(pane, 'WORKSPACE NAVIGATOR')
-        agents = screen.split('AGENTS', 1)[1]
+        agents = screen
         self.assertIn('session project', agents)
         self.assertIn('session other', agents)
         self.assertNotRegex(agents, r'@\d+')

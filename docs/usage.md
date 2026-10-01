@@ -879,3 +879,31 @@ activity, branch when space permits, tracked Git +/- against HEAD, and clickable
 measure task progress. `Git ?` means unavailable evidence. Use **Options →
 Appearance → Status layout → tabs** to restore the two-row window overview.
 Rosé Pine is the default; Moon and Dawn remain available.
+
+
+### Workspace and Sessions
+
+Both navigators use the Cockpit's Rosé Pine masthead, quiet table rules and
+selected-item panel. Workspace groups rows by session; `t` cycles All,
+Agents/workers and Shells/editors, while `/` searches names, sessions, branches
+and activity. Role labels distinguish COORD, WT, AGENT, SH and EDIT.
+
+A bot identifies an agent-owned workspace; a terminal identifies a manual
+shell/editor. Sessions uses a bot when it contains agents, a terminal when its
+observed agent count is zero, and `?` when observation is unavailable. These
+icons do not imply active work; activity and connection retain separate labels.
+The configured agent-icon and safe-font policy apply to all three surfaces.
+
+At wide sizes, inspect the selection in the right panel. Press `d` for wrapping,
+scrollable details (`j/k`, `d` or Escape to return), including at narrow widths.
+Selection only inspects; Enter opens in the requesting terminal. Both navigators
+expose `n` for New shell session. Enter a name, Tab to the starting directory,
+then Enter to create. Escape returns without creating a session. Existing
+rename, explicit kill confirmation, coordinator and save actions remain.
+
+**Appearance → Status layout → dense** selects compact single-row window tabs.
+Set **Visible status tabs** to `6` for the denser layout. Width may reduce the
+visible count; the selected window stays included and `+N` opens the remaining
+windows. Padded tab labels and quiet dividers sit on a distinct surface colour.
+Git +/- and global NEED remain visible when space permits; safe-font mode uses
+text identities. This layout adds no blank terminal rows.

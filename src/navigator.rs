@@ -14,7 +14,7 @@ use crossterm::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
@@ -30,6 +30,9 @@ const SEP: char = '\u{241f}';
 const FORMAT: &str = "#{session_name}␟#{window_id}␟#{window_index}␟#{window_name}␟#{pane_current_command}␟#{@drudwyn_state}␟#{@drudwyn_since}␟#{@drudwyn_branch}";
 const NAVIGATION_ACTIONS: &[(&str, &str)] = &[("j/k", "Move"), ("Enter", "Jump")];
 const WORKSPACE_ACTIONS: &[(&str, &str)] = &[
+    ("n", "New Session"),
+    ("t", "Show"),
+    ("d", "Details"),
     ("c", "Coordinator"),
     ("r", "Rename"),
     ("x", "Kill"),
@@ -59,6 +62,7 @@ struct Window {
     branch: Option<String>,
     role: String,
     evidence: String,
+    tool: String,
 }
 
 #[derive(Clone)]
@@ -66,12 +70,17 @@ struct App {
     windows: Vec<Window>,
     visible: Vec<usize>,
     selected: usize,
+    kind: u8,
+    details: Option<u16>,
+    new_session: Option<ui::ShellForm>,
     filter: String,
     filtering: bool,
     pending_kill: Option<Window>,
     pending_rename: Option<(String, String)>,
     notice: Option<String>,
     theme: Theme,
+    agent_icon: String,
+    shell_icon: String,
     redact: bool,
 }
 
@@ -84,6 +93,8 @@ enum NavigationAction {
     Kill,
     Save,
     Rename,
+    New,
+    Create,
 }
 
 impl App {
@@ -94,15 +105,16 @@ impl App {
             .iter()
             .enumerate()
             .filter(|(_, item)| {
-                query.is_empty()
-                    || item.name.to_lowercase().contains(&query)
-                    || item.session.to_lowercase().contains(&query)
-                    || item
-                        .branch
-                        .as_deref()
-                        .is_some_and(|branch| branch.to_lowercase().contains(&query))
-                    || item.agent.label().to_lowercase().contains(&query)
-                    || item.lifecycle.label().to_lowercase().contains(&query)
+                (self.kind == 0 || (self.kind == 1) == item.managed)
+                    && (query.is_empty()
+                        || item.name.to_lowercase().contains(&query)
+                        || item.session.to_lowercase().contains(&query)
+                        || item
+                            .branch
+                            .as_deref()
+                            .is_some_and(|branch| branch.to_lowercase().contains(&query))
+                        || item.agent.label().to_lowercase().contains(&query)
+                        || item.lifecycle.label().to_lowercase().contains(&query))
             })
             .map(|(index, _)| index)
             .collect();
@@ -120,6 +132,26 @@ impl App {
 }
 
 fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
+    if let Some(form) = &mut app.new_session {
+        match form.edit(code) {
+            ui::FormAction::Cancel => {
+                app.new_session = None;
+                app.notice = None;
+            }
+            ui::FormAction::Create => return NavigationAction::Create,
+            ui::FormAction::Edit => app.notice = None,
+        }
+        return NavigationAction::Continue;
+    }
+    if let Some(scroll) = &mut app.details {
+        match code {
+            KeyCode::Esc | KeyCode::Char('d') | KeyCode::Char('q') => app.details = None,
+            KeyCode::Char('j') | KeyCode::Down => *scroll = scroll.saturating_add(1),
+            KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+            _ => {}
+        }
+        return NavigationAction::Continue;
+    }
     if app.pending_kill.is_some() {
         return match code {
             KeyCode::Char('y') => NavigationAction::Kill,
@@ -183,6 +215,20 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
             app.filtering = true;
             NavigationAction::Continue
         }
+        KeyCode::Char('n') => NavigationAction::New,
+        KeyCode::Char('d') => {
+            app.details = Some(0);
+            NavigationAction::Continue
+        }
+        KeyCode::Char('t') => {
+            let selected = app.visible.get(app.selected).copied();
+            app.kind = (app.kind + 1) % 3;
+            app.refresh_visible();
+            if let Some(at) = selected.and_then(|id| app.visible.iter().position(|i| *i == id)) {
+                app.selected = at;
+            }
+            NavigationAction::Continue
+        }
         KeyCode::Char('r') => {
             app.pending_rename = app
                 .visible
@@ -213,16 +259,22 @@ pub fn run(variant: Variant) -> io::Result<()> {
         .iter()
         .position(|item| item.id == current)
         .unwrap_or(0);
+    let (agent_icon, shell_icon) = crate::icons::workspace_icons();
     let mut app = App {
         visible: (0..windows.len()).collect(),
         windows,
         selected,
+        kind: 0,
+        details: None,
+        new_session: None,
         filter: String::new(),
         filtering: false,
         pending_kill: None,
         pending_rename: None,
         notice: None,
         theme: Theme::rose_pine(variant),
+        agent_icon,
+        shell_icon,
         redact: tmux_output(&["show-option", "-gqv", "@drudwyn-redact-labels"])? == "on",
     };
     enable_raw_mode()?;
@@ -253,6 +305,21 @@ fn event_loop(
         }
         match handle_key(app, key.code) {
             NavigationAction::Close => return Ok(()),
+            NavigationAction::New => match ui::ShellForm::from_current() {
+                Ok(form) => app.new_session = Some(form),
+                Err(error) => app.notice = Some(format!("New Session failed: {error}")),
+            },
+            NavigationAction::Create => {
+                if let Some(form) = &app.new_session {
+                    match crate::session::create(
+                        &form.name,
+                        Some(std::path::Path::new(&form.directory)),
+                    ) {
+                        Ok(_) => return Ok(()),
+                        Err(error) => app.notice = Some(format!("Create failed: {error}")),
+                    }
+                }
+            }
             NavigationAction::Jump => {
                 if let Some(item) = app
                     .visible
@@ -324,9 +391,11 @@ fn event_loop(
     }
 }
 
-fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
+fn render(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     // Redact only the projection: selection, filtering and tmux targets retain
     // their real identities for navigation and explicit user actions.
+    let original = app;
+    let app = &*original;
     let mut projection;
     let app = if app.redact {
         projection = app.clone();
@@ -341,6 +410,10 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         }
         if let Some((_, name)) = &mut projection.pending_rename {
             *name = "[redacted]".into();
+        }
+        if let Some(form) = &mut projection.new_session {
+            form.name = "[redacted]".into();
+            form.directory = "[redacted]".into();
         }
         if projection.filtering {
             projection.filter = "[redacted]".into();
@@ -382,23 +455,17 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         Block::default().style(Style::default().fg(app.theme.text).bg(app.theme.base)),
         area,
     );
-    let shell_count = app
-        .visible
-        .iter()
-        .filter(|i| !app.windows[**i].managed)
-        .count() as u16;
-    let shell_height = (shell_count * 2 + 2)
-        .min(area.height.saturating_sub(5 + footer_height) / 3)
-        .max(2);
-    let groups = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            Constraint::Length(shell_height),
-            Constraint::Min(5),
-            Constraint::Length(footer_height),
-        ])
-        .split(area);
+    if let Some(form) = &app.new_session {
+        ui::shell_form(frame, form, app.theme, app.notice.as_deref());
+        return;
+    }
+    let groups = Layout::vertical([
+        Constraint::Length(5),
+        Constraint::Length(2),
+        Constraint::Min(3),
+        Constraint::Length(footer_height),
+    ])
+    .split(area);
     let agents = app.windows.iter().filter(|item| item.managed).count();
     let attention = app
         .windows
@@ -418,8 +485,28 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         ),
     );
 
-    render_group(frame, app, groups[1], false, " WORKSPACES ");
-    render_group(frame, app, groups[2], true, " AGENTS ");
+    ui::navigation_toolbar(
+        frame,
+        groups[1],
+        app.theme,
+        &format!(
+            "{} shown / {} total · [/] Search · {}",
+            app.visible.len(),
+            app.windows.len(),
+            ["All workspaces", "Agents & workers", "Shells & editors"][app.kind as usize]
+        ),
+    );
+    let body = groups[2];
+    let mut clamped_scroll = None;
+    if app.details.is_some() {
+        clamped_scroll = Some(render_inspection(frame, app, body));
+    } else if body.width >= 112 {
+        let panes = Layout::horizontal([Constraint::Min(60), Constraint::Length(34)]).split(body);
+        render_windows(frame, app, panes[0]);
+        render_inspection(frame, app, panes[1]);
+    } else {
+        render_windows(frame, app, body);
+    }
     if let Some(target) = &app.pending_kill {
         let message = format!(
             "Kill {} {}:{} ({})? Stops all panes and processes.",
@@ -469,74 +556,187 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 app.theme,
                 area.width,
             ))
-            .block(Block::default().borders(Borders::TOP)),
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(app.theme.line())),
+            ),
             groups[3],
         );
     }
+    if let Some(offset) = clamped_scroll {
+        original.details = Some(offset);
+    }
 }
 
-fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: bool, title: &str) {
-    let indices = app
-        .visible
-        .iter()
-        .copied()
-        .filter(|index| app.windows[*index].managed == agents)
-        .collect::<Vec<_>>();
-    let selected_window = app.visible.get(app.selected).copied();
-    let selected =
-        selected_window.and_then(|target| indices.iter().position(|index| *index == target));
-    let muted = Style::default().fg(app.theme.subtle());
-    let items = indices.iter().map(|index| {
+fn role(item: &Window) -> &str {
+    if item.role.starts_with("Coordinator") {
+        "COORD"
+    } else if item.role == "Worktree worker" {
+        "WT"
+    } else if item.managed {
+        "AGENT"
+    } else if matches!(item.tool.as_str(), "vim" | "nvim" | "emacs" | "nano" | "hx") {
+        "EDIT"
+    } else {
+        "SH"
+    }
+}
+fn render_windows(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let theme = app.theme;
+    let muted = Style::default().fg(theme.subtle());
+    let width = area.width as usize;
+    let tool = if width >= 72 { 14 } else { 0 };
+    let activity = if width >= 48 { 16 } else { 0 };
+    let branch = if width >= 100 { (width / 3).min(42) } else { 0 };
+    let name = width.saturating_sub(tool + activity + branch + 2);
+    let mut headers = vec![Span::raw("  "), ui::cell("WORKSPACE", name, muted)];
+    if tool > 0 {
+        headers.push(ui::cell("AGENT / TOOL", tool, muted));
+    }
+    if activity > 0 {
+        headers.push(ui::cell("ACTIVITY", activity, muted));
+    }
+    if branch > 0 {
+        headers.push(ui::cell("BRANCH", branch, muted));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(headers)).block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme.line())),
+        ),
+        Rect::new(area.x, area.y, area.width, 2),
+    );
+    let mut items = Vec::new();
+    let mut selected = None;
+    let mut session = None;
+    for (at, index) in app.visible.iter().enumerate() {
         let item = &app.windows[*index];
-        let available = area.width.saturating_sub(4) as usize;
-        let state_width = if agents { 15 } else { 0 };
-        let label = format!("{}  {} · {}", item.index, item.role, item.name);
-        let mut first = vec![ui::cell(
+        if session != Some(item.session.as_str()) {
+            session = Some(&item.session);
+            let count = app
+                .visible
+                .iter()
+                .filter(|i| app.windows[**i].session == item.session)
+                .count();
+            items.push(ListItem::new(Line::styled(
+                ui::ellipsize(
+                    &format!(" session {} · {count} shown", item.session),
+                    width.saturating_sub(2),
+                ),
+                Style::default()
+                    .fg(theme.accent())
+                    .add_modifier(Modifier::BOLD),
+            )));
+        }
+        if at == app.selected {
+            selected = Some(items.len());
+        }
+        let label = format!(
+            "{}  {} {}  {}",
+            item.index,
+            if item.managed {
+                &app.agent_icon
+            } else {
+                &app.shell_icon
+            },
+            role(item),
+            item.name
+        );
+        let mut cells = vec![ui::cell(
             &label,
-            available.saturating_sub(state_width),
-            Style::default()
-                .fg(app.theme.text)
-                .add_modifier(Modifier::BOLD),
+            name,
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         )];
-        if agents {
-            first.push(Span::styled(
-                format!(" {} ", ui::activity(item.lifecycle)),
-                ui::activity_style(item.lifecycle, app.theme),
+        if tool > 0 {
+            cells.push(ui::cell(&item.tool, tool, muted));
+        }
+        if activity > 0 {
+            let label = if item.managed {
+                ui::activity(item.lifecycle)
+            } else if role(item) == "EDIT" {
+                "EDITOR"
+            } else {
+                "SHELL"
+            };
+            cells.push(Span::styled(
+                format!(" {label} "),
+                if item.managed {
+                    ui::activity_style(item.lifecycle, theme)
+                } else {
+                    muted
+                },
+            ));
+            cells.push(Span::raw(
+                " ".repeat(activity.saturating_sub(label.len() + 2)),
             ));
         }
-        let context = if agents {
-            format!(
-                "session {} · {} · {} · {} {}",
-                item.session,
-                item.agent.label(),
-                item.evidence,
-                age(item.since),
-                item.branch.as_deref().unwrap_or("")
-            )
-        } else {
-            format!(
-                "session {}  {}",
-                item.session,
-                item.branch.as_deref().unwrap_or("")
-            )
-        };
-        ListItem::new(vec![
-            Line::from(first),
-            Line::styled(ui::ellipsize(&context, available), muted),
-        ])
-    });
+        if branch > 0 {
+            cells.push(ui::cell(
+                item.branch.as_deref().unwrap_or("—"),
+                branch,
+                muted,
+            ));
+        }
+        items.push(ListItem::new(vec![Line::from(cells), Line::default()]));
+    }
+    if items.is_empty() {
+        items.push(ListItem::new(
+            " No matching workspaces. [/] Change search; [t] Show all.",
+        ));
+    }
     let mut state = ListState::default().with_selected(selected);
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(title)
-                .title_style(Style::default().fg(app.theme.accent()))
-                .borders(Borders::TOP)
-                .border_style(Style::default().fg(app.theme.line())),
+    frame.render_stateful_widget(
+        List::new(items)
+            .highlight_symbol("▎ ")
+            .highlight_style(Style::default().bg(theme.selection())),
+        Rect::new(
+            area.x,
+            area.y + 2,
+            area.width,
+            area.height.saturating_sub(2),
+        ),
+        &mut state,
+    );
+}
+fn render_inspection(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) -> u16 {
+    if let Some(item) = app.visible.get(app.selected).map(|i| &app.windows[*i]) {
+        ui::inspection(
+            frame,
+            area,
+            app.theme,
+            "SELECTED WORKSPACE",
+            &item.name,
+            &[
+                ("Role", item.role.clone()),
+                ("Session", item.session.clone()),
+                ("Agent / tool", item.tool.clone()),
+                (
+                    "Branch",
+                    item.branch
+                        .clone()
+                        .unwrap_or_else(|| "Not available".into()),
+                ),
+                (
+                    "Activity evidence",
+                    if item.managed {
+                        format!(
+                            "{} · {} · {}",
+                            ui::activity(item.lifecycle),
+                            item.evidence,
+                            age(item.since)
+                        )
+                    } else {
+                        "Shell/editor; no agent activity inferred".into()
+                    },
+                ),
+            ],
+            app.details,
         )
-        .highlight_symbol("▎ ")
-        .highlight_style(Style::default().bg(app.theme.selection()));
-    frame.render_stateful_widget(list, area, &mut state);
+    } else {
+        0
+    }
 }
 
 fn discover() -> io::Result<Vec<Window>> {
@@ -549,7 +749,11 @@ fn discover() -> io::Result<Vec<Window>> {
             .find(|w| w.identity.window_id == window.id)
         {
             window.role = workspace.role().into();
+            window.branch = workspace.checkout.branch.clone();
             window.agent = workspace.agent;
+            if workspace.is_agent() {
+                window.tool = workspace.agent.label().into();
+            }
             window.lifecycle = workspace.lifecycle;
             window.since = workspace.state_since;
             window.managed = workspace.is_agent();
@@ -579,16 +783,7 @@ fn discover() -> io::Result<Vec<Window>> {
     let mut seen = std::collections::HashSet::new();
     windows.retain(|window| seen.insert(window.id.clone()));
     windows.sort_by_key(|item| {
-        let group = if item.managed { 1 } else { 0 };
-        let priority = match item.lifecycle {
-            Lifecycle::Failed => 0,
-            Lifecycle::Waiting => 1,
-            Lifecycle::Review => 2,
-            _ => 3,
-        };
         (
-            group,
-            priority,
             item.session.clone(),
             item.index.parse::<u32>().unwrap_or(u32::MAX),
         )
@@ -618,6 +813,7 @@ fn parse_windows(output: &str) -> Vec<Window> {
                     .into(),
                     managed: agent != AgentKind::Unknown || lifecycle != Lifecycle::Unknown,
                     evidence: "unknown".into(),
+                    tool: fields[4].into(),
                     lifecycle,
                     since: fields[6].parse().ok(),
                     branch: (!fields[7].is_empty()).then(|| fields[7].into()),
@@ -676,11 +872,11 @@ mod tests {
                 app.windows.truncate(1);
                 app.visible = vec![0];
                 app.windows[0].role = role.into();
-                app.windows[0].managed = true;
+                app.windows[0].managed = !matches!(role, "Shell" | "Coordinator shell");
                 app.redact = true;
                 let mut terminal =
                     Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
-                terminal.draw(|frame| render(frame, &app)).unwrap();
+                terminal.draw(|frame| render(frame, &mut app)).unwrap();
                 let content = terminal
                     .backend()
                     .buffer()
@@ -689,7 +885,12 @@ mod tests {
                     .map(|c| c.symbol())
                     .collect::<String>();
                 assert!(
-                    content.contains(role),
+                    content.contains(match role {
+                        "Worktree worker" => "WT",
+                        "Coordinator shell" | "Coordinator agent" => "COORD",
+                        "Ordinary agent" => "AGENT",
+                        _ => "SH",
+                    }),
                     "missing {role} at {width}: {content}"
                 );
                 assert!(!content.contains("@1"));
@@ -728,12 +929,17 @@ mod tests {
             windows: Vec::new(),
             visible: Vec::new(),
             selected: 0,
+            kind: 0,
+            details: None,
+            new_session: None,
             filter: "star".into(),
             filtering: true,
             pending_kill: None,
             pending_rename: None,
             notice: None,
             theme: Theme::rose_pine(Variant::Moon),
+            agent_icon: "A".into(),
+            shell_icon: ">_".into(),
             redact: false,
         };
 
@@ -745,12 +951,17 @@ mod tests {
             windows: parse_windows("dev␟@1␟1␟first␟zsh␟␟␟\ndev␟@2␟2␟second␟zsh␟␟␟"),
             visible: vec![0, 1],
             selected: 0,
+            kind: 0,
+            details: None,
+            new_session: None,
             filter: String::new(),
             filtering: false,
             pending_kill: None,
             pending_rename: None,
             notice: None,
             theme: Theme::rose_pine(Variant::Moon),
+            agent_icon: "A".into(),
+            shell_icon: ">_".into(),
             redact: false,
         }
     }

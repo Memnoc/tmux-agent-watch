@@ -182,8 +182,19 @@ set -g @drudwyn-theme rose-pine
 ```
 
 Rosé Pine is the default palette. `moon` and `dawn` remain explicit choices.
-Select `tabs` to restore the two-row layout described below. Visible-tab and
-per-agent-icon options apply to that layout; focus uses explicit role labels.
+Select `dense` for one row of compact tabs, or `tabs` for the two-row layout
+below. Visible-tab and icon options apply to both tab layouts; focus uses role
+labels. To select the denser six-tab design:
+
+```tmux
+set -g @drudwyn-status-layout dense
+set -g @drudwyn-visible-tabs 6
+set -g @drudwyn-agent-icon bot
+```
+
+Dense uses padded tab labels, quiet separators and a distinct background, with
+no extra terminal rows. Width can reduce the visible tab count; overflow stays
+accessible and the selected window remains visible.
 
 ### Two-row tabs
 

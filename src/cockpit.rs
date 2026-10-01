@@ -98,6 +98,7 @@ pub struct App {
     help_open: bool,
     detail_scroll: u16,
     agent_icon: String,
+    shell_icon: String,
     config: Config,
     theme: Theme,
 }
@@ -219,6 +220,7 @@ impl App {
             help_open: false,
             detail_scroll: 0,
             agent_icon: "A".into(),
+            shell_icon: ">_".into(),
             config,
             theme: Theme::rose_pine(variant),
         }
@@ -1184,7 +1186,7 @@ pub fn run(
     if start {
         app.begin_start();
     }
-    app.agent_icon = crate::icons::agent_icon();
+    (app.agent_icon, app.shell_icon) = crate::icons::workspace_icons();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
@@ -2487,8 +2489,13 @@ fn render_list(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             "SH"
         };
         let name = format!(
-            "{} {role}  {}{}",
+            "{} {} {role}  {}{}",
             if selected { "▎" } else { " " },
+            if w.is_agent() {
+                &app.agent_icon
+            } else {
+                &app.shell_icon
+            },
             if w.identity.window_id == app.current_window {
                 "• "
             } else {

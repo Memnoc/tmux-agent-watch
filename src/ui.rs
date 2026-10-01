@@ -166,7 +166,14 @@ pub(crate) fn masthead(
                         .fg(theme.accent())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Line::styled("WORKSPACES", Style::default().fg(theme.subtle())),
+                Line::styled(
+                    if title.starts_with("SESSION") {
+                        "SESSIONS"
+                    } else {
+                        "WORKSPACES"
+                    },
+                    Style::default().fg(theme.subtle()),
+                ),
             ]),
             Rect::new(area.x + 12, area.y + 1, 18, 2),
         );
@@ -257,4 +264,223 @@ mod tests {
             .collect::<String>();
         assert_eq!(text, " [j/k] Move  │  [Esc] Close");
     }
+}
+
+/// Consistent selected-item panel. Expanded details wrap and scroll; sidebar
+/// values truncate explicitly and never leave a label without its value.
+pub(crate) fn inspection(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    theme: Theme,
+    title: &str,
+    name: &str,
+    fields: &[(&str, String)],
+    scroll: Option<u16>,
+) -> u16 {
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(Style::default().fg(theme.line()));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let body = Rect::new(
+        inner.x + 2,
+        inner.y + 1,
+        inner.width.saturating_sub(4),
+        inner.height.saturating_sub(3),
+    );
+    let mut lines = vec![
+        Line::styled(title.to_owned(), Style::default().fg(theme.accent())),
+        Line::default(),
+        Line::styled(
+            if scroll.is_some() {
+                name.to_owned()
+            } else {
+                ellipsize(name, body.width as usize)
+            },
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+        Line::default(),
+    ];
+    for (label, value) in fields {
+        if scroll.is_none() && lines.len() + 2 > body.height as usize {
+            break;
+        }
+        lines.push(Line::styled(
+            (*label).to_owned(),
+            Style::default().fg(theme.subtle()),
+        ));
+        lines.push(Line::from(if scroll.is_some() {
+            value.clone()
+        } else {
+            ellipsize(value, body.width as usize)
+        }));
+        if scroll.is_some() || body.height >= 27 {
+            lines.push(Line::default());
+        }
+    }
+    let paragraph = Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false });
+    let max_scroll = paragraph
+        .line_count(body.width)
+        .saturating_sub(body.height as usize)
+        .min(u16::MAX as usize) as u16;
+    frame.render_widget(
+        paragraph.scroll((scroll.unwrap_or(0).min(max_scroll), 0)),
+        body,
+    );
+    frame.render_widget(
+        Paragraph::new(if scroll.is_some() {
+            "[j/k] Scroll  [d/Esc] Back"
+        } else {
+            "[d] Full details"
+        })
+        .style(Style::default().fg(theme.accent())),
+        Rect::new(
+            inner.x + 2,
+            inner.bottom().saturating_sub(1),
+            inner.width.saturating_sub(4),
+            1,
+        ),
+    );
+    scroll.unwrap_or(0).min(max_scroll)
+}
+
+pub(crate) fn navigation_toolbar(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    theme: Theme,
+    summary: &str,
+) {
+    let action = "[n] New shell session";
+    let right = (action.len() as u16 + 2).min(area.width);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(theme.line())),
+        area,
+    );
+    frame.render_widget(
+        Paragraph::new(ellipsize(
+            summary,
+            area.width.saturating_sub(right + 2) as usize,
+        ))
+        .style(Style::default().fg(theme.subtle())),
+        Rect::new(area.x + 1, area.y, area.width.saturating_sub(right + 2), 1),
+    );
+    frame.render_widget(
+        Paragraph::new(action).style(Style::default().fg(theme.accent())),
+        Rect::new(area.right().saturating_sub(right), area.y, right, 1),
+    );
+}
+
+#[derive(Clone)]
+pub(crate) struct ShellForm {
+    pub name: String,
+    pub directory: String,
+    pub editing_directory: bool,
+}
+pub(crate) enum FormAction {
+    Edit,
+    Cancel,
+    Create,
+}
+impl ShellForm {
+    pub fn from_current() -> std::io::Result<Self> {
+        Ok(Self {
+            name: String::new(),
+            directory: crate::session::directory()?,
+            editing_directory: false,
+        })
+    }
+    pub fn edit(&mut self, code: crossterm::event::KeyCode) -> FormAction {
+        use crossterm::event::KeyCode;
+        match code {
+            KeyCode::Esc => return FormAction::Cancel,
+            KeyCode::Tab | KeyCode::BackTab => self.editing_directory = !self.editing_directory,
+            KeyCode::Enter if self.editing_directory => return FormAction::Create,
+            KeyCode::Enter => self.editing_directory = true,
+            KeyCode::Backspace => {
+                if self.editing_directory {
+                    self.directory.pop();
+                } else {
+                    self.name.pop();
+                }
+            }
+            KeyCode::Char(c) => {
+                if self.editing_directory {
+                    self.directory.push(c);
+                } else {
+                    self.name.push(c);
+                }
+            }
+            _ => {}
+        }
+        FormAction::Edit
+    }
+}
+pub(crate) fn shell_form(
+    frame: &mut ratatui::Frame<'_>,
+    form: &ShellForm,
+    theme: Theme,
+    notice: Option<&str>,
+) {
+    use ratatui::layout::{Constraint, Layout};
+    let area = frame.area();
+    let actions = &[
+        ("Tab", "Field"),
+        ("Enter", "Next/Create"),
+        ("Backspace", "Delete"),
+        ("Esc", "Cancel"),
+    ];
+    let help = action_lines(&[actions], theme, area.width);
+    let groups = Layout::vertical([
+        Constraint::Length(5),
+        Constraint::Min(4),
+        Constraint::Length(help.len() as u16 + 2),
+    ])
+    .split(area);
+    masthead(
+        frame,
+        groups[0],
+        theme,
+        "NEW SESSION / SHELL",
+        "Name your shell and choose its starting directory",
+    );
+    let field = |label: &str, value: &str, active: bool| {
+        Line::styled(
+            format!(
+                " {} {label}: {value}{}",
+                if active { "›" } else { " " },
+                if active { "_" } else { "" }
+            ),
+            Style::default().fg(if active { theme.accent() } else { theme.text }),
+        )
+    };
+    let lines = vec![
+        Line::default(),
+        field("Name", &form.name, !form.editing_directory),
+        Line::default(),
+        field("Directory", &form.directory, form.editing_directory),
+        Line::default(),
+        Line::from(" Opens a shell in this terminal."),
+        Line::from(" Other terminals keep their selection."),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
+        groups[1],
+    );
+    let mut help = help;
+    help.push(Line::styled(
+        notice
+            .unwrap_or("Enter a name and starting directory")
+            .to_owned(),
+        Style::default().fg(theme.subtle()),
+    ));
+    frame.render_widget(
+        Paragraph::new(help).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(theme.line())),
+        ),
+        groups[2],
+    );
 }

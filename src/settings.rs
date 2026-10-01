@@ -91,7 +91,7 @@ impl SettingSpec {
                 "Hide workspace, repository and branch labels in Drudwyn views. Reopen other popups to update them."
             }
             "@drudwyn-status-layout" => {
-                "Focus uses one row for the selected workspace, Git line counts and global attention. Tabs restores the two-row window overview."
+                "Focus uses one row for the selected workspace, Git line counts and global attention. Dense fits compact window tabs in one row. Tabs restores the two-row overview."
             }
             "@drudwyn-theme" => {
                 "Colour palette for the status bar and popups. Previews here immediately; reopen other popups."
@@ -247,7 +247,7 @@ const SETTINGS: &[SettingSpec] = &[
         option: "@drudwyn-status-layout",
         label: "Status layout",
         default: "focus",
-        kind: SettingKind::Choice(&["focus", "tabs"]),
+        kind: SettingKind::Choice(&["focus", "tabs", "dense"]),
     },
     SettingSpec {
         category: Category::Appearance,

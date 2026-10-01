@@ -1,3 +1,9 @@
+Latest update — 2026-10-01: the historical pause below was superseded by
+Memnoc's resume. Tickets12–15 and follow-up UI implementation are complete.
+[Ticket22](22-approved-navigation-layouts.md) records the approved Workspace/
+Sessions redesign, restored identity icons and dense six-tab option. Main remains
+unchanged; no push or deployment. Earlier receipts below remain historical.
+
 # Worktree worker implementation tickets
 
 Approved by Memnoc on 2026-09-30.

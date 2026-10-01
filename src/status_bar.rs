@@ -17,6 +17,7 @@ pub enum Row {
     Tabs,
     Context,
     Focus,
+    Dense,
 }
 fn cells(s: &str) -> usize {
     Line::from(s).width()
@@ -643,6 +644,154 @@ fn selected_branch(w: &Workspace) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
         .filter(|v| !v.is_empty())
 }
+fn dense(
+    rows: &[Tab],
+    workspaces: &[Workspace],
+    current: &str,
+    session: &str,
+    width: usize,
+    style: &Style,
+) -> String {
+    let totals = inventory::Totals::from_workspaces(workspaces);
+    let attention = format!(
+        " NEED {}{}{} ",
+        totals.attention,
+        if totals.categories_overlap() { "*" } else { "" },
+        if style.stale { " STALE" } else { "" }
+    );
+    let selected = rows
+        .iter()
+        .find(|t| t.workspace.identity.window_id == current);
+    let git = selected.and_then(|t| selected_git(t.workspace));
+    let changes = if width >= 64 {
+        git.map(|(_, a, d)| format!(" +{a} -{d} "))
+            .unwrap_or_else(|| " Git ? ".into())
+    } else {
+        String::new()
+    };
+    let changes = if cells(&changes) + cells(&attention) + 20 <= width {
+        changes
+    } else {
+        String::new()
+    };
+    let right_width = cells(&changes) + cells(&attention);
+    let mut count = rows
+        .len()
+        .min(style.cap())
+        .min(width.saturating_sub(right_width) / 17)
+        .max(1)
+        .min(rows.len());
+    // Reserve the navigator overflow link before allocating equally padded tabs.
+    while count > 1
+        && width.saturating_sub(right_width + if rows.len() > count { 5 } else { 0 }) / count < 17
+    {
+        count -= 1;
+    }
+    let mut chosen: Vec<usize> = (0..count).collect();
+    if let Some(index) = rows
+        .iter()
+        .position(|r| r.workspace.identity.window_id == current)
+    {
+        if !chosen.contains(&index) && count > 0 {
+            chosen[count - 1] = index;
+            chosen.sort_unstable();
+        }
+    }
+    let overflow = if rows.len() > count {
+        format!(" +{} ", rows.len() - count)
+    } else {
+        String::new()
+    };
+    let available = width.saturating_sub(right_width + cells(&overflow));
+    if available < count {
+        return focus(workspaces, current, width, style);
+    }
+    let tab_width = if count > 0 {
+        available / count
+    } else {
+        available
+    };
+    let bg = hex(style.theme.surface());
+    let mut out = format!("#[bg={bg},fg={}]", hex(style.theme.text));
+    for index in chosen {
+        let tab = &rows[index];
+        let w = tab.workspace;
+        let active = w.identity.window_id == current;
+        let icon = if w.is_agent() {
+            if style.nerd {
+                style.fallback_icon.as_str()
+            } else {
+                "A"
+            }
+        } else {
+            ">_"
+        };
+        let icon = if icon.is_empty() { "󰚩" } else { icon };
+        let name = if style.redact {
+            "Workspace"
+        } else {
+            &w.identity.window_name
+        };
+        let role = if w.coordinator.as_deref() == Some(w.identity.window_id.as_str()) {
+            "COORD "
+        } else if w.checkout.is_linked_worktree {
+            "WT "
+        } else {
+            ""
+        };
+        let badge = if active {
+            context_state(w, true)
+        } else {
+            String::new()
+        };
+        let label = cut(
+            &format!("{icon} {} {role}{name}", tab.index),
+            tab_width.saturating_sub(cells(&badge) + 4),
+        );
+        let content = format!(
+            " {label}{}{} ",
+            " ".repeat(tab_width.saturating_sub(cells(&label) + cells(&badge) + 3)),
+            badge
+        );
+        let content = cut(&content, tab_width.saturating_sub(1));
+        let tab_bg = if active { style.selected } else { &bg };
+        let tab_text = format!(
+            "#[bg={tab_bg},fg={},{}]{}{}#[bg={bg},fg={},nobold]│",
+            hex(style.theme.text),
+            if active { "bold" } else { "nobold" },
+            escape(&content),
+            " ".repeat(tab_width.saturating_sub(cells(&content) + 1)),
+            hex(style.theme.line())
+        );
+        out.push_str(&range(
+            &format!("window:{session}:{}", w.identity.window_id),
+            &tab_text,
+        ));
+    }
+    out.push_str(&range(
+        &format!("windows:{session}"),
+        &format!("#[fg={}]{}", hex(style.theme.accent()), escape(&overflow)),
+    ));
+    out.push_str(
+        &" ".repeat(width.saturating_sub(count * tab_width + cells(&overflow) + right_width)),
+    );
+    out.push_str(&format!("#[fg={}]{}", hex(style.theme.subtle()), changes));
+    out.push_str(&range(
+        "attention",
+        &format!(
+            "#[fg={},bold]{}",
+            hex(if totals.attention > 0 {
+                style.theme.gold
+            } else {
+                style.theme.subtle()
+            }),
+            attention
+        ),
+    ));
+    out.push_str("#[default]");
+    out
+}
+
 pub fn render(
     session: &str,
     current: &str,
@@ -692,6 +841,9 @@ pub fn render(
         return Err(io::Error::other(
             "Selected window membership disappeared; refresh",
         ));
+    }
+    if row == Row::Dense {
+        return Ok(dense(&rows, &workspaces, current, session, width, &style));
     }
     if row == Row::Focus {
         return Ok(focus(&workspaces, current, width, &style));

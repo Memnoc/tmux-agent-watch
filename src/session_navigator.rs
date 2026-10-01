@@ -10,10 +10,10 @@ use crossterm::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 
 use crate::{
@@ -26,17 +26,12 @@ const FORMAT: &str = "#{session_name}␟#{session_windows}␟#{session_attached}
 const NAVIGATION_ACTIONS: &[(&str, &str)] = &[("j/k", "Move"), ("Enter", "Switch")];
 const SESSION_ACTIONS: &[(&str, &str)] = &[
     ("n", "New Session"),
+    ("d", "Details"),
     ("c", "Coordinator"),
     ("r", "Rename"),
     ("x", "Kill"),
     ("s", "Save"),
     ("/", "Filter"),
-];
-const NEW_ACTIONS: &[(&str, &str)] = &[
-    ("Tab", "Field"),
-    ("Enter", "Next/Create"),
-    ("Backspace", "Delete"),
-    ("Esc", "Cancel"),
 ];
 const CLOSE_ACTION: &[(&str, &str)] = &[("Esc", "Close")];
 const CONFIRM_ACTION: &[(&str, &str)] = &[("y", "Confirm")];
@@ -54,6 +49,9 @@ struct Session {
     name: String,
     windows: usize,
     attached: usize,
+    agents: Option<usize>,
+    attention: Option<usize>,
+    directory: String,
 }
 
 #[derive(Clone)]
@@ -62,21 +60,17 @@ struct App {
     visible: Vec<usize>,
     selected: usize,
     current: String,
+    details: Option<u16>,
     filter: String,
     filtering: bool,
     pending_kill: Option<Session>,
     pending_rename: Option<(String, String)>,
-    new_session: Option<NewSession>,
+    new_session: Option<ui::ShellForm>,
     notice: Option<String>,
     theme: Theme,
+    agent_icon: String,
+    shell_icon: String,
     redact: bool,
-}
-
-#[derive(Clone)]
-struct NewSession {
-    name: String,
-    directory: String,
-    editing_directory: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -117,30 +111,21 @@ impl App {
 
 fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
     if let Some(form) = &mut app.new_session {
-        match code {
-            KeyCode::Esc => {
+        match form.edit(code) {
+            ui::FormAction::Cancel => {
                 app.new_session = None;
                 app.notice = None;
             }
-            KeyCode::Tab | KeyCode::BackTab => form.editing_directory = !form.editing_directory,
-            KeyCode::Enter if form.editing_directory => return NavigationAction::Create,
-            KeyCode::Enter => form.editing_directory = true,
-            KeyCode::Backspace => {
-                if form.editing_directory {
-                    form.directory.pop();
-                } else {
-                    form.name.pop();
-                }
-                app.notice = None;
-            }
-            KeyCode::Char(character) => {
-                if form.editing_directory {
-                    form.directory.push(character);
-                } else {
-                    form.name.push(character);
-                }
-                app.notice = None;
-            }
+            ui::FormAction::Create => return NavigationAction::Create,
+            ui::FormAction::Edit => app.notice = None,
+        }
+        return NavigationAction::Continue;
+    }
+    if let Some(scroll) = &mut app.details {
+        match code {
+            KeyCode::Esc | KeyCode::Char('d') | KeyCode::Char('q') => app.details = None,
+            KeyCode::Char('j') | KeyCode::Down => *scroll = scroll.saturating_add(1),
+            KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
             _ => {}
         }
         return NavigationAction::Continue;
@@ -219,6 +204,10 @@ fn handle_key(app: &mut App, code: KeyCode) -> NavigationAction {
         }
         KeyCode::Char('c') => NavigationAction::Coordinator,
         KeyCode::Char('n') => NavigationAction::New,
+        KeyCode::Char('d') => {
+            app.details = Some(0);
+            NavigationAction::Continue
+        }
         KeyCode::Char('s') => NavigationAction::Save,
         KeyCode::Char('x') => {
             app.pending_kill = app
@@ -242,11 +231,13 @@ pub fn run(variant: Variant) -> io::Result<()> {
         .iter()
         .position(|session| session.name == current)
         .unwrap_or(0);
+    let (agent_icon, shell_icon) = crate::icons::workspace_icons();
     let mut app = App {
         visible: (0..sessions.len()).collect(),
         sessions,
         selected,
         current,
+        details: None,
         filter: String::new(),
         filtering: false,
         pending_kill: None,
@@ -254,6 +245,8 @@ pub fn run(variant: Variant) -> io::Result<()> {
         new_session: None,
         notice: None,
         theme: Theme::rose_pine(variant),
+        agent_icon,
+        shell_icon,
         redact: tmux_output(&["show-option", "-gqv", "@drudwyn-redact-labels"])? == "on",
     };
 
@@ -285,14 +278,8 @@ fn event_loop(
         }
         match handle_key(app, key.code) {
             NavigationAction::Close => return Ok(()),
-            NavigationAction::New => match crate::session::directory() {
-                Ok(directory) => {
-                    app.new_session = Some(NewSession {
-                        name: String::new(),
-                        directory,
-                        editing_directory: false,
-                    });
-                }
+            NavigationAction::New => match ui::ShellForm::from_current() {
+                Ok(form) => app.new_session = Some(form),
                 Err(error) => app.notice = Some(format!("New Session failed: {error}")),
             },
             NavigationAction::Create => {
@@ -377,7 +364,9 @@ fn event_loop(
     }
 }
 
-fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
+fn render(frame: &mut ratatui::Frame<'_>, app: &mut App) {
+    let original = app;
+    let app = &*original;
     let mut projection;
     let app = if app.redact {
         projection = app.clone();
@@ -386,6 +375,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 projection.current = format!("Session {}", session.id);
             }
             session.name = format!("Session {}", session.id);
+            session.directory = "[redacted]".into();
         }
         if let Some(target) = &mut projection.pending_kill {
             target.name = "private".into();
@@ -423,56 +413,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         area,
     );
     if let Some(form) = &app.new_session {
-        let mut help = action_lines(NEW_ACTIONS, app.theme, area.width);
-        help.push(Line::styled(
-            app.notice
-                .as_deref()
-                .unwrap_or("Enter a name and starting directory")
-                .to_owned(),
-            Style::default().fg(app.theme.subtle()),
-        ));
-        let groups = Layout::vertical([
-            Constraint::Length(5),
-            Constraint::Min(4),
-            Constraint::Length(help.len() as u16 + 1),
-        ])
-        .split(area);
-        ui::masthead(
-            frame,
-            groups[0],
-            app.theme,
-            "NEW SESSION / SHELL",
-            "Name your shell and choose its starting directory",
-        );
-        let field = |label: &str, value: &str, active: bool| {
-            Line::styled(
-                format!(
-                    " {} {label}: {value}{}",
-                    if active { "›" } else { " " },
-                    if active { "_" } else { "" }
-                ),
-                Style::default().fg(if active {
-                    app.theme.rose
-                } else {
-                    app.theme.text
-                }),
-            )
-        };
-        frame.render_widget(
-            Paragraph::new(vec![
-                field("Name", &form.name, !form.editing_directory),
-                Line::default(),
-                field("Directory", &form.directory, form.editing_directory),
-                Line::default(),
-                Line::from(" Opens a shell in this terminal."),
-            ])
-            .wrap(Wrap { trim: false }),
-            groups[1],
-        );
-        frame.render_widget(
-            Paragraph::new(help).block(Block::default().borders(Borders::TOP)),
-            groups[2],
-        );
+        ui::shell_form(frame, form, app.theme, app.notice.as_deref());
         return;
     }
     let actions: Vec<_> = [NAVIGATION_ACTIONS, SESSION_ACTIONS, CLOSE_ACTION].concat();
@@ -483,14 +424,13 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         } else {
             action_lines.len() as u16 + 1 + u16::from(app.notice.is_some())
         };
-    let groups = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            Constraint::Min(3),
-            Constraint::Length(footer_height),
-        ])
-        .split(area);
+    let groups = Layout::vertical([
+        Constraint::Length(5),
+        Constraint::Length(2),
+        Constraint::Min(3),
+        Constraint::Length(footer_height),
+    ])
+    .split(area);
     let attached = app
         .sessions
         .iter()
@@ -502,9 +442,103 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         groups[0],
         app.theme,
         "SESSION NAVIGATOR",
-        &format!("{} sessions · {} attached", app.sessions.len(), attached),
+        &format!(
+            "{} sessions · {} attached · {} windows",
+            app.sessions.len(),
+            attached,
+            app.sessions.iter().map(|s| s.windows).sum::<usize>()
+        ),
     );
-    let width = groups[1].width as usize;
+    ui::navigation_toolbar(
+        frame,
+        groups[1],
+        app.theme,
+        &format!(
+            "{} shown / {} total · [/] Search",
+            app.visible.len(),
+            app.sessions.len()
+        ),
+    );
+    let body = groups[2];
+    let mut clamped_scroll = None;
+    if app.details.is_some() {
+        clamped_scroll = Some(render_inspection(frame, app, body));
+    } else if body.width >= 112 {
+        let panes = Layout::horizontal([Constraint::Min(60), Constraint::Length(34)]).split(body);
+        render_sessions(frame, app, panes[0]);
+        render_inspection(frame, app, panes[1]);
+    } else {
+        render_sessions(frame, app, body);
+    }
+
+    if let Some(target) = &app.pending_kill {
+        let message = format!(
+            "Kill session {} {} ({} windows)?",
+            target.id, target.name, target.windows
+        );
+        ui::render_footer(
+            frame,
+            groups[3],
+            app.theme,
+            &[CONFIRM_ACTION, CANCEL_ACTION],
+            ("CONFIRM", &message, FooterTone::Warning),
+        );
+    } else if let Some((_, name)) = &app.pending_rename {
+        let message = app
+            .notice
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("Rename session › {name}_"));
+        ui::render_footer(
+            frame,
+            groups[3],
+            app.theme,
+            &[EDIT_ACTIONS, CANCEL_ACTION],
+            ("RENAME", &message, FooterTone::Info),
+        );
+    } else if let Some(notice) = &app.notice {
+        let mut lines = action_lines;
+        lines.push(Line::styled(
+            format!(" STATUS   {notice}"),
+            Style::default().fg(app.theme.subtle()),
+        ));
+        frame.render_widget(
+            Paragraph::new(lines).block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(app.theme.line())),
+            ),
+            groups[3],
+        );
+    } else if app.filtering {
+        let message = format!("› {}_", app.filter);
+        ui::render_footer(
+            frame,
+            groups[3],
+            app.theme,
+            &[FILTER_ACTIONS],
+            ("FILTER", &message, FooterTone::Info),
+        );
+    } else {
+        frame.render_widget(
+            Paragraph::new(action_lines).block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(app.theme.line())),
+            ),
+            groups[3],
+        );
+    }
+    if let Some(offset) = clamped_scroll {
+        original.details = Some(offset);
+    }
+}
+
+fn count(value: Option<usize>) -> String {
+    value.map(|n| n.to_string()).unwrap_or_else(|| "?".into())
+}
+fn render_sessions(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let width = area.width as usize;
     let windows_width = if width >= 70 { 12 } else { 0 };
     let connection_width = if width >= 70 {
         22
@@ -513,11 +547,15 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     } else {
         0
     };
-    let name_width = width.saturating_sub(2 + windows_width + connection_width);
+    let agents_width = if width >= 86 { 10 } else { 0 };
+    let name_width = width.saturating_sub(2 + windows_width + agents_width + connection_width);
     let muted = Style::default().fg(app.theme.subtle());
     let mut headings = vec![Span::raw("  "), ui::cell("SESSION", name_width, muted)];
     if windows_width > 0 {
         headings.push(ui::cell("WINDOWS", windows_width, muted));
+    }
+    if agents_width > 0 {
+        headings.push(ui::cell("AGENTS", agents_width, muted));
     }
     if connection_width > 0 {
         headings.push(ui::cell("CONNECTION", connection_width, muted));
@@ -528,7 +566,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 .borders(Borders::BOTTOM)
                 .border_style(Style::default().fg(app.theme.line())),
         ),
-        Rect::new(groups[1].x, groups[1].y, groups[1].width, 2),
+        Rect::new(area.x, area.y, area.width, 2),
     );
     let items = app.visible.iter().map(|index| {
         let session = &app.sessions[*index];
@@ -539,7 +577,15 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             (false, false) => "detached",
         };
         let mut cells = vec![ui::cell(
-            &session.name,
+            &format!(
+                "{} {}",
+                match session.agents {
+                    Some(n) if n > 0 => &app.agent_icon,
+                    Some(_) => &app.shell_icon,
+                    None => "?",
+                },
+                session.name
+            ),
             name_width,
             Style::default()
                 .fg(app.theme.text)
@@ -560,6 +606,9 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 muted,
             ));
         }
+        if agents_width > 0 {
+            cells.push(ui::cell(&count(session.agents), agents_width, muted));
+        }
         if connection_width > 0 {
             cells.push(ui::cell(
                 state,
@@ -576,63 +625,49 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     frame.render_stateful_widget(
         list,
         Rect::new(
-            groups[1].x,
-            groups[1].y + 2,
-            groups[1].width,
-            groups[1].height.saturating_sub(2),
+            area.x,
+            area.y + 2,
+            area.width,
+            area.height.saturating_sub(2),
         ),
         &mut state,
     );
-
-    if let Some(target) = &app.pending_kill {
-        let message = format!(
-            "Kill session {} {} ({} windows)?",
-            target.id, target.name, target.windows
-        );
-        ui::render_footer(
+}
+fn render_inspection(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) -> u16 {
+    if let Some(session) = app.visible.get(app.selected).map(|i| &app.sessions[*i]) {
+        ui::inspection(
             frame,
-            groups[2],
+            area,
             app.theme,
-            &[CONFIRM_ACTION, CANCEL_ACTION],
-            ("CONFIRM", &message, FooterTone::Warning),
-        );
-    } else if let Some((_, name)) = &app.pending_rename {
-        let message = app
-            .notice
-            .as_deref()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("Rename session › {name}_"));
-        ui::render_footer(
-            frame,
-            groups[2],
-            app.theme,
-            &[EDIT_ACTIONS, CANCEL_ACTION],
-            ("RENAME", &message, FooterTone::Info),
-        );
-    } else if let Some(notice) = &app.notice {
-        let mut lines = action_lines;
-        lines.push(Line::styled(
-            format!(" STATUS   {notice}"),
-            Style::default().fg(app.theme.subtle()),
-        ));
-        frame.render_widget(
-            Paragraph::new(lines).block(Block::default().borders(Borders::TOP)),
-            groups[2],
-        );
-    } else if app.filtering {
-        let message = format!("› {}_", app.filter);
-        ui::render_footer(
-            frame,
-            groups[2],
-            app.theme,
-            &[FILTER_ACTIONS],
-            ("FILTER", &message, FooterTone::Info),
-        );
+            "SELECTED SESSION",
+            &session.name,
+            &[
+                (
+                    "Connection",
+                    if session.name == app.current {
+                        "Current".into()
+                    } else if session.attached > 0 {
+                        "Attached".into()
+                    } else {
+                        "Detached".into()
+                    },
+                ),
+                ("Windows", session.windows.to_string()),
+                ("Agents", count(session.agents)),
+                ("Need you", count(session.attention)),
+                (
+                    "Starting directory",
+                    if session.directory.is_empty() {
+                        "Not available".into()
+                    } else {
+                        session.directory.clone()
+                    },
+                ),
+            ],
+            app.details,
+        )
     } else {
-        frame.render_widget(
-            Paragraph::new(action_lines).block(Block::default().borders(Borders::TOP)),
-            groups[2],
-        );
+        0
     }
 }
 
@@ -664,6 +699,42 @@ fn discover() -> io::Result<Vec<Session>> {
             }
         }
     }
+    // Observe once per opening/refresh, deduplicating linked window memberships.
+    let workspaces = crate::discovery::discover_all_tmux().ok();
+    let memberships = tmux_output(&["list-windows", "-a", "-F", "#{session_id}␟#{window_id}"])?;
+    let directories = tmux_output(&["list-sessions", "-F", "#{session_id}␟#{session_path}"])?;
+    for session in &mut sessions {
+        session.directory = directories
+            .lines()
+            .filter_map(|line| line.split_once(SEP))
+            .find(|(id, _)| *id == session.id)
+            .map(|(_, path)| path.to_owned())
+            .unwrap_or_default();
+        if let Some(workspaces) = &workspaces {
+            let ids: std::collections::HashSet<_> = memberships
+                .lines()
+                .filter_map(|line| line.split_once(SEP))
+                .filter(|(id, _)| *id == session.id)
+                .map(|(_, window)| window)
+                .collect();
+            let mut seen = std::collections::HashSet::new();
+            let agents: Vec<_> = workspaces
+                .iter()
+                .filter(|w| {
+                    ids.contains(w.identity.window_id.as_str())
+                        && w.is_agent()
+                        && seen.insert(w.identity.window_id.clone())
+                })
+                .collect();
+            session.agents = Some(agents.len());
+            session.attention = Some(
+                agents
+                    .iter()
+                    .filter(|w| crate::inventory::attention_state(w).needs_attention())
+                    .count(),
+            );
+        }
+    }
     sessions.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(sessions)
 }
@@ -678,6 +749,9 @@ fn parse_sessions(output: &str) -> Vec<Session> {
                 name: fields[0].into(),
                 windows: fields[1].parse().unwrap_or_default(),
                 attached: fields[2].parse().unwrap_or_default(),
+                agents: None,
+                attention: None,
+                directory: String::new(),
             })
         })
         .collect()
@@ -712,12 +786,18 @@ mod tests {
                     name: "dev".into(),
                     windows: 7,
                     attached: 1,
+                    agents: None,
+                    attention: None,
+                    directory: String::new(),
                 },
                 Session {
                     id: "$2".into(),
                     name: "archive".into(),
                     windows: 2,
                     attached: 0,
+                    agents: None,
+                    attention: None,
+                    directory: String::new(),
                 },
             ]
         );
@@ -730,6 +810,7 @@ mod tests {
             visible: Vec::new(),
             selected: 0,
             current: String::new(),
+            details: None,
             filter: "dev".into(),
             filtering: true,
             pending_kill: None,
@@ -737,6 +818,8 @@ mod tests {
             new_session: None,
             notice: None,
             theme: Theme::rose_pine(Variant::Moon),
+            agent_icon: "A".into(),
+            shell_icon: ">_".into(),
             redact: false,
         };
         assert_eq!(
@@ -758,7 +841,10 @@ mod tests {
             new_session: None,
             notice: None,
             current: String::new(),
+            details: None,
             theme: Theme::rose_pine(Variant::Moon),
+            agent_icon: "A".into(),
+            shell_icon: ">_".into(),
             redact: false,
         }
     }
@@ -771,7 +857,7 @@ mod tests {
             app.sessions[1].name = "project-beta".into();
             let mut terminal =
                 Terminal::new(ratatui::backend::TestBackend::new(width, 24)).unwrap();
-            terminal.draw(|frame| render(frame, &app)).unwrap();
+            terminal.draw(|frame| render(frame, &mut app)).unwrap();
             let text = terminal
                 .backend()
                 .buffer()

@@ -1,10 +1,6 @@
 //! Share the shell status bar's font policy with standalone Rust interfaces.
 use std::process::Command;
 
-pub(crate) fn agent_icon() -> String {
-    policy().1
-}
-
 pub(crate) fn policy() -> (String, String) {
     Command::new("bash")
         .args(["-c", include_str!("../scripts/icons.sh")])
@@ -17,4 +13,17 @@ pub(crate) fn policy() -> (String, String) {
             Some((lines.next()?.to_owned(), lines.next()?.to_owned()))
         })
         .unwrap_or_else(|| ("safe".into(), "A".into()))
+}
+
+/// Agent and manual-terminal identities share the configured font policy.
+pub(crate) fn workspace_icons() -> (String, String) {
+    let (mode, agent) = policy();
+    (
+        agent,
+        if mode == "nerd" {
+            "".into()
+        } else {
+            ">_".into()
+        },
+    )
 }

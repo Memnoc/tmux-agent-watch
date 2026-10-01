@@ -140,13 +140,30 @@ class IndependentNavigation(unittest.TestCase):
             time.sleep(.02)
         self.fail(f'no {text!r}: {output}')
 
-    def session_form(self):
+    def session_form(self, surface="sessions"):
         pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project',
-                         shlex.join(['env', f'DRUDWYN_CLIENT={self.clients[0]}', str(BIN), 'sessions']))
+                         shlex.join(['env', f'DRUDWYN_CLIENT={self.clients[0]}', str(BIN), surface]))
         self.wait_pane(pane, 'NAVIGATOR')
         self.tmux('send-keys', '-t', pane, 'n')
         self.wait_pane(pane, 'NEW SESSION')
         return pane
+
+    def test_workspace_new_shell_cancel_and_create_preserves_other_client(self):
+        requester=self.selection(self.clients[0]); other=self.selection(self.clients[1])
+        pane=self.session_form('navigator')
+        self.tmux('send-keys','-t',pane,'Escape')
+        self.wait_pane(pane,'WORKSPACE NAVIGATOR')
+        self.assertEqual(self.selection(self.clients[0]),requester)
+        self.tmux('send-keys','-t',pane,'n')
+        self.wait_pane(pane,'NEW SESSION')
+        self.tmux('send-keys','-t',pane,'-l','workspace shell')
+        self.tmux('send-keys','-t',pane,'Tab','Enter')
+        for _ in range(250):
+            if self.selection(self.clients[0]) != requester:break
+            time.sleep(.02)
+        session=self.selection(self.clients[0]).split(':')[0]
+        self.assertEqual(self.tmux('display-message','-p','-t',session,'#{session_name}'),'workspace shell')
+        self.assertEqual(self.selection(self.clients[1]),other)
 
     def test_new_session_form_cancel_and_create(self):
         other = self.selection(self.clients[1])
