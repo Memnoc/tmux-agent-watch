@@ -334,7 +334,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     let app = if app.redact {
         projection = app.clone();
         for item in &mut projection.windows {
-            item.name = format!("Workspace {}", item.id);
+            item.name = format!("Workspace {}", item.index);
             item.session = "private".into();
             item.branch = item.branch.as_ref().map(|_| "private".into());
         }
@@ -373,7 +373,13 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
     {
         3
     } else {
-        2
+        ui::action_lines(
+            &[NAVIGATION_ACTIONS, WORKSPACE_ACTIONS, CLOSE_ACTION],
+            app.theme,
+            area.width,
+        )
+        .len() as u16
+            + 1
     };
     let groups = Layout::default()
         .direction(Direction::Vertical)
@@ -457,11 +463,14 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             ("FILTER", &message, FooterTone::Info),
         );
     } else {
-        ui::render_action_bar(
-            frame,
+        frame.render_widget(
+            Paragraph::new(ui::action_lines(
+                &[NAVIGATION_ACTIONS, WORKSPACE_ACTIONS, CLOSE_ACTION],
+                app.theme,
+                area.width,
+            ))
+            .block(Block::default().borders(Borders::TOP)),
             groups[3],
-            app.theme,
-            &[NAVIGATION_ACTIONS, WORKSPACE_ACTIONS, CLOSE_ACTION],
         );
     }
 }
@@ -481,35 +490,52 @@ fn render_group(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect, agents: b
         let branch = item.branch.as_deref().unwrap_or("");
         if agents {
             let color = state_color(item.lifecycle, app.theme);
-            let agent_icon = app.agent_icon.as_str();
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!(
-                        " {agent_icon} {} {} · {}",
-                        item.id,
-                        item.role,
-                        truncate(&item.name, 18)
+            let prefix = format!(" {} {}  {} · ", app.agent_icon, item.index, item.role);
+            let state = item.lifecycle.label();
+            let available = area.width.saturating_sub(3) as usize;
+            let name_width =
+                available.saturating_sub(Line::from(prefix.as_str()).width() + state.len() + 3);
+            let name = ui::ellipsize(&item.name, name_width);
+            let pad = name_width.saturating_sub(Line::from(name.as_str()).width());
+            ListItem::new(vec![
+                Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(app.theme.muted)),
+                    Span::styled(
+                        name,
+                        Style::default()
+                            .fg(app.theme.text)
+                            .add_modifier(Modifier::BOLD),
                     ),
-                    Style::default().fg(color),
-                ),
-                Span::styled(
-                    format!(
-                        " {:<8} {} · {} ",
-                        item.agent.label(),
-                        item.lifecycle.label(),
-                        item.evidence
+                    Span::raw(" ".repeat(pad + 2)),
+                    Span::styled(
+                        state,
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("{} {}", age(item.since), branch),
+                ]),
+                Line::styled(
+                    ui::ellipsize(
+                        &format!(
+                            "    session {} · {} · {} · {} {}",
+                            item.session,
+                            item.agent.label(),
+                            item.evidence,
+                            age(item.since),
+                            branch
+                        ),
+                        available,
+                    ),
                     Style::default().fg(app.theme.muted),
                 ),
-            ]))
+            ])
         } else {
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!(" {} {} · {}", item.id, item.role, truncate(&item.name, 22)),
+                    format!(
+                        " {}  {} · {}",
+                        item.index,
+                        item.role,
+                        truncate(&item.name, 22)
+                    ),
                     Style::default().fg(app.theme.text),
                 ),
                 Span::styled(
@@ -669,7 +695,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn roles_and_ids_remain_visible_at_narrow_width_with_redaction() {
+    fn roles_and_window_numbers_remain_visible_at_narrow_width_with_redaction() {
         for role in [
             "Worktree worker",
             "Ordinary agent",
@@ -698,7 +724,8 @@ mod tests {
                     content.contains(role),
                     "missing {role} at {width}: {content}"
                 );
-                assert!(content.contains("@1"));
+                assert!(!content.contains("@1"));
+                assert!(content.contains("1  "));
                 assert!(!content.contains("first"));
             }
         }

@@ -179,7 +179,9 @@ set -g @drudwyn-status-key g
 
 Every local window counts toward the cap, including shells and coordinators;
 `+N` is outside the cap. Width may show fewer tabs to preserve names and badge
-padding. The selected window remains included in local window order. Invalid
+padding. Names have a separate gutter before state badges; selected agent names
+appear once in the tab while the context row shows a bounded branch label and
+activity. The selected window remains included in local window order. Invalid
 direct tab settings fall back to four. Themes, per-agent icons, safe mode,
 redaction and lifecycle badge colours apply to these rows. The separator and
 window-number colour controls remain relevant to legacy/native status layouts.

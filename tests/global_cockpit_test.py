@@ -144,7 +144,9 @@ class GlobalCockpitTest(IndependentNavigation):
         self.command('navigate', '--window', second, client=self.clients[0])
         pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit')
         screen = self.wait_pane(pane, 'MATCHING 2')
-        self.assertIn('* ' + second, screen)
+        self.assertIn('• same name', screen)
+        # Current and inspected windows may have identical names; stable identity
+        # remains available in details and continues to control every action.
         self.assertIn('IDENTITY ' + self.worker, screen)
         Path('/tmp/drudwyn-ticket09-current-vs-selected.txt').write_text(screen)
         target = self.tmux('display-message', '-p', '-t', second, '#{pane_id}')
@@ -162,7 +164,7 @@ class GlobalCockpitTest(IndependentNavigation):
         self.tmux('send-keys', '-t', pane, 's')
         self.wait_pane(pane, 'state attention')
         self.tmux('send-keys', '-t', pane, 'p')
-        self.wait_pane(pane, 'project $0')
+        self.wait_pane(pane, 'project project')
         # Pending Open resolves the selected stable ID, never the same-name row.
         before = [self.selection(c) for c in self.clients]
         self.tmux('kill-window', '-t', self.worker)
@@ -216,7 +218,7 @@ class GlobalCockpitTest(IndependentNavigation):
                 self.wait_pane(pane, 'MATCHING 1')
                 for width in [48,64,80,120,160]:
                     self.tmux('resize-window', '-t', pane, '-x', str(width), '-y', '24')
-                    screen = self.wait_pane(pane, self.worker)
+                    screen = self.wait_pane(pane, "MATCHING 1")
                     if redacted: self.assertNotIn('private-', screen)
                     Path(f'/tmp/drudwyn-ticket09-{mode}-{theme}-{width}-redact{int(redacted)}.txt').write_text(screen)
                     self.tmux('send-keys', '-t', pane, 'd')

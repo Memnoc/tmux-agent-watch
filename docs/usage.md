@@ -53,6 +53,9 @@ Rust implementation never reads prompts, responses, or terminal scrollback.
 ### Find work, then act
 
 Use the session navigator to find a session, the workspace navigator to find a window, and the cockpit to act on a workspace.
+Workspace rows show familiar window numbers rather than raw `@` IDs. Agent rows
+include a session label so same-name windows in different sessions remain
+identifiable. Navigation controls wrap between complete key/action pairs.
 
 <img src="images/navigator-cockpit-surfaces.png" alt="Comparison of three complementary tmux-drudwyn surfaces: the Session Navigator for switching tmux sessions, the Workspace Navigator for finding windows and agents across sessions, and the Workspace Cockpit for starting, reviewing, opening, and finishing agent work">
 
@@ -78,8 +81,12 @@ shortcut uses the configured base when no live batch is attached.
 
 ### Global Cockpit (Rust v2)
 
-At widths below 100 columns, the inventory uses the full body; `d` opens
-complete details. Wider views keep the side panel. The footer shows navigation,
+The Cockpit restores the bundled Drudwyn hound above compact project groups
+and aligned worker states. At widths below 100 columns, the inventory uses the
+full body; `d` opens complete details, including full paths and stable tmux IDs.
+Wider views keep the side panel. Same-name repositories use a distinguishing
+parent or a numbered label; actions always use the underlying stable identity.
+The footer shows navigation,
 search, details, and `?` for the full action list. All existing action shortcuts
 remain available directly.
 

@@ -12,7 +12,9 @@ Implementation branch: `work/worktree-worker-workflow`.
 ## Live-use follow-up — 2026-10-01
 
 [16 — Screenshot regressions](16-screenshot-regressions.md) addresses the first
-live-use feedback. The earlier acceptance below covered workflow mechanics but
+live-use feedback. [17 — Visual polish](17-visual-polish.md) restores branding,
+removes raw IDs from overview rows, and fixes crowded labels and controls.
+The earlier acceptance below covered workflow mechanics but
 missed ordinary unregistered sessions and usable inventory space at 84 × 27.
 
 ## Completion checkpoint — 2026-10-01

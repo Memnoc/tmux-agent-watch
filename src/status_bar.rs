@@ -307,7 +307,7 @@ fn tab_parts(tab: &Tab, selected: bool, style: &Style, name_width: usize) -> (St
         if icon.is_empty() { "" } else { " " },
         icon
     );
-    let title = format!("{prefix}{}", cut(name, name_width));
+    let title = format!("{prefix}{}  ", cut(name, name_width));
     let badge = if state(w).is_empty() {
         " ".into()
     } else {
@@ -452,7 +452,13 @@ fn context(workspaces: &[Workspace], current: &str, width: usize, style: &Style)
                 selected_branch(w).unwrap_or_else(|| "ref ?".into())
             };
             let status = context_state(w, false);
-            let mut full = format!("{} {name} · {reference}", role(w));
+            // The selected tab already names an agent. Reserve its context row
+            // for the checkout and activity, with a bounded branch label.
+            let mut full = if w.is_agent() {
+                format!("{} · {}", role(w), cut(&reference, 36))
+            } else {
+                format!("{} {name} · {reference}", role(w))
+            };
             if !status.is_empty() {
                 full.push_str(&format!(" · {status}"));
             }

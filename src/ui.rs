@@ -16,6 +16,47 @@ pub(crate) enum FooterTone {
     Error,
 }
 
+/// Bound labels by terminal cells, retaining an explicit truncation marker.
+pub(crate) fn ellipsize(value: &str, width: usize) -> String {
+    let clean: String = value.chars().filter(|c| !c.is_control()).collect();
+    if Line::from(clean.as_str()).width() <= width {
+        return clean;
+    }
+    let mut result = String::new();
+    for c in clean.chars() {
+        if Line::from(format!("{result}{c}…")).width() > width {
+            break;
+        }
+        result.push(c);
+    }
+    if width > 0 {
+        result.push('…');
+    }
+    result
+}
+
+/// Wrap only between actions so a key never gets separated from its label.
+pub(crate) fn action_lines(
+    groups: &[&[(&str, &str)]],
+    theme: Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::default()];
+    for action in groups.iter().flat_map(|group| group.iter()) {
+        let item = action_line(&[&[*action]], theme);
+        let line = lines.last_mut().unwrap();
+        if line.width() + item.width() + 1 > width as usize && !line.spans.is_empty() {
+            lines.push(item);
+        } else {
+            if !line.spans.is_empty() {
+                line.spans.push(Span::raw(" "));
+            }
+            line.spans.extend(item.spans);
+        }
+    }
+    lines
+}
+
 pub(crate) fn render_action_bar(
     frame: &mut ratatui::Frame<'_>,
     area: Rect,
