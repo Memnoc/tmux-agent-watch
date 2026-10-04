@@ -461,9 +461,9 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
     }
     crate::navigation::open_for(&client, Some(&started.window_id), None)?;
     let message = if request.agent.is_some() {
-        "Worker restarted; task sent. Fresh conversation; acceptance unconfirmed. Prefix + C returns to coordinator."
+        "Worker restarted; task sent. Fresh conversation; acceptance unconfirmed. Use the coordinator shortcut to return."
     } else {
-        "Workspace shell opened. Prefix + C returns to coordinator."
+        "Workspace shell opened. Use the coordinator shortcut to return."
     };
     let _ = tmux(&["display-message", "-c", &client, "-d", "6000", message]);
     Ok(started)

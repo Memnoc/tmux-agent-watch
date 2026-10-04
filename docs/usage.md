@@ -918,7 +918,7 @@ text identities. This layout adds no blank terminal rows.
 
 ## Live worktree feedback improvements (October 2026)
 
-- `prefix + C` switches from a worker to its coordinator, and back to that
+- `prefix + G` switches from a worker to its coordinator, and back to that
   terminal's previous worker. The bookmark lives only in tmux. An existing user
   binding is preserved; choose `@drudwyn-coordinator-key` to use another key.
 - Launch has separate name, branch and multiline task fields. Enter or Down

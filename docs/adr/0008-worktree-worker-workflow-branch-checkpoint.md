@@ -77,7 +77,7 @@ Native macOS/ARM64 runtime, real third-party agent-service arrangements and
 manual release-artifact gates remain unverified; branch completion is not a
 shipping decision.
 
-**Open bug:** [ticket19](../../.scratch/worktree-worker-workflow/19-codex-hook-ownership.md)
+**Bug at the original checkpoint:** [ticket19](../../.scratch/worktree-worker-workflow/19-codex-hook-ownership.md)
 reproduced Codex hook failure when launcher/server/helper processes create
 ambiguous ownership. UI polish did not fix it. Resume by validating content-blind
 process-family and client/pane attribution with fake process families and private
@@ -110,3 +110,30 @@ git switch work/worktree-worker-workflow
 The release binary and live tmux presentation were applied on 2026-10-01.
 Switching Git branches alone does not rebuild that binary or reload tmux;
 validate source/binary alignment before further live-runtime testing.
+
+## October 4 live-feedback implementation
+
+All feedback in [ticket25](../../.scratch/worktree-worker-workflow/25-live-worktree-test-findings.md)
+is now implemented on the retained feature branch. Action screens use the same
+Rosé Pine language, visible editing/focus and result states; destinations are
+selectable branch/checkout pairs. Verification returns fresh evidence to the
+result. Recovery retains validated live tmux context without a persistent registry.
+Coordinator return uses prefix + G, preserving tmux's existing prefix + C.
+
+Task delivery waits for editor terminal mode but still distinguishes transmission
+from acceptance. Default managed Codex uses --no-daemon; configured hooks prove
+terminal ancestry plus process cwd and reject shared-backend attribution. This
+resolves the supported launch route while retaining an explicit limitation for
+existing shared-daemon sessions and platforms with unobservable process cwd.
+
+Runtime snapshots now contain matching binaries/scripts/assets and atomically
+select a stable installation path. Source-branch switches cannot remove it;
+loader migration replaces only Drudwyn's own hooks and observer. Existing active
+agent conversations are not restarted as part of installation.
+
+43 Rust tests, the repository's integration/UI/privacy/package phases, targeted
+failure reruns, and both assembled release workflows pass; one optional Resurrect
+test is skipped. Independent Standards and Spec reviews have no remaining findings.
+The [comparison plan](../specs/2026-10-04-worktree-feedback-comparison.md) preserves
+the same baseline/tasks and separates automated evidence from pending real-agent
+acceptance and visual judgement. Main remains eaf2446, clean and unmerged.

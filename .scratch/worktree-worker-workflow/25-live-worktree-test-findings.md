@@ -1,37 +1,38 @@
 # 25 — Live worktree test findings, 2026-10-04
 
-Status: reproduced observations; fixes pending
+Status: implementation complete; automated checks passed; live comparison pending
 Spec: docs/specs/2026-09-30-worktree-worker-workflow.md
 Implementation under test: 5a2c1d1 (checkpoint da60b1f)
 
 ## Consolidated feedback checklist
 
 This checklist gathers the user's feedback from the October 4 hands-on run.
-Suggested treatments below are follow-up proposals, not completed fixes.
+The checklist is implemented on the feature branch. The original observations
+below remain historical evidence; real-agent comparison is still pending.
 
-- [ ] **Moving between testing and the coordinator is cumbersome.** The user
+- [x] **Moving between testing and the coordinator is cumbersome.** The user
   must return to this chat to report results. Navigation worked; returning to
   chat must not be interpreted as selecting the wrong test session. Make the
   coordinator easy to identify and return to while preserving worker context.
-- [ ] **Secondary popups look bland.** Bring batch setup, launch, recovery and
+- [x] **Secondary popups look bland.** Bring batch setup, launch, recovery and
   integration into the approved Cockpit's Rosé Pine (not Moon) visual language.
   Improve hierarchy, spacing, focus and action styling.
-- [ ] **Form editing and focus are unclear.** Short name, branch and multiline
+- [x] **Form editing and focus are unclear.** Short name, branch and multiline
   task navigation need obvious controls. The global Enter-newline hint is
   misleading outside Task. Destination entry also felt copy/paste-only; this
   is user-reported friction, not a reproduced keyboard-input failure.
-- [ ] **Expose destination choices.** Offer selectable existing branches and
+- [x] **Expose destination choices.** Offer selectable existing branches and
   checkouts, showing branch and directory together, instead of requiring a
   memorized branch name or batch ID. Explain branch-vs-path mistakes clearly.
-- [ ] **Make Preview, Back and Close discoverable.** Enter retrying an invalid
+- [x] **Make Preview, Back and Close discoverable.** Enter retrying an invalid
   preview and nested Escape behavior felt like a trap. Cancellation failure
   itself has not been independently reproduced.
-- [ ] **Repair activity and attention signals.** A worker that had committed
+- [x] **Repair activity and attention signals.** A worker that had committed
   its result still displayed process-derived RUNNING without a completion or
   review signal. Repeated Hook failed messages also remain unresolved (see
   ticket 19). Their causal relationship to this worker's state is unproven.
   Distinguish a live process from active work, input needed and review readiness.
-- [ ] **Make progress and completion unmistakable.** Launch, recovery and
+- [x] **Make progress and completion unmistakable.** Launch, recovery and
   integration need clear action/result feedback. After integration the screen
   still looked like a preview with an old destination commit. Show the actual
   result prominently and provide visible next actions, keeping integration
@@ -39,14 +40,14 @@ Suggested treatments below are follow-up proposals, not completed fixes.
 
 Additional observed failures and continuity questions:
 
-- [ ] Runtime files disappeared when the development checkout returned to main.
+- [x] Runtime files disappeared when the development checkout returned to main.
   Stable preview loading mitigates exit 127; durable installation remains open.
-- [ ] Recovery opened Codex but did not visibly deliver the supplied task,
+- [x] Recovery opened Codex but did not visibly deliver the supplied task,
   despite a sent receipt. Manual pasting was required. Startup readiness is a
   hypothesis, not a confirmed root cause.
-- [ ] Launch presented an ERROR alongside successful creation/task transmission;
+- [x] Launch presented an ERROR alongside successful creation/task transmission;
   clarify transport success, unknown acceptance and actual failure.
-- [ ] Review recovery continuity: window name changed, launch used the requesting
+- [x] Review recovery continuity: window name changed, launch used the requesting
   chat session, and blank batch association required a fresh destination choice.
   These observations are not all established defects or promises to add state.
 
@@ -213,3 +214,40 @@ Configured-adapter fixtures now execute under controlled terminal ancestors and
 reject external callers, packaged backends and nested independent agents.
 The installed `codex --help` confirms --no-daemon support; existing shared-daemon
 sessions are intentionally not rebound or restarted automatically.
+
+## Final automated receipt and installed test setup
+
+Implementation commits: 0764174, f194371, 0ba6efd, followed by the shortcut
+collision correction (prefix + G preserves tmux's existing prefix + C).
+
+- 43 Rust tests, formatting and diff checks pass.
+- Every tests/run.sh phase executed. The initial pass exposed stale action-label
+  assertions, a real Finish title bug and an auto-refresh timing assertion.
+  Corrections and the exact failed scenarios pass on focused rerun; the suite
+  was resumed rather than represented as one uninterrupted green invocation.
+- 16 launch, 18 recovery, 24 integration, 17 conflict and 10 verification tests
+  pass; promotion/cleanup and global Cockpit failures were corrected and rerun.
+- 43 lifecycle tests pass, including configured hooks under actual controlled
+  ancestry, unrelated/backends/nested rejection and automatic overview refresh.
+- Navigation, screenshot, four status layouts, settings, privacy, packaging,
+  release workflow and runtime migration/removal checks pass. One optional
+  tmux-resurrect test was skipped. The new shortcut also passes a two-client
+  physical-key regression preserving tmux's native customization binding.
+- Release build passes. Both assembled acceptance routes pass: 3 pinned workers,
+  2 clients, recovery, conflict Abort/Continue, checks, promotion where selected,
+  and guarded cleanup. Controlled agents only; no real service launched.
+- Standards crosscheck: no remaining findings. Spec crosscheck: no remaining
+  findings after correcting provenance, stale verification and path guidance.
+- Actual action-screen captures: /tmp/drudwyn-feedback-ui/index.html (temporary,
+  synthetic fixtures only). Main remains clean at eaf2446; no merge or push.
+
+The stable runtime is ~/.local/share/drudwyn/runtime/current; SOURCE identifies
+its implementation commit. Only existing Drudwyn loader/hook paths were updated,
+with timestamped config backups. Existing agent conversations were not restarted.
+Shared-daemon hook events remain unprovable; new managed workers use --no-daemon.
+
+[Repeat comparison](../../docs/specs/2026-10-04-worktree-feedback-comparison.md)
+records the same ce51f1e starting commit and tasks in a fresh disposable checkout,
+with a detached drudwyn-compare session and registered plan coordinator. The
+original playground, worker and integrated result remain intact. Live task
+acceptance, signals and visual judgement are explicitly pending this repeat.

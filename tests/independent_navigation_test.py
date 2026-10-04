@@ -60,6 +60,23 @@ class IndependentNavigation(unittest.TestCase):
         self.assertTrue(self.selection(self.clients[0]).endswith(':'+self.worker))
         self.assertEqual(self.selection(self.clients[1]), other)
 
+    def test_coordinator_shortcut_preserves_native_customization_and_other_client(self):
+        self.command('coordinator','set','--window',self.home,client=self.clients[0])
+        session=self.tmux('display-message','-p','-t',self.home,'#{session_id}')
+        self.tmux('set','-w','-t',self.worker,'@drudwyn_project',session)
+        self.tmux('run-shell',str(ROOT/'tmux-drudwyn.tmux'))
+        self.assertIn('customize-mode',self.tmux('list-keys','-T','prefix','C'))
+        self.assertIn('coordinator-toggle.sh',self.tmux('list-keys','-T','prefix','G'))
+        self.command('navigate','--window',self.worker,client=self.clients[0])
+        other=self.selection(self.clients[1])
+        for target in [self.home,self.worker]:
+            os.write(self.client_fds[self.clients[0]],b'\x02G')
+            deadline=time.monotonic()+4
+            while not self.selection(self.clients[0]).endswith(':'+target):
+                self.assertLess(time.monotonic(),deadline)
+                time.sleep(.02)
+            self.assertEqual(self.selection(self.clients[1]),other)
+
     def worker_hook(self, event):
         pane = self.tmux('display-message', '-p', '-t', self.worker, '#{pane_id}')
         subprocess.run([str(BIN), 'hook', 'codex', event], env={**self.env, 'TMUX_PANE': pane}, text=True, capture_output=True, check=True)

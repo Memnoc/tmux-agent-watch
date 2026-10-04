@@ -1,6 +1,6 @@
 # 19 — Codex hook ownership with daemon/helper processes
 
-Status: diagnosed; fix outstanding
+Status: managed-worker fix implemented and tested; live comparison pending
 Spec: docs/specs/2026-09-30-worktree-worker-workflow.md
 Baseline: 012ea44
 
@@ -43,3 +43,21 @@ Fix requirements:
 
 This receipt records diagnosis only. Do not mark the hook issue fixed based on
 popup changes, visual proposals, or a bare successful scan.
+
+## October 4 implementation
+
+Ticket25 implements supported standalone ownership: default managed Codex starts
+with --no-daemon, and the configured adapter proves a unique agent ancestor,
+actual process cwd and PID/birth before updating its owning pane. Both identity
+and provenance are revalidated under the lifecycle guard. Packaged backend
+ancestry (including backend -> terminal-named child), independent nested agents,
+unrelated callers and unreadable cwd fail closed with an actionable diagnostic.
+The adapter emits neutral JSON for successful Stop hooks and never reads payloads.
+
+A cwd-only draft failed independent review and was replaced. Known backend
+executables no longer count as a second interactive worker during process scans;
+this classification alone never authorizes their hook events. Explicit custom
+commands remain unchanged. Existing shared-daemon conversations require a
+chosen restart for automatic signals; they are not silently attributed or killed.
+Linux controlled-adapter regressions and the 43-test lifecycle suite pass.
+Real Codex acceptance and activity are pending the same-task repeat test.

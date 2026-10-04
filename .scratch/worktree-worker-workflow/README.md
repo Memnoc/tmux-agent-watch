@@ -1,3 +1,11 @@
+Completed feedback implementation — 2026-10-04: [ticket25](25-live-worktree-test-findings.md)
+records all functional and UX fixes, automated receipts and the remaining live
+comparison. Managed Codex hook ownership is corrected in ticket19; shared-daemon
+sessions are deliberately unsupported until restarted. The installed runtime is
+independent of main/feature checkouts. [Repeat procedure](../../docs/specs/2026-10-04-worktree-feedback-comparison.md).
+
+The status entries below are historical checkpoints.
+
 Implementation resumed — 2026-10-04: Memnoc authorized all functional and UX
 feedback in [ticket25](25-live-worktree-test-findings.md), including ticket19.
 Baseline f530145; verification and independent crosscheck in progress.
