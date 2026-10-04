@@ -1,3 +1,7 @@
+Live test follow-up — 2026-10-04: [ticket25](25-live-worktree-test-findings.md)
+records runtime path repair, uncertain recovery task delivery and form UX findings.
+The hands-on test is still in progress.
+
 Latest checkpoint — 2026-10-04: work preserved on
 `work/worktree-worker-workflow` before returning to `main`.
 [ADR-0008](../../docs/adr/0008-worktree-worker-workflow-branch-checkpoint.md)
