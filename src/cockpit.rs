@@ -1980,6 +1980,13 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         render_summary(frame, app, body[1]);
     }
     render_footer(frame, app, layout[2]);
+    if app.batch_form.is_some() || app.task.is_some() {
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(app.theme.base)),
+            area,
+        );
+    }
     if let Some(form) = &app.batch_form {
         let mut lines = vec![
             Line::from("BATCH SETUP · Tab field · Enter preview/confirm · Esc cancel"),
@@ -2362,7 +2369,9 @@ fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &Integrat
             (CheckoutAction::Integrate, _, true) => "INTEGRATE PREVIEW",
             (CheckoutAction::Promote, _, true) => "PROMOTE PREVIEW",
             (CheckoutAction::Finish, _, true) => "FINISH PREVIEW",
-            (_, _, false) => "INTEGRATE · CHOOSE DESTINATION",
+            (CheckoutAction::Integrate, _, false) => "INTEGRATE · CHOOSE DESTINATION",
+            (CheckoutAction::Promote, _, false) => "PROMOTE · CHOOSE DESTINATION",
+            (CheckoutAction::Finish, _, false) => "FINISH · CHOOSE DESTINATION",
         }
     };
     let actions: &[(&str, &str)] = if finished && form.action == CheckoutAction::Finish {
@@ -2382,7 +2391,14 @@ fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &Integrat
         ]
     } else if form.preview.is_some() {
         &[
-            ("y", "Apply reviewed changes"),
+            (
+                "y",
+                match form.action {
+                    CheckoutAction::Integrate => "Integrate reviewed changes",
+                    CheckoutAction::Promote => "Promote reviewed changes",
+                    CheckoutAction::Finish => "Remove reviewed worktree",
+                },
+            ),
             ("e", "Destination"),
             ("PgUp/PgDn", "Scroll"),
             ("Esc", "cancel"),
@@ -2401,7 +2417,13 @@ fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &Integrat
             ("Esc", "Back to Cockpit"),
         ]
     };
-    let subtitle = if finished {
+    let subtitle = if form.action == CheckoutAction::Finish {
+        if finished {
+            "Checkout removed · branch retained"
+        } else {
+            "Choose the branch that must already contain this work"
+        }
+    } else if finished {
         "Changes applied · verification is a separate step"
     } else if form.preview.is_some() {
         "Review before applying · original worktree retained"

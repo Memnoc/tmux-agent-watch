@@ -61,6 +61,19 @@ cleanup_sidebars() {
 }
 
 cleanup_plugin_hooks
+# A runtime-location migration also moves the observer. Only stop the recorded
+# PID when its command still belongs to the previous Drudwyn installation.
+if [ -n "$PREVIOUS_PLUGIN_DIR" ] && [ "$PREVIOUS_PLUGIN_DIR" != "$PLUGIN_DIR" ]; then
+  previous_watcher="$(tmux show-option -gqv @drudwyn_watcher_pid 2>/dev/null || true)"
+  if [ -n "$previous_watcher" ]; then
+    case "$(ps -p "$previous_watcher" -o args= 2>/dev/null || true)" in
+      *"$PREVIOUS_PLUGIN_DIR/scripts/start-watcher.sh"*)
+        kill -TERM "$previous_watcher" 2>/dev/null || true
+        tmux set-option -gu @drudwyn_watcher_pid
+        ;;
+    esac
+  fi
+fi
 install_window_formats
 if [ "$(option @drudwyn-sidebar off)" != on ]; then
   cleanup_sidebars
