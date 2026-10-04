@@ -1,3 +1,10 @@
+Latest checkpoint — 2026-10-04: work preserved on
+`work/worktree-worker-workflow` before returning to `main`.
+[ADR-0008](../../docs/adr/0008-worktree-worker-workflow-branch-checkpoint.md)
+is the consolidated recall record. Last implementation: `5a2c1d1`; tickets23/24
+add grouped agents and approved Balanced A status. Ticket19 remains open.
+The earlier updates and receipts below are historical.
+
 Latest update — 2026-10-01: the historical pause below was superseded by
 Memnoc's resume. Tickets12–15 and follow-up UI implementation are complete.
 [Ticket22](22-approved-navigation-layouts.md) records the approved Workspace/

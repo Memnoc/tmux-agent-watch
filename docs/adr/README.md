@@ -9,3 +9,4 @@
 | [0005](./0005-project-sessions-and-explicit-integration.md) | Share a project session and integrate workers explicitly | accepted | 2026-09-30 |
 | [0006](./0006-two-row-status-and-persistent-attention.md) | Use two informative status rows and persistent attention | accepted | 2026-09-30 |
 | [0007](./0007-global-cockpit-and-navigation-roles.md) | Use Cockpit for global supervision and navigators for movement | accepted | 2026-09-30 |
+| [0008](./0008-worktree-worker-workflow-branch-checkpoint.md) | Preserve the worktree worker workflow, approved interface and branch checkpoint | accepted | 2026-10-04 |
