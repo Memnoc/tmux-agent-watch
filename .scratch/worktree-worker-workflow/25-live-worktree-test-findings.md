@@ -58,3 +58,23 @@ the saved branch on2026-10-04 (2tests,25.121s), with controlled agents. This doe
 not establish real Codex input acceptance; the manual test found that gap.
 The live test is incomplete: no worker implementation or merge verified yet.
 User screenshots are the supplied evidence; no live conversation capture used.
+
+## Integration destination form — live feedback, 08:59
+
+After manual task submission, worker commit adb161d added greetings.py and two
+passing unittest cases. Worktree was clean; playground main remained ce51f1e.
+Process-derived RUNNING persisted, with no observed review/completion signal.
+
+Recovered worker integration required choosing the destination again. User
+reported difficulty entering a destination without copy/paste and leaving the
+menu. Screenshot085922 shows the checkout path entered in Destination branch,
+focus on Batch ID, and the generic exactly-one-checkout error. Enter retries
+preview; code handles Escape by returning to Cockpit. A keyboard cancellation
+failure has not been independently reproduced.
+
+Required UX follow-up: list eligible existing destination branches/checkouts
+with branch+path shown together; make explicit selection possible without typing
+or pasting identifiers. Retain fresh preview/confirmation and stale-target guards.
+Text entry, where retained, needs visible cursor/focus, branch-vs-path validation
+and a useful error example. Distinguish Preview, Back and Close; make nested Esc
+behavior obvious. Do not dismiss the discoverability problem as user error.
