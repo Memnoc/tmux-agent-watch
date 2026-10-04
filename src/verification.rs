@@ -392,6 +392,21 @@ pub fn inspect(path: &Path, redact: bool) -> Result<String, Error> {
 /// Run a user-selected shell program through transient stdin; inherit terminal
 /// output directly. Commands never become argv, files, history or tmux options.
 pub fn run(path: &Path, check: &str, command: &str, redact: bool) -> Result<(String, bool), Error> {
+    run_with_progress(path, check, command, redact, |report| {
+        println!("{report}");
+        Ok(())
+    })
+}
+
+/// The UI supplies presentation of the running receipt. Child output still goes
+/// straight to its terminal and is never read, buffered, or retained here.
+pub(crate) fn run_with_progress(
+    path: &Path,
+    check: &str,
+    command: &str,
+    redact: bool,
+    started: impl FnOnce(&str) -> std::io::Result<()>,
+) -> Result<(String, bool), Error> {
     if check.is_empty()
         || check.len() > 160
         || check.chars().any(char::is_control)
@@ -475,7 +490,7 @@ pub fn run(path: &Path, check: &str, command: &str, redact: bool) -> Result<(Str
     r.child = binding(child.id()).unwrap_or_default();
     write(&lock, &path, &r)?;
     drop(lock);
-    println!("{}", r.display(redact));
+    started(&r.display(redact))?;
     let sent = child
         .stdin
         .take()

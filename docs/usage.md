@@ -991,3 +991,14 @@ This observes a byte count, never terminal contents. A five-second timeout leave
 an uncertain result for inspection, not an automatic retry. Other platforms retain
 the previous delay. The controlled regression passes; real Codex acceptance still
 needs the next manual comparison and is never inferred from transport success.
+
+### Reading check output
+
+While a check runs, its name and folder appear above the command output. Rosé
+Pine colors and text distinguish Running, Passed, and Failed; the result also
+shows the exit code. Press **Enter** to return to the check form, then **F2** for
+revision and timing details. Command output streams directly to the terminal.
+
+Workspace activity labels occupy a padded column, so longer labels such as
+Ready to review stay separate from branch names. Selected rows use light text
+for readability.

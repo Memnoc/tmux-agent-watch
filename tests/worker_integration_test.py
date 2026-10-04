@@ -466,7 +466,7 @@ class WorkerIntegrationTest(IndependentNavigation):
         self.tmux('send-keys','-t',pane,'Tab')
         self.tmux('send-keys','-t',pane,'-l','true')
         self.tmux('send-keys','-t',pane,'F5')
-        self.wait_pane(pane,'Press Enter to return')
+        self.wait_pane(pane,'[Enter] Back to checks')
         self.tmux('send-keys','-t',pane,'Enter')
         self.wait_pane(pane,'CHECK MERGED CHANGES')
         self.tmux('send-keys','-t',pane,'Escape')

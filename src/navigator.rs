@@ -583,7 +583,7 @@ fn role(item: &Window) -> &str {
 }
 fn window_columns(width: usize) -> (usize, usize, usize, usize) {
     let tool = if width >= 72 { 14 } else { 0 };
-    let activity = if width >= 48 { 16 } else { 0 };
+    let activity = if width >= 48 { 20 } else { 0 };
     let branch = if width >= 100 { (width / 3).min(42) } else { 0 };
     let name = width.saturating_sub(tool + activity + branch + 2);
     (name, tool, activity, branch)
@@ -720,16 +720,14 @@ fn render_window_group(
             } else {
                 "SHELL"
             };
-            cells.push(Span::styled(
-                format!(" {label} "),
+            cells.push(ui::cell(
+                &format!(" {label}"),
+                activity,
                 if item.managed {
                     ui::activity_style(item.lifecycle, theme)
                 } else {
                     muted
                 },
-            ));
-            cells.push(Span::raw(
-                " ".repeat(activity.saturating_sub(label.len() + 2)),
             ));
         }
         if branch > 0 {
@@ -750,7 +748,7 @@ fn render_window_group(
         List::new(items)
             .highlight_spacing(ratatui::widgets::HighlightSpacing::Always)
             .highlight_symbol("▎ ")
-            .highlight_style(Style::default().bg(theme.selection())),
+            .highlight_style(Style::default().bg(theme.selection()).fg(theme.text)),
         body,
         &mut state,
     );

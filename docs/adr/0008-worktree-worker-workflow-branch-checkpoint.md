@@ -169,3 +169,11 @@ regressions, privacy, packaging and both assembled release routes. Independent
 reviews found no remaining blockers. One optional session-restore test was skipped.
 The stable runtime snapshot can be updated without switching or modifying main.
 See ticket26 for exact receipts and the remaining live acceptance distinction.
+
+## October 4 check-output and spacing follow-up
+
+[Ticket27](../../.scratch/worktree-worker-workflow/27-check-output-and-label-spacing.md)
+polishes the live check output with themed status headings, clear output/result
+separation and return guidance. Technical receipt fields remain in Details; child
+output continues directly to the terminal without capture or storage. Workspace
+activity labels have bounded padded columns and readable selection contrast.

@@ -1700,10 +1700,17 @@ fn event_loop(
                     execute!(
                         terminal.backend_mut(),
                         DisableBracketedPaste,
-                        LeaveAlternateScreen
+                        LeaveAlternateScreen,
+                        crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                        crossterm::cursor::MoveTo(0, 0)
                     )?;
-                    let result =
-                        crate::verification::run(&path, &check, &command, app.config.redact_labels);
+                    let result = crate::verification::run_with_progress(
+                        &path,
+                        &check,
+                        &command,
+                        app.config.redact_labels,
+                        |report| print_check_output(report, app.theme, false),
+                    );
                     let status = match result {
                         Ok((text, _)) => text,
                         Err(e) => {
@@ -1714,7 +1721,7 @@ fn event_loop(
                             }
                         }
                     };
-                    println!("{status}\nPress Enter to return to verification.");
+                    print_check_output(&status, app.theme, true)?;
                     enable_raw_mode()?;
                     loop {
                         if matches!(event::read()?, Event::Key(k) if k.code == KeyCode::Enter) {
@@ -2745,6 +2752,101 @@ fn render_launch(frame: &mut ratatui::Frame<'_>, app: &App, task: &str) {
             ),
         );
     }
+}
+
+/// Style supervisor metadata around directly inherited command output. No child
+/// output is captured; details remain in the returning check form.
+fn print_check_output(report: &str, theme: Theme, finished: bool) -> io::Result<()> {
+    use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
+    use std::io::Write;
+    let color = |value| match value {
+        ratatui::style::Color::Rgb(r, g, b) => Color::Rgb { r, g, b },
+        _ => Color::Reset,
+    };
+    let mut out = io::stdout().lock();
+    let width = crossterm::terminal::size()
+        .map(|s| s.0)
+        .unwrap_or(80)
+        .saturating_sub(4)
+        .min(76);
+    let rule = "─".repeat(width as usize);
+    // A leading newline also separates a command that ended without one.
+    crossterm::queue!(
+        out,
+        ResetColor,
+        Print("\n"),
+        SetForegroundColor(color(theme.line())),
+        Print(format!("  {rule}\n"))
+    )?;
+    if !finished {
+        crossterm::queue!(
+            out,
+            SetForegroundColor(color(theme.accent())),
+            SetAttribute(Attribute::Bold),
+            Print("  Drudwyn / CHECK OUTPUT\n"),
+            SetAttribute(Attribute::Reset)
+        )?;
+    }
+    let state = report
+        .lines()
+        .find_map(|l| l.strip_prefix("Assembled verification: "));
+    let (symbol, tone) = match state {
+        Some("Passed") => ("[OK]", theme.foam()),
+        Some("Running") => ("[>]", theme.gold),
+        Some("Failed") => ("[!]", theme.love),
+        _ => ("[!]", theme.gold),
+    };
+    crossterm::queue!(
+        out,
+        SetForegroundColor(color(tone)),
+        SetAttribute(Attribute::Bold),
+        Print(format!(
+            "  {symbol} {}\n",
+            state.unwrap_or("Checks unavailable")
+        )),
+        SetAttribute(Attribute::Reset),
+        SetForegroundColor(color(theme.text))
+    )?;
+    if !finished {
+        for line in report
+            .lines()
+            .filter(|l| l.starts_with("Check:") || l.starts_with("Checkout:"))
+        {
+            let line =
+                line.replacen("Check:", "Check name:", 1)
+                    .replacen("Checkout:", "Folder:", 1);
+            for row in editor_rows(&line, 0, width.max(1) as usize).0 {
+                crossterm::queue!(out, Print(format!("  {row}\n")))?;
+            }
+        }
+        crossterm::queue!(
+            out,
+            SetForegroundColor(color(theme.subtle())),
+            Print("\n  COMMAND OUTPUT\n"),
+            ResetColor,
+            Print("\n")
+        )?;
+    } else {
+        if let Some(exit) = report.lines().find(|l| l.starts_with("Exit:")) {
+            crossterm::queue!(out, Print(format!("  {exit}\n")))?;
+        }
+        if state.is_none() {
+            crossterm::queue!(out, Print(format!("  {report}\n")))?;
+        }
+        crossterm::queue!(
+            out,
+            SetForegroundColor(color(theme.subtle())),
+            Print("  Result applies to the tested version.\n\n"),
+            SetForegroundColor(color(theme.rose)),
+            SetAttribute(Attribute::Bold),
+            Print("  [Enter] Back to checks"),
+            SetAttribute(Attribute::Reset),
+            SetForegroundColor(color(theme.subtle())),
+            Print("\n  F2 opens Details after returning.\n"),
+            ResetColor
+        )?;
+    }
+    out.flush()
 }
 
 /// Render the existing receipt as separate semantic lines. Internal identifiers

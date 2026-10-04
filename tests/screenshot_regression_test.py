@@ -7,6 +7,33 @@ from independent_navigation_test import IndependentNavigation, BIN
 
 
 class ScreenshotRegression(IndependentNavigation):
+    def test_review_activity_keeps_branch_padding_and_selected_contrast(self):
+        self.tmux("set-environment", "-gu", "NO_COLOR")
+        self.worker_hook('stop')
+        pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project',
+                         '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'navigator')
+        for width in (200, 160):
+            self.tmux('resize-window', '-t', pane, '-x', str(width), '-y', '40')
+            screen = self.wait_pane(pane, 'READY TO REVIEW')
+            row = next(line for line in screen.splitlines() if 'READY TO REVIEW' in line and 'main' in line)
+            self.assertRegex(row, r'READY TO REVIEW {2,}main')
+            header = next(line for line in screen.splitlines() if 'ACTIVITY' in line and 'BRANCH' in line)
+            self.assertEqual(row.index('main'), header.index('BRANCH'))
+
+        self.tmux('send-keys', '-t', pane, '/')
+        self.tmux('send-keys', '-t', pane, '-l', 'worker')
+        self.tmux('send-keys', '-t', pane, 'Escape')
+        self.wait_pane(pane, '1 shown')
+        from terminal_cells import TerminalCells
+        cells = TerminalCells(160, 40)
+        raw = self.tmux('capture-pane', '-p', '-e', '-t', pane)
+        for y, line in enumerate(raw.splitlines()):
+            cells.feed(f'\x1b[{y+1};1H' + line)
+        y, row = next((y, line) for y, line in enumerate(cells.lines()) if 'READY TO REVIEW' in line and 'main' in line)
+        self.assertEqual(cells.styles[y][row.index('READY')][0], ('rgb', 224, 222, 244))
+        self.tmux('resize-window', '-t', pane, '-x', '64', '-y', '24')
+        self.wait_pane(pane, 'READY TO REVIEW')
+
     def four_workers(self, separate_repos=False):
         self.worker_hook('userPromptSubmit')
         workers = [self.worker]
