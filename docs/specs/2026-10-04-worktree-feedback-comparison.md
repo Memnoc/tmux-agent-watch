@@ -50,7 +50,7 @@ The original updater interruption cannot be recreated honestly unless it recurs.
 | Activity | RUN persisted after completion; hooks failed | Greetings completion recorded as done, source hook, while the process remained running. Screenshot 11:48:23 confirms REVIEW on greetings under drudwyn-compare, 1 REVIEW in Cockpit and 1 NEED in the bar. |
 | Destination | Path pasted into branch field | Pending; branch+checkout picker and validation pass |
 | Integration progress/result | Quiet line under old preview | Screenshot 11:51:24 shows INTEGRATED in the correct comparison checkout at bc32dee. Intermediate progress was not independently observed in this live run. |
-| Assembled checks | Ran outside Drudwyn; no UI receipt | Ran through Drudwyn: 2 tests OK, exit 0, Passed receipt at bc32dee. Verification form renders receipt fields concatenated; return to Integrated still to be checked. |
+| Assembled checks | Ran outside Drudwyn; no UI receipt | Ran through Drudwyn: 2 tests OK, exit 0, Passed receipt at bc32dee. Verification form renders receipt fields concatenated; Screenshot 11:59:02 confirms Passed remains visible when integration is reopened. |
 | Recovery continuity | Name/project/batch uncertain | Pending; retained identity and explicit missing-metadata paths pass |
 | Secondary popup styling | Bland, weak hierarchy | User reports much improved appearance; asks for clearer labels, separation and contextual guidance. |
 
@@ -157,3 +157,43 @@ of lost input. Make this intentional clearing understandable in contextual help.
 The first screenshot is partially occluded by the desktop launcher, but the test
 count, OK, Passed and exit 0 remain visible. No need to repeat checks for a clearer
 screenshot or infer failure from the result-formatting bug.
+
+## Live repeat checkpoint — completed route and plain language
+
+Screenshot 11:59:02 shows source and destination at bc32dee, Already contained,
+zero commits to integrate, and Assembled verification Passed with exit 0. This
+confirms the completed one-worker route and retained verification evidence on
+reopening integration. It does not establish the exact nested Esc return path.
+
+The user requests substantially less jargon and straightforward explanations.
+The process should be described as: start a task, let the agent make changes,
+check those changes, merge them into the chosen branch, then run checks on the
+merged result. Git worktree mechanics and internal receipt details need not be
+prerequisites for operating the common flow.
+
+Proposed copy direction for the next pass (not implemented yet):
+
+| Current wording | Plain-language direction |
+| --- | --- |
+| Start workspace | Start a task |
+| Source | Start from |
+| Destination | Merge into |
+| Batch setup / batch pinned | Explain the shared starting version and merge branch; avoid requiring users to learn batch terminology |
+| Integrate | Merge changes |
+| Already contained / no mutation needed | These changes are already merged |
+| Assembled verification | Check merged changes |
+| Check identity | Check name |
+| Command (transient) | Command to run; explain that it is cleared after use in help |
+| Reported worker checks: unknown | No check results reported by this worker |
+| RUNNING (process only) | Agent open; avoid implying active implementation |
+| REVIEW | Ready to review; never imply already approved |
+| Review token / raw refs and hashes / epoch timestamps | Put technical identifiers in Details; format user-facing times readably |
+
+The fresh integration screen also calls completed work INTEGRATE PREVIEW and
+still offers Integrate reviewed changes when there is nothing left to merge.
+The next pass should present an already-merged summary with relevant next actions.
+Likewise, Checks unknown near Assembled verification Passed appears contradictory;
+label worker-reported checks separately from checks actually run on merged code.
+Use visible choices and short field examples alongside these copy changes.
+No plain-language label may collapse agent completion, human review, merge and
+passing checks into a single success state.
