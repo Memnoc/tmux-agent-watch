@@ -39,6 +39,7 @@ case "${1:-}" in
     exec "$binary" settings --theme "${theme:-rose-pine}"
     ;;
   status-bar|status-action) command="$1"; shift; exec "$binary" "$command" "$@" ;;
+  coordinator) shift; exec "$binary" coordinator "$@" ;;
   navigate) shift; exec "$binary" navigate "$@" ;;
   status) exec "$binary" status ;;
   scan) exec "$binary" scan ;;
@@ -47,7 +48,7 @@ case "${1:-}" in
   workspace) shift; exec "$binary" workspace "$@" ;;
   hook)
     [ "$#" -ge 3 ] || { printf 'usage: %s hook AGENT EVENT\n' "$0" >&2; exit 2; }
-    exec "$binary" hook "$2" "$3"
+    shift; exec "$binary" hook "$@"
     ;;
   *)
     printf 'usage: %s cockpit|navigator|sessions|settings|status|scan|hook AGENT EVENT\n' "$0" >&2

@@ -30,6 +30,10 @@ pub enum LifecycleError {
     ChangedAgent,
     #[error("unsupported lifecycle event: {0}")]
     UnsupportedEvent(String),
+    #[error(
+        "Codex activity unavailable: session cwd has no unique live terminal (missing or ambiguous ownership). Open the worker and inspect its activity."
+    )]
+    CwdOwnership,
     #[error("could not serialize lifecycle updates: {0}")]
     Synchronization(String),
 }
@@ -115,11 +119,75 @@ fn processes() -> Result<Vec<Process>, LifecycleError> {
                 parent: f[1].into(),
                 birth: f[2..7].join("-"),
                 exited: matches!(f[7].as_bytes().first(), Some(b'Z' | b'X' | b'x')),
-                agent: AgentKind::from_command(f[8]),
+                agent: if packaged_codex_backend(f[0], f[8]) {
+                    None
+                } else {
+                    AgentKind::from_command(f[8])
+                },
             })
         })
         .collect())
 }
+// The standalone and daemon distributions contain different executables named
+// codex. Identify the backend by executable location, not argv or a blanket
+// "all descendants are one agent" rule. Independent nested CLIs stay ambiguous.
+fn packaged_codex_backend(pid: &str, command: &str) -> bool {
+    if AgentKind::from_command(command) != Some(AgentKind::Codex) {
+        return false;
+    }
+    let executable = fs::read_link(format!("/proc/{pid}/exe"))
+        .unwrap_or_else(|_| std::path::PathBuf::from(command));
+    let components: Vec<_> = executable.components().map(|c| c.as_os_str()).collect();
+    components
+        .windows(2)
+        .any(|w| w[0] == "packages" && w[1] == "app-server-daemon")
+        && executable.file_name().is_some_and(|n| n == "codex")
+}
+
+/// Codex runs command hooks in the session cwd, even when the daemon inherited
+/// another client's TMUX_PANE. Resolve a unique terminal by actual process cwd;
+/// never fall back to the inherited pane on zero or multiple matches.
+fn codex_cwd_pane() -> Result<String, LifecycleError> {
+    let cwd = env::current_dir()?.canonicalize()?;
+    let all = processes()?;
+    let rows = tmux_output(&[
+        "list-panes",
+        "-a",
+        "-F",
+        "#{pane_id}␟#{pane_pid}␟#{pane_dead}␟#{pane_current_path}",
+    ])?;
+    let mut candidates = std::collections::BTreeSet::new();
+    for row in rows.lines() {
+        let f: Vec<_> = row.split(SEPARATOR).collect();
+        if f.len() != 4 || f[2] != "0" {
+            continue;
+        }
+        let agents: Vec<_> = all
+            .iter()
+            .filter(|p| !p.exited && p.agent.is_some() && belongs_to(p, f[1], &all))
+            .collect();
+        for p in agents.iter().filter(|p| p.agent == Some(AgentKind::Codex)) {
+            let path = fs::read_link(format!("/proc/{}/cwd", p.pid))
+                .unwrap_or_else(|_| std::path::PathBuf::from(f[3]));
+            if path.canonicalize().ok().as_ref() == Some(&cwd) {
+                if agents.len() != 1 {
+                    return Err(LifecycleError::CwdOwnership);
+                }
+                candidates.insert(f[0].to_owned());
+            }
+        }
+    }
+    if candidates.len() != 1 {
+        return Err(LifecycleError::CwdOwnership);
+    }
+    Ok(candidates.into_iter().next().unwrap())
+}
+
+pub fn codex_session_hook(event: &str) -> Result<(), LifecycleError> {
+    let pane = codex_cwd_pane()?;
+    apply_hook(AgentKind::Codex, event, &pane, true)
+}
+
 fn belongs_to(process: &Process, root: &str, all: &[Process]) -> bool {
     let mut current = process;
     for _ in 0..128 {
@@ -414,13 +482,25 @@ pub fn starting(pane: &str, pid: &str, agent: Option<AgentKind>) -> Result<(), L
 }
 
 pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
+    let pane = env::var("TMUX_PANE").map_err(|_| LifecycleError::MissingPane)?;
+    apply_hook(agent, event, &pane, false)
+}
+
+fn apply_hook(
+    agent: AgentKind,
+    event: &str,
+    pane: &str,
+    session_cwd: bool,
+) -> Result<(), LifecycleError> {
     let lifecycle = map_event(agent, event)
         .ok_or_else(|| LifecycleError::UnsupportedEvent(event.to_owned()))?;
-    let pane = env::var("TMUX_PANE").map_err(|_| LifecycleError::MissingPane)?;
     // Bind before contention can replace the worker. This is an observation of
     // the pane's unique agent, not proof of the caller's identity or event time.
     let observed = observe_hook_target(&pane, agent)?;
     let guard = LifecycleGuard::acquire()?;
+    if session_cwd && codex_cwd_pane()? != pane {
+        return Err(LifecycleError::ChangedAgent);
+    }
     let current = observe_hook_target(&pane, agent)?;
     if observed.identity != current.identity || observed.root_birth != current.root_birth {
         return Err(LifecycleError::ChangedAgent);

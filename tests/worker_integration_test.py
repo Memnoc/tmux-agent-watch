@@ -402,6 +402,25 @@ class WorkerIntegrationTest(IndependentNavigation):
         self.tmux('send-keys', '-t', pane, 'i')
         return pane
 
+    def test_destination_picker_and_prominent_result(self):
+        self.tmux('set', '-wu', '-t', self.worker, '@drudwyn_batch')
+        pane = self.integration_ui()
+        screen = self.wait_pane(pane, 'CHOOSE DESTINATION')
+        self.assertIn('main', screen)
+        self.assertIn(str(self.repo), screen)
+        self.tmux('send-keys', '-t', pane, 'Enter')
+        self.wait_pane(pane, 'INTEGRATE PREVIEW')
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.base)
+        self.tmux('send-keys', '-t', pane, 'y')
+        screen = self.wait_pane(pane, 'INTEGRATED')
+        self.assertIn(self.commit[:12], screen)
+        self.assertNotIn('INTEGRATE PREVIEW', screen)
+        self.assertIn('Verify', screen)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.commit)
+        self.tmux('send-keys', '-t', pane, 'v')
+        screen = self.wait_pane(pane, 'ASSEMBLED VERIFICATION')
+        self.assertIn(str(self.repo), screen)
+
     def test_cockpit_preview_cancel_and_apply_preserves_both_client_selections(self):
         before = [self.selection(c) for c in self.clients]
         pane = self.integration_ui()
@@ -464,7 +483,7 @@ class WorkerIntegrationTest(IndependentNavigation):
         self.git('commit', '-qm', 'many files', path=self.source)
         pane = self.integration_ui()
         self.wait_pane(pane, 'CHOOSE DESTINATION')
-        self.tmux('send-keys', '-t', pane, 'Enter')
+        self.tmux('send-keys', '-t', pane, 'e', 'Enter')
         self.wait_pane(pane, 'Choose exactly one')
         self.assertEqual(self.git('rev-parse', 'HEAD'), self.base)
         self.tmux('send-keys', '-t', pane, '-l', 'main')
@@ -473,7 +492,7 @@ class WorkerIntegrationTest(IndependentNavigation):
         self.tmux('resize-window', '-t', pane, '-x', '48', '-y', '24')
         for _ in range(16): self.tmux('send-keys', '-t', pane, 'PageDown')
         output = self.wait_pane(pane, '"worker.txt"')
-        self.assertIn('Esc cancel', output)
+        self.assertIn('cancel', output)
         Path('/tmp/drudwyn-ticket11-narrow-bottom.txt').write_text(output)
         self.tmux('send-keys', '-t', pane, 'Home')
         output = self.wait_pane(pane, 'refs/heads/worker')
@@ -485,6 +504,7 @@ class WorkerIntegrationTest(IndependentNavigation):
         self.tmux('set', '-g', '@drudwyn-redact-labels', 'on')
         pane = self.integration_ui()
         self.wait_pane(pane, 'CHOOSE DESTINATION')
+        self.tmux('send-keys', '-t', pane, 'e')
         self.tmux('send-keys', '-t', pane, '-l', 'main')
         self.tmux('send-keys', '-t', pane, 'Enter')
         output = self.wait_pane(pane, 'INTEGRATE PREVIEW')

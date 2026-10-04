@@ -108,3 +108,26 @@ cargo install --locked --path ~/.tmux/plugins/tmux-drudwyn
 Cargo normally installs to `~/.cargo/bin`. This does not replace an existing
 `target/release` build in the checkout. See [missing or old binaries](troubleshooting.md#missing-or-old-binary)
 if the shell and plugin appear to run different versions.
+
+## Keep the runtime independent of development branches
+
+A checkout installation uses scripts from that checkout. Switching it to a branch
+without those scripts can break live tmux bindings. To test development versions
+without this dependency, build and install a complete local snapshot:
+
+```sh
+cargo build --release --locked
+bash scripts/install-runtime.sh
+```
+
+The installer prints the stable tmux loader and agent-hook paths under
+`~/.local/share/drudwyn/runtime/current` (or `$XDG_DATA_HOME`). Use the printed
+loader in your tmux configuration in place of the development-checkout loader,
+and point existing Drudwyn agent hooks at the printed scripts directory. Reload
+tmux and restart Drudwyn's watcher after updating the snapshot. Reopen existing
+popups. The script does not edit your configuration or start agent services.
+
+Snapshots contain the matching binary, scripts and assets, with an atomic
+`current` link. Failed installation leaves the previous snapshot selected.
+Previous snapshots are retained for rollback and for already-running processes.
+This stores installed application files only; it adds no workspace/task registry.

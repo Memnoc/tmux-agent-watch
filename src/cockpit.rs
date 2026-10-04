@@ -74,6 +74,7 @@ pub struct App {
     filter: String,
     filtering: bool,
     error: Option<String>,
+    notice: Option<String>,
     task: Option<String>,
     launch: LaunchForm,
     start_agent: usize,
@@ -170,11 +171,16 @@ struct IntegrationForm {
     field: usize,
     preview: Option<ActionPreview>,
     result: Option<String>,
+    result_head: String,
+    choices: Vec<crate::recovery::Checkout>,
+    choice: usize,
+    manual: bool,
     error: Option<String>,
     scroll: u16,
 }
 
 struct BatchForm {
+    cursors: [usize; 4],
     fields: [String; 4],
     selected: usize,
     reuse: bool,
@@ -197,6 +203,7 @@ impl App {
             filter: String::new(),
             filtering: false,
             error: None,
+            notice: None,
             task: None,
             launch: LaunchForm::default(),
             from_current: false,
@@ -406,6 +413,11 @@ impl App {
             id.clear();
             branch = self.config.base_branch.clone();
         }
+        let choices = crate::recovery::list(&source)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|c| c.path != source && c.unavailable.is_none() && c.branch != "(detached)")
+            .collect();
         self.integration = Some(IntegrationForm {
             action,
             anchor,
@@ -418,6 +430,10 @@ impl App {
             field: 0,
             preview: None,
             result: None,
+            result_head: String::new(),
+            choices,
+            choice: 0,
+            manual: false,
             error: selected.err().map(|e| e.to_string()),
             scroll: 0,
         });
@@ -467,7 +483,7 @@ impl App {
 
     fn integration_edit(&mut self, key: KeyCode, paste: Option<&str>) {
         if let Some(form) = &mut self.integration {
-            if form.preview.is_none() {
+            if form.preview.is_none() && form.manual {
                 edit_text(
                     &mut form.fields[form.field],
                     &mut form.cursors[form.field],
@@ -480,6 +496,13 @@ impl App {
     }
     fn integration_key(&mut self, key: KeyCode) {
         if key == KeyCode::Esc {
+            if let Some(form) = &mut self.integration {
+                if form.manual && form.preview.is_none() {
+                    form.manual = false;
+                    form.error = None;
+                    return;
+                }
+            }
             self.integration = None;
             self.begin_refresh();
             return;
@@ -487,6 +510,29 @@ impl App {
         let Some(form) = &mut self.integration else {
             return;
         };
+        if form.result.is_some() {
+            let path = match &form.preview {
+                Some(ActionPreview::Merge(p)) => Some(p.target.path.clone()),
+                _ => None,
+            };
+            if key == KeyCode::Char('v') {
+                if let Some(path) = path {
+                    let path = path.display().to_string();
+                    self.verification = Some(VerificationForm {
+                        cursors: [path.len(), 0, 0], fields: [path, String::new(), String::new()],
+                        field: 1, status: "Changes integrated. Choose a check name and command to verify this destination.".into(),
+                    });
+                }
+                return;
+            }
+            if key == KeyCode::Char('o') {
+                if let Some(path) = path {
+                    self.begin_recovery_at(path);
+                    self.integration = None;
+                }
+                return;
+            }
+        }
         if form.preview.is_some() {
             match key {
                 KeyCode::Char('y') if form.result.is_none() && form.error.is_none() => {
@@ -516,6 +562,11 @@ impl App {
                         Ok(result) => {
                             form.result = Some(result);
                             if let Some(ActionPreview::Merge(p)) = &form.preview {
+                                form.result_head =
+                                    workspace::git(&p.target.path, &["rev-parse", "HEAD"])
+                                        .unwrap_or_else(|_| "Unavailable; refresh".into());
+                            }
+                            if let Some(ActionPreview::Merge(p)) = &form.preview {
                                 form.verification = crate::verification::inspect(
                                     &p.target.path,
                                     self.config.redact_labels,
@@ -541,6 +592,7 @@ impl App {
                 KeyCode::Char('r') => self.integration_preview(),
                 KeyCode::Char('e') => {
                     form.preview = None;
+                    form.manual = false;
                     form.result = None;
                     form.error = None;
                     form.scroll = 0;
@@ -556,8 +608,28 @@ impl App {
             }
         } else {
             match key {
-                KeyCode::Enter => self.integration_preview(),
-                KeyCode::Tab | KeyCode::BackTab => form.field = 1 - form.field,
+                KeyCode::Char('e') if !form.manual => form.manual = true,
+                KeyCode::Up | KeyCode::Char('k') if !form.manual => {
+                    form.choice = form.choice.saturating_sub(1)
+                }
+                KeyCode::Down | KeyCode::Char('j') if !form.manual => {
+                    form.choice = (form.choice + 1).min(form.choices.len().saturating_sub(1))
+                }
+                KeyCode::Enter => {
+                    if !form.manual {
+                        let Some(choice) = form.choices.get(form.choice) else {
+                            form.error = Some(
+                                "No available destination checkout. Use Batch setup to create one."
+                                    .into(),
+                            );
+                            return;
+                        };
+                        form.fields = [choice.branch.clone(), String::new()];
+                        form.cursors = [form.fields[0].len(), 0];
+                    }
+                    self.integration_preview();
+                }
+                KeyCode::Tab | KeyCode::BackTab if form.manual => form.field = 1 - form.field,
                 _ => self.integration_edit(key, None),
             }
         }
@@ -682,7 +754,13 @@ impl App {
                     form.file = !form.task.is_empty();
                     form.cursors = [form.task.len(), 0];
                     form.field = 0;
-                    form.batch.clear();
+                    form.batch = form
+                        .checkouts
+                        .get(form.selected)
+                        .and_then(crate::recovery::context)
+                        .and_then(|c| c.batch)
+                        .unwrap_or_default();
+                    form.cursors[1] = form.batch.len();
                     form.error = None;
                 }
                 KeyCode::Enter => {
@@ -767,6 +845,7 @@ impl App {
 
     fn launch_worker(&mut self) -> io::Result<()> {
         self.error = None;
+        self.notice = None;
         if self.launch.name.trim().is_empty()
             || self.task.as_ref().is_none_or(|t| t.trim().is_empty())
         {
@@ -797,19 +876,32 @@ impl App {
                     self.launch.file,
                     Some(self.start_agent()),
                 );
-                self.error = Some(match sent {
-                    Ok(()) => format!(
-                        "Worker created; task sent; acceptance and implementation unknown. Open window {} to inspect.",
-                        created.window_id
-                    ),
-                    Err(error) => format!(
-                        "{error}; retained window {} pane {} and checkout {}. Open and inspect before deliberate delivery retry.",
-                        created.window_id,
-                        created.pane_id,
-                        created.path.display()
-                    ),
-                });
+                match sent {
+                    Ok(()) => {
+                        self.notice = Some(format!(
+                            "WORKER CREATED · task sent; acceptance unconfirmed. Select the worker and Enter to open. {}",
+                            created.window_id
+                        ))
+                    }
+                    Err(error) => {
+                        self.error = Some(format!(
+                            "{error}; retained window {} pane {} and checkout {}. Open and inspect before deliberate delivery retry.",
+                            created.window_id,
+                            created.pane_id,
+                            created.path.display()
+                        ))
+                    }
+                }
+                self.query = crate::inventory::Query::default();
+                self.filter.clear();
                 self.refresh();
+                if let Some(index) = self
+                    .visible
+                    .iter()
+                    .position(|i| self.workspaces[*i].identity.window_id == created.window_id)
+                {
+                    self.selected = index;
+                }
             }
             Err(error) => {
                 let message = error.to_string();
@@ -824,6 +916,7 @@ impl App {
 
     fn begin_batch(&mut self) {
         self.batch_form = Some(BatchForm {
+            cursors: [4, 0, 0, 0],
             fields: ["base".into(), String::new(), String::new(), String::new()],
             selected: 0,
             reuse: false,
@@ -847,12 +940,20 @@ impl App {
                 form.reuse = !form.reuse;
                 form.preview = None;
             }
-            KeyCode::Backspace => {
-                form.fields[form.selected].pop();
-                form.preview = None;
-            }
-            KeyCode::Char(c) => {
-                form.fields[form.selected].push(c);
+            KeyCode::Backspace
+            | KeyCode::Delete
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Home
+            | KeyCode::End
+            | KeyCode::Char(_) => {
+                edit_text(
+                    &mut form.fields[form.selected],
+                    &mut form.cursors[form.selected],
+                    key,
+                    None,
+                    false,
+                );
                 form.preview = None;
             }
             KeyCode::Enter => {
@@ -1349,12 +1450,36 @@ fn event_loop(
 ) -> Result<(), CockpitError> {
     loop {
         app.complete_refresh();
+        if !app.stale
+            && app.refreshed.elapsed() >= Duration::from_secs(3)
+            && app.task.is_none()
+            && app.batch_form.is_none()
+            && app.recovery.is_none()
+            && app.integration.is_none()
+            && app.conflict.is_none()
+            && app.verification.is_none()
+            && !app.details_open
+            && !app.filtering
+        {
+            app.begin_refresh();
+        }
         terminal.draw(|frame| render(frame, app))?;
         if !event::poll(Duration::from_millis(250))? {
             continue;
         }
         let input = event::read()?;
         if let Event::Paste(text) = &input {
+            if let Some(form) = &mut app.batch_form {
+                edit_text(
+                    &mut form.fields[form.selected],
+                    &mut form.cursors[form.selected],
+                    KeyCode::Null,
+                    Some(text),
+                    false,
+                );
+                form.preview = None;
+                continue;
+            }
             if app.verification.is_some() {
                 app.verification_edit(KeyCode::Null, Some(text));
                 continue;
@@ -1452,10 +1577,35 @@ fn event_loop(
             continue;
         }
         if app.integration.is_some() {
+            if key.code == KeyCode::Char('y')
+                && app
+                    .integration
+                    .as_ref()
+                    .is_some_and(|f| f.preview.is_some() && f.result.is_none() && f.error.is_none())
+            {
+                terminal.draw(|frame| {
+                    render_busy(
+                        frame,
+                        app,
+                        "INTEGRATING",
+                        "Applying the reviewed changes. Keep this window open.",
+                    )
+                })?;
+            }
             app.integration_key(key.code);
             continue;
         }
         if app.recovery.is_some() {
+            if key.code == KeyCode::F(6) {
+                terminal.draw(|frame| {
+                    render_busy(
+                        frame,
+                        app,
+                        "RESTARTING WORKER",
+                        "Opening the checkout and waiting for the agent editor.",
+                    )
+                })?;
+            }
             if app.recovery_key(key.code) {
                 return Ok(());
             }
@@ -1483,7 +1633,19 @@ fn event_loop(
                     app.from_current = !app.from_current;
                     app.resolve_start_point();
                 }
-                KeyCode::F(6) => app.launch_worker()?,
+                KeyCode::F(6) => {
+                    terminal.draw(|frame| {
+                        render_busy(
+                            frame,
+                            app,
+                            "STARTING WORKER",
+                            "Creating the worktree and waiting for the agent editor.",
+                        )
+                    })?;
+                    app.launch_worker()?;
+                }
+                KeyCode::Enter | KeyCode::Down if app.launch.field < 2 => app.launch.field += 1,
+                KeyCode::Up if app.launch.field == 1 => app.launch.field = 0,
                 KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     app.launch_edit(KeyCode::Home, None)
                 }
@@ -1659,14 +1821,19 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         frame.area(),
     );
     if let Some(form) = &app.verification {
-        let sections = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Min(1),
-            Constraint::Length(4),
-        ])
-        .split(frame.area());
-        frame.render_widget(Paragraph::new("ASSEMBLED VERIFICATION"), sections[0]);
-        let mut lines = vec![];
+        let body = action_screen(
+            frame,
+            app,
+            "ASSEMBLED VERIFICATION",
+            "Run checks against the integrated destination",
+            &[
+                ("Tab", "Field"),
+                ("F5", "Run visibly"),
+                ("F6", "Inspect evidence"),
+                ("Esc", "Back"),
+            ],
+        );
+        let mut lines = Vec::new();
         for (i, label) in [
             "Destination checkout",
             "Check identity",
@@ -1680,17 +1847,27 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             } else {
                 &form.fields[i]
             };
-            lines.push(format!(
-                "{} {label}: {value}",
-                if form.field == i { ">" } else { " " }
+            lines.push(Line::styled(
+                format!("{} {label}", if form.field == i { "›" } else { " " }),
+                Style::default().fg(app.theme.accent()),
             ));
+            lines.push(Line::styled(
+                format!("  {value}"),
+                if form.field == i {
+                    Style::default()
+                        .bg(app.theme.selection())
+                        .fg(app.theme.text)
+                } else {
+                    Style::default().fg(app.theme.subtle())
+                },
+            ));
+            lines.push(Line::default());
         }
-        lines.push(form.status.clone());
-        frame.render_widget(
-            Paragraph::new(lines.join("\n\n")).wrap(Wrap { trim: false }),
-            sections[1],
-        );
-        frame.render_widget(Paragraph::new("Tab fields · F5 Run visibly\nF6 Inspect live evidence · Esc back\nCommands use bash stdin; no shell history.").wrap(Wrap { trim: false }), sections[2]);
+        lines.push(Line::styled(
+            form.status.clone(),
+            Style::default().fg(app.theme.foam()),
+        ));
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), body);
         return;
     }
     if let Some(form) = &app.conflict {
@@ -1715,7 +1892,7 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         return;
     }
     let actions_height = overview_actions(app, area.width).len() as u16;
-    let footer_height = if let Some(error) = &app.error {
+    let footer_height = if let Some(error) = app.error.as_ref().or(app.notice.as_ref()) {
         let lines = (error.chars().count() + 10).div_ceil((area.width as usize / 2).max(1));
         (lines as u16 + actions_height + 1)
             .min(area.height.saturating_sub(5))
@@ -1777,9 +1954,14 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 if i == form.selected { ">" } else { " " },
                 label,
                 if app.config.redact_labels {
-                    "[redacted]"
+                    "[redacted]".to_owned()
                 } else {
-                    &form.fields[i]
+                    input_view(
+                        &form.fields[i],
+                        form.cursors[i],
+                        54.min(area.width.saturating_sub(46)) as usize,
+                    )
+                    .0
                 }
             )));
         }
@@ -1805,12 +1987,34 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                 error.clone()
             }));
         }
-        let modal = centered(area, 110, 23);
+        for (i, line) in lines.iter_mut().enumerate() {
+            *line = line.clone().style(if i == 0 {
+                Style::default()
+                    .fg(app.theme.accent())
+                    .add_modifier(Modifier::BOLD)
+            } else if i == form.selected + 2 {
+                Style::default()
+                    .bg(app.theme.selection())
+                    .fg(app.theme.text)
+            } else if i < 2 {
+                Style::default().fg(app.theme.foam())
+            } else {
+                Style::default().fg(app.theme.text)
+            });
+        }
+        let modal = centered(area, 110, 25);
         frame.render_widget(Clear, modal);
         frame.render_widget(
             Paragraph::new(lines)
                 .wrap(Wrap { trim: false })
-                .block(Block::default().borders(Borders::ALL))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(ratatui::widgets::BorderType::Rounded)
+                        .border_style(Style::default().fg(app.theme.accent()))
+                        .padding(ratatui::widgets::Padding::new(2, 2, 1, 1))
+                        .title(" Drudwyn · Source & destination "),
+                )
                 .style(Style::default().bg(app.theme.base).fg(app.theme.text)),
             modal,
         );
@@ -1823,7 +2027,9 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         frame.render_widget(Clear, modal);
         frame.render_widget(
             Block::default()
-                .title("START WORKSPACE")
+                .title(" START WORKSPACE · Drudwyn ")
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .border_style(Style::default().fg(app.theme.accent()))
                 .borders(Borders::ALL)
                 .style(Style::default().bg(app.theme.base).fg(app.theme.text)),
             modal,
@@ -1885,7 +2091,25 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
             Line::from(format!("Agent {} · F4 change", app.start_agent().label())),
         ];
         lines.push(Line::from("Tab fields · F5 text/file · F6 start"));
-        lines.push(Line::from("Enter newline · Esc cancel"));
+        lines.push(Line::styled(
+            if app.launch.field < 2 {
+                "Enter / Down next field · Tab / Shift-Tab move · Esc cancel"
+            } else if app.launch.file {
+                "Task file path · Tab next field · Esc cancel"
+            } else {
+                "Enter newline · arrows edit · Tab next field · Esc cancel"
+            },
+            Style::default().fg(app.theme.foam()),
+        ));
+        for (i, line) in lines.iter_mut().take(2).enumerate() {
+            *line = line.clone().style(if app.launch.field == i {
+                Style::default()
+                    .bg(app.theme.selection())
+                    .fg(app.theme.text)
+            } else {
+                Style::default().fg(app.theme.subtle())
+            });
+        }
         let header = lines.len() as u16;
         frame.render_widget(
             Paragraph::new(lines),
@@ -1918,7 +2142,13 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
                         } else {
                             "Task · arrows/Home/End/PgUp/PgDn edit/review"
                         })
-                        .borders(Borders::ALL),
+                        .borders(Borders::ALL)
+                        .border_type(ratatui::widgets::BorderType::Rounded)
+                        .border_style(Style::default().fg(if app.launch.field == 2 {
+                            app.theme.foam()
+                        } else {
+                            app.theme.line()
+                        })),
                 ),
             editor,
         );
@@ -1956,19 +2186,22 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
 }
 
 fn render_conflict(frame: &mut ratatui::Frame<'_>, app: &App, form: &ConflictForm) {
-    let sections = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Min(1),
-        Constraint::Length(6),
-    ])
-    .split(frame.area());
-    frame.render_widget(
-        Paragraph::new("INTEGRATION CONFLICT").style(
-            Style::default()
-                .fg(app.theme.rose)
-                .add_modifier(Modifier::BOLD),
-        ),
-        sections[0],
+    let body = action_screen(
+        frame,
+        app,
+        "INTEGRATION CONFLICT",
+        "Coordinator handoff · resolve, continue or abort",
+        &[
+            ("c", "Continue"),
+            ("a", "Abort"),
+            ("o", "Open"),
+            ("v", "Recover agent"),
+            ("t", "Retry"),
+            ("r", "Refresh"),
+            ("p", "Use current project"),
+            ("PgUp/PgDn", "Scroll"),
+            ("Esc", "Back"),
+        ],
     );
     let mut text = String::new();
     if let Some(error) = &form.error {
@@ -1987,117 +2220,269 @@ fn render_conflict(frame: &mut ratatui::Frame<'_>, app: &App, form: &ConflictFor
     text.push_str("\nSent means transmitted, not accepted. Inspect before deliberate Retry.\n");
     let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
     let max = paragraph
-        .line_count(sections[1].width)
-        .saturating_sub(sections[1].height as usize) as u16;
-    frame.render_widget(paragraph.scroll((form.scroll.min(max), 0)), sections[1]);
-    frame.render_widget(Paragraph::new("c Continue · a Abort · o Open\nv Recover agent · t Retry · r Refresh\np Use current project · PgUp/PgDn · Esc back").wrap(Wrap { trim: false }).block(Block::default().borders(Borders::TOP)), sections[2]);
+        .line_count(body.width)
+        .saturating_sub(body.height as usize) as u16;
+    frame.render_widget(paragraph.scroll((form.scroll.min(max), 0)), body);
+}
+
+/// Shared frame for action screens: the same masthead, inset body and quiet
+/// borders as the inventory, with an always-visible keyboard action strip.
+fn action_screen(
+    frame: &mut ratatui::Frame<'_>,
+    app: &App,
+    title: &str,
+    subtitle: &str,
+    actions: &[(&str, &str)],
+) -> Rect {
+    let area = frame.area();
+    frame.render_widget(
+        Block::default().style(Style::default().bg(app.theme.base).fg(app.theme.text)),
+        area,
+    );
+    let inner = Rect::new(
+        area.x + 2,
+        area.y + 1,
+        area.width.saturating_sub(4),
+        area.height.saturating_sub(2),
+    );
+    let footer = ui::action_lines(&[actions], app.theme, inner.width);
+    let layout = Layout::vertical([
+        Constraint::Length(6),
+        Constraint::Min(1),
+        Constraint::Length(footer.len() as u16 + 2),
+    ])
+    .split(inner);
+    ui::masthead(frame, layout[0], app.theme, title, subtitle);
+    frame.render_widget(
+        Paragraph::new(footer).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(app.theme.line())),
+        ),
+        layout[2],
+    );
+    layout[1]
+}
+
+fn render_busy(frame: &mut ratatui::Frame<'_>, app: &App, title: &str, message: &str) {
+    let body = action_screen(frame, app, title, "IN PROGRESS", &[]);
+    frame.render_widget(
+        Paragraph::new(format!("  ◌  {message}"))
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(app.theme.gold)),
+        body,
+    );
 }
 
 fn render_integration(frame: &mut ratatui::Frame<'_>, app: &App, form: &IntegrationForm) {
-    let area = frame.area();
-    let sections = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Min(1),
-        Constraint::Length(3),
-    ])
-    .split(area);
-    let title = match (form.action, form.preview.is_some()) {
-        (CheckoutAction::Integrate, true) => "INTEGRATE PREVIEW",
-        (CheckoutAction::Integrate, false) => "INTEGRATE · CHOOSE DESTINATION",
-        (CheckoutAction::Promote, true) => "PROMOTE PREVIEW",
-        (CheckoutAction::Promote, false) => "PROMOTE · CHOOSE BASE",
-        (CheckoutAction::Finish, true) => "FINISH PREVIEW",
-        (CheckoutAction::Finish, false) => "FINISH · CHOOSE DESTINATION",
+    let finished = form.result.is_some();
+    let title = if form.error.is_some() && form.preview.is_some() {
+        "ACTION BLOCKED · REVIEW REQUIRED"
+    } else {
+        match (form.action, finished, form.preview.is_some()) {
+            (CheckoutAction::Integrate, true, _) => "INTEGRATED",
+            (CheckoutAction::Promote, true, _) => "PROMOTED",
+            (CheckoutAction::Finish, true, _) => "WORKTREE REMOVED",
+            (CheckoutAction::Integrate, _, true) => "INTEGRATE PREVIEW",
+            (CheckoutAction::Promote, _, true) => "PROMOTE PREVIEW",
+            (CheckoutAction::Finish, _, true) => "FINISH PREVIEW",
+            (_, _, false) => "INTEGRATE · CHOOSE DESTINATION",
+        }
     };
-    frame.render_widget(
-        Paragraph::new(title).style(
-            Style::default()
-                .fg(app.theme.rose)
-                .add_modifier(Modifier::BOLD),
-        ),
-        sections[0],
-    );
+    let actions: &[(&str, &str)] = if finished && form.action == CheckoutAction::Finish {
+        &[("Esc", "Back to Cockpit")]
+    } else if form.error.is_some() && form.preview.is_some() {
+        &[
+            ("r", "Refresh preview"),
+            ("e", "Destination"),
+            ("Esc", "Back to Cockpit"),
+        ]
+    } else if finished {
+        &[
+            ("o", "Open destination"),
+            ("v", "Verify"),
+            ("r", "Refresh"),
+            ("Esc", "Back to Cockpit"),
+        ]
+    } else if form.preview.is_some() {
+        &[
+            ("y", "Apply reviewed changes"),
+            ("e", "Destination"),
+            ("PgUp/PgDn", "Scroll"),
+            ("Esc", "cancel"),
+        ]
+    } else if form.manual {
+        &[
+            ("Tab", "Field"),
+            ("Enter", "Preview"),
+            ("Esc", "Back to choices"),
+        ]
+    } else {
+        &[
+            ("↑/↓", "Select"),
+            ("Enter", "Preview"),
+            ("e", "Type branch / batch"),
+            ("Esc", "Back to Cockpit"),
+        ]
+    };
+    let subtitle = if finished {
+        "Changes applied · verification is a separate step"
+    } else if form.preview.is_some() {
+        "Review before applying · original worktree retained"
+    } else {
+        "Select the branch that will receive this worker's changes"
+    };
+    let body = action_screen(frame, app, title, subtitle, actions);
     let redact = app.config.redact_labels;
-    let mut text = String::new();
-    if let Some(result) = &form.result {
-        text.push_str(&format!(
-            "{result}\nReviewed state below; r refreshes current ancestry.\n\n"
-        ));
-    }
+    let label = |v: &str| {
+        if redact {
+            "[redacted]".to_owned()
+        } else {
+            v.to_owned()
+        }
+    };
+    let mut lines = Vec::new();
     if let Some(error) = &form.error {
-        text.push_str(&format!(
-            "{}\n\n",
+        lines.push(Line::styled(
             if redact {
-                "Integration unavailable; inspect Git state or choose destination again"
+                "Action unavailable; inspect the selected checkout.".to_owned()
             } else {
-                error
-            }
+                error.clone()
+            },
+            Style::default().fg(app.theme.love),
         ));
+        lines.push(Line::default());
     }
-    if let Some(preview) = &form.preview {
-        text.push_str(&preview.display(redact));
-        if form.action != CheckoutAction::Finish {
-            text.push_str(&format!(
-                "Destination verification:\n{}\n",
-                form.verification
+    if finished {
+        lines.push(Line::styled(
+            if form.action == CheckoutAction::Finish {
+                "  ✓  Worktree removed · branch retained"
+            } else {
+                "  ✓  Changes integrated successfully"
+            },
+            Style::default()
+                .fg(app.theme.foam())
+                .add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::default());
+        if let Some(ActionPreview::Merge(p)) = &form.preview {
+            for (key, value) in [
+                ("Destination", label(&p.target.reference)),
+                ("Checkout", label(&p.target.path.display().to_string())),
+                ("Current commit", label(&form.result_head)),
+                ("Source included", label(&p.source.commit)),
+            ] {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("  {key:<17}"),
+                        Style::default().fg(app.theme.subtle()),
+                    ),
+                    Span::raw(value),
+                ]));
+            }
+            lines.push(Line::default());
+            lines.push(Line::from(format!(
+                "  Reviewed changes: {} file names · worker retained",
+                p.files.len()
+            )));
+            lines.push(Line::styled(
+                "  VERIFICATION",
+                Style::default().fg(app.theme.accent()),
             ));
-            text.push_str("Worktrees retained. No push, deployment or automatic cleanup.\n");
+            lines.extend(
+                form.verification
+                    .lines()
+                    .map(|l| Line::from(format!("  {l}"))),
+            );
+        }
+        if let Some(result) = &form.result {
+            lines.push(Line::from(result.clone()));
+        }
+    } else if let Some(preview) = &form.preview {
+        lines.extend(
+            preview
+                .display(redact)
+                .lines()
+                .map(|l| Line::from(l.to_owned())),
+        );
+        lines.extend(form.verification.lines().map(|l| Line::from(l.to_owned())));
+    } else if !form.manual {
+        if form.choices.is_empty() {
+            lines.push(Line::from(
+                "No eligible checkout. Use Batch setup to create a destination.",
+            ));
+        }
+        let start = form
+            .choice
+            .saturating_sub((body.height as usize / 3).saturating_sub(2));
+        for (i, choice) in form.choices.iter().enumerate().skip(start) {
+            let selected = i == form.choice;
+            lines.push(Line::styled(
+                format!(
+                    " {}  {}",
+                    if selected { "›" } else { " " },
+                    label(&choice.branch)
+                ),
+                if selected {
+                    Style::default()
+                        .bg(app.theme.selection())
+                        .fg(app.theme.text)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(app.theme.text)
+                },
+            ));
+            lines.push(Line::styled(
+                format!("    {}", label(&choice.path.display().to_string())),
+                Style::default().fg(app.theme.subtle()),
+            ));
+            lines.push(Line::default());
         }
     } else {
-        text.push_str("Select a destination branch OR a live batch ID.\nMissing metadata never implies a base branch.\n\n");
-        for (i, label) in ["Destination branch", "Batch ID"].iter().enumerate() {
-            let (value, _) = input_view(
+        lines.push(Line::from(
+            "Enter a branch name, for example main (not a directory path).",
+        ));
+        lines.push(Line::from(
+            "Or enter a live batch ID. Choose one field only.",
+        ));
+        lines.push(Line::default());
+        for (i, key) in ["Destination branch", "Batch ID"].iter().enumerate() {
+            let (value, col) = input_view(
                 &form.fields[i],
                 form.cursors[i],
-                sections[1].width.saturating_sub(23) as usize,
+                body.width.saturating_sub(24) as usize,
             );
-            text.push_str(&format!(
-                "{} {label}: {}\n",
-                if i == form.field { ">" } else { " " },
-                if redact && !value.is_empty() {
-                    "[redacted]"
+            let row = lines.len();
+            lines.push(Line::styled(
+                format!(
+                    "{} {key}: {}",
+                    if i == form.field { "›" } else { " " },
+                    label(&value)
+                ),
+                if i == form.field {
+                    Style::default()
+                        .bg(app.theme.selection())
+                        .fg(app.theme.text)
                 } else {
-                    &value
-                }
+                    Style::default().fg(app.theme.subtle())
+                },
             ));
+            if i == form.field && !redact && body.width > 24 {
+                frame.set_cursor_position((
+                    body.x + key.len() as u16 + 4 + col as u16,
+                    body.y + row as u16,
+                ));
+            }
         }
-        text.push_str("\nThe destination must already have one existing checkout.\nUse Batch setup to create/select one explicitly.\n");
     }
-    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
-    let max_scroll = paragraph
-        .line_count(sections[1].width)
-        .saturating_sub(sections[1].height as usize) as u16;
-    frame.render_widget(
-        paragraph.scroll((form.scroll.min(max_scroll), 0)),
-        sections[1],
-    );
-    let actions = if form.preview.is_none() {
-        "Tab field · Enter preview · Esc cancel"
-    } else if form.error.is_some() || form.result.is_some() {
-        "r refresh ancestry · e destination · PgUp/PgDn scroll · Esc back"
-    } else {
-        match form.action {
-            CheckoutAction::Integrate => {
-                "y integrate reviewed state · e destination · PgUp/PgDn scroll · Esc cancel"
-            }
-            CheckoutAction::Promote => {
-                "y promote reviewed state · e base · PgUp/PgDn scroll · Esc cancel"
-            }
-            CheckoutAction::Finish => {
-                "y remove worktree · branch retained · e destination · Esc cancel"
-            }
-        }
-    };
-    frame.render_widget(
-        Paragraph::new(actions)
-            .wrap(Wrap { trim: false })
-            .block(Block::default().borders(Borders::TOP)),
-        sections[2],
-    );
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let max = paragraph
+        .line_count(body.width)
+        .saturating_sub(body.height as usize) as u16;
+    frame.render_widget(paragraph.scroll((form.scroll.min(max), 0)), body);
 }
 
 fn render_recovery(frame: &mut ratatui::Frame<'_>, app: &App, form: &RecoveryForm) {
-    let area = frame.area();
     let private = |value: &str| {
         if app.config.redact_labels {
             "[redacted]".to_owned()
@@ -2105,37 +2490,86 @@ fn render_recovery(frame: &mut ratatui::Frame<'_>, app: &App, form: &RecoveryFor
             value.to_owned()
         }
     };
+    let actions: &[(&str, &str)] = if form.restart {
+        &[
+            ("Tab", "Field"),
+            ("F4", "Agent"),
+            ("F5", "Text / file"),
+            ("F6", "Restart"),
+            ("Esc", "Back to worktrees"),
+        ]
+    } else {
+        &[
+            ("j/k", "Select"),
+            ("Enter", "Open live"),
+            ("s", "Open shell"),
+            ("t", "Restart with task"),
+            ("c", "Recover coordinator"),
+            ("r", "Refresh"),
+            ("Esc", "Back to Cockpit"),
+        ]
+    };
+    let area = action_screen(
+        frame,
+        app,
+        if form.restart {
+            "RESTART WITH TASK"
+        } else {
+            "RECOVER WORKTREE"
+        },
+        if form.restart {
+            "Fresh conversation · files and branches preserved"
+        } else {
+            "Select a checkout to open or restart"
+        },
+        actions,
+    );
     if form.restart {
         let groups = Layout::vertical([
-            Constraint::Length(5),
+            Constraint::Length(3),
             Constraint::Min(3),
-            Constraint::Length(if area.width < 80 { 12 } else { 8 }),
+            Constraint::Length(5),
         ])
         .split(area);
+        let context = form
+            .checkouts
+            .get(form.selected)
+            .and_then(crate::recovery::context);
         frame.render_widget(
             Paragraph::new(vec![
-                Line::from("RESTART WITH TASK · Fresh conversation"),
-                Line::from("Conversation is not restored; no resume offered."),
-                Line::from("F4 agent · F5 text/reference · Tab task/batch"),
-                Line::from("F6 restart once · Esc cancel"),
-                Line::from(format!("Agent: {}", app.start_agent().command())),
-            ])
-            .wrap(Wrap { trim: false }),
+                Line::styled(
+                    format!(
+                        "{} {} · Enter adds a task line",
+                        app.agent_icon,
+                        app.start_agent().label()
+                    ),
+                    Style::default().fg(app.theme.accent()),
+                ),
+                Line::from(format!(
+                    "Workspace: {}",
+                    private(
+                        &context
+                            .as_ref()
+                            .map(|c| c.name.clone())
+                            .or_else(|| form.checkouts.get(form.selected).map(|c| c.branch.clone()))
+                            .unwrap_or_default()
+                    )
+                )),
+                Line::styled(
+                    "Conversation is not restored; no resume offered.",
+                    Style::default().fg(app.theme.subtle()),
+                ),
+            ]),
             groups[0],
         );
-        let label = if form.file {
-            "Task reference"
-        } else {
-            "Task (multiline)"
-        };
-        let text = if app.config.redact_labels {
-            "[redacted]".to_owned()
-        } else {
-            form.task.clone()
-        };
+        let text = private(&form.task);
         let (rows, line, col) = editor_rows(
             &text,
-            form.cursors[0].min(text.len()),
+            if app.config.redact_labels {
+                0
+            } else {
+                form.cursors[0]
+            },
             area.width.saturating_sub(2) as usize,
         );
         let height = groups[1].height.saturating_sub(2) as usize;
@@ -2147,86 +2581,146 @@ fn render_recovery(frame: &mut ratatui::Frame<'_>, app: &App, form: &RecoveryFor
                     .map(Line::from)
                     .collect::<Vec<_>>(),
             )
-            .block(Block::default().borders(Borders::ALL).title(label)),
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_style(Style::default().fg(if form.field == 0 {
+                        app.theme.foam()
+                    } else {
+                        app.theme.line()
+                    }))
+                    .title(if form.file {
+                        " Task reference "
+                    } else {
+                        " Task · multiline "
+                    }),
+            ),
             groups[1],
         );
-        if form.field == 0 && !app.config.redact_labels {
+        if form.field == 0 && !app.config.redact_labels && groups[1].height > 2 {
             frame.set_cursor_position((
                 groups[1].x + 1 + col as u16,
                 groups[1].y + 1 + (line - offset) as u16,
             ));
         }
+        let (value, col) = input_view(
+            &form.batch,
+            form.cursors[1],
+            area.width.saturating_sub(14) as usize,
+        );
         frame.render_widget(
             Paragraph::new(vec![
-                Line::from(format!(
-                    "{} Batch ID: {}",
-                    if form.field == 1 { ">" } else { " " },
-                    private(&form.batch)
-                )),
-                Line::from("Blank deliberately means no batch association."),
-                Line::from("Reselect batch after metadata loss; source/destination unknown."),
-                Line::from("Historical prompts, checks and exit: Unknown"),
-                Line::from(private(
-                    form.error
-                        .as_deref()
-                        .unwrap_or("Review the task and batch choice, then F6."),
-                )),
+                Line::styled(
+                    format!(
+                        "{} Batch ID: {}",
+                        if form.field == 1 { "›" } else { " " },
+                        private(&value)
+                    ),
+                    if form.field == 1 {
+                        Style::default()
+                            .bg(app.theme.selection())
+                            .fg(app.theme.text)
+                    } else {
+                        Style::default().fg(app.theme.subtle())
+                    },
+                ),
+                Line::from("Retained batch prefilled when available; blank means unassociated."),
+                Line::styled(
+                    private(
+                        form.error
+                            .as_deref()
+                            .unwrap_or("Review task and destination, then F6 restart once."),
+                    ),
+                    Style::default().fg(if form.error.is_some() {
+                        app.theme.love
+                    } else {
+                        app.theme.foam()
+                    }),
+                ),
             ])
             .wrap(Wrap { trim: false }),
             groups[2],
         );
-        return;
-    }
-    let groups = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(2),
-        Constraint::Length(if area.width < 80 { 12 } else { 8 }),
-    ])
-    .split(area);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from("RECOVER WORKTREE · selected repository"),
-            Line::from("j/k select · Enter open live · r refresh · Esc cancel"),
+        if form.field == 1 && !app.config.redact_labels && area.width > 14 {
+            frame.set_cursor_position((groups[2].x + 12 + col as u16, groups[2].y));
+        }
+    } else {
+        let groups = Layout::vertical([
+            Constraint::Min(2),
+            Constraint::Length(if area.width < 80 { 7 } else { 5 }),
         ])
-        .wrap(Wrap { trim: false }),
-        groups[0],
-    );
-    let rows: Vec<_> = form
-        .checkouts
-        .iter()
-        .map(|row| ListItem::new(format!("{} · {}", row.state(), private(&row.branch))))
-        .collect();
-    let mut selection =
-        ListState::default().with_selected((!rows.is_empty()).then_some(form.selected));
-    frame.render_stateful_widget(
-        List::new(rows)
-            .highlight_symbol("› ")
-            .highlight_style(Style::default().fg(app.theme.rose)),
-        groups[1],
-        &mut selection,
-    );
-    let detail = form
-        .checkouts
-        .get(form.selected)
-        .map(|r| r.display(app.config.redact_labels))
-        .unwrap_or_else(|| "No registered worktrees".into());
-    let lines = vec![
-        Line::from("s Open shell · t Restart with task"),
-        Line::from("c Recover coordinator shell"),
-        Line::from("Fresh agent does not restore a conversation."),
-        Line::from(detail),
-        Line::from(private(
-            form.error
-                .as_deref()
-                .unwrap_or("Files and branches are preserved."),
-        )),
-    ];
-    frame.render_widget(
-        Paragraph::new(lines)
+        .split(area);
+        let rows: Vec<_> = form
+            .checkouts
+            .iter()
+            .map(|row| {
+                ListItem::new(vec![
+                    Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "  {}  ",
+                                if row.live.is_empty() {
+                                    &app.shell_icon
+                                } else {
+                                    &app.agent_icon
+                                }
+                            ),
+                            Style::default().fg(app.theme.accent()),
+                        ),
+                        Span::raw(private(&row.branch)),
+                        Span::styled(
+                            format!("   {}", row.state()),
+                            Style::default().fg(app.theme.foam()),
+                        ),
+                    ]),
+                    Line::styled(
+                        format!("     {}", private(&row.path.display().to_string())),
+                        Style::default().fg(app.theme.subtle()),
+                    ),
+                    Line::default(),
+                ])
+            })
+            .collect();
+        let mut selection =
+            ListState::default().with_selected((!rows.is_empty()).then_some(form.selected));
+        frame.render_stateful_widget(
+            List::new(rows).highlight_symbol("› ").highlight_style(
+                Style::default()
+                    .bg(app.theme.selection())
+                    .fg(app.theme.text),
+            ),
+            groups[0],
+            &mut selection,
+        );
+        let detail = form
+            .checkouts
+            .get(form.selected)
+            .map(|r| r.display(app.config.redact_labels))
+            .unwrap_or_else(|| "No registered worktrees".into());
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(detail),
+                Line::styled(
+                    private(form.error.as_deref().unwrap_or(
+                        "Files and branches are preserved. Restart opens a fresh conversation.",
+                    )),
+                    Style::default().fg(if form.error.is_some() {
+                        app.theme.love
+                    } else {
+                        app.theme.subtle()
+                    }),
+                ),
+            ])
             .wrap(Wrap { trim: false })
-            .block(Block::default().borders(Borders::TOP)),
-        groups[2],
-    );
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(app.theme.line())),
+            ),
+            groups[1],
+        );
+    }
 }
 
 fn slug(value: &str) -> String {
@@ -2278,7 +2772,7 @@ fn render_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     } else if app.stale {
         "STALE: r retry"
     } else {
-        "Snapshot: r refresh"
+        "Snapshot: r refresh · auto 3s"
     };
     let mut stats = Line::from(vec![
         Span::raw("  "),
@@ -3033,7 +3527,7 @@ fn overview_actions(app: &App, width: u16) -> Vec<Line<'static>> {
         .chain(
             COCKPIT_ACTIONS
                 .iter()
-                .filter(|(key, _)| matches!(*key, "d" | "/")),
+                .filter(|(key, _)| matches!(*key, "d" | "/" | "c")),
         )
         .chain(std::iter::once(&("?", "Actions")))
         .chain(CLOSE_ACTION)
@@ -3078,7 +3572,7 @@ fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         return;
     }
 
-    if app.error.is_none() && app.filter.is_empty() {
+    if app.error.is_none() && app.notice.is_none() && app.filter.is_empty() {
         frame.render_widget(
             Paragraph::new(overview_actions(app, area.width))
                 .wrap(Wrap { trim: false })
@@ -3107,6 +3601,26 @@ fn render_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             .style(Style::default().fg(app.theme.love))
             .wrap(Wrap { trim: false })
             .block(Block::default().borders(Borders::TOP)),
+            area,
+        );
+        return;
+    }
+    if let Some(notice) = &app.notice {
+        let mut lines = overview_actions(app, area.width);
+        lines.push(Line::styled(
+            if app.config.redact_labels {
+                "WORKER CREATED · task sent; acceptance unconfirmed.".to_owned()
+            } else {
+                notice.clone()
+            },
+            Style::default().fg(app.theme.foam()),
+        ));
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(app.theme.line())),
+            ),
             area,
         );
         return;

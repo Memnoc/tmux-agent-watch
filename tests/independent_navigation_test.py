@@ -48,6 +48,18 @@ class IndependentNavigation(unittest.TestCase):
         self.client_fds = {}
         self.clients = [self.attach(), self.attach()]
 
+    def test_coordinator_toggle_returns_to_worker_in_requesting_client(self):
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        session = self.tmux('display-message', '-p', '-t', self.home, '#{session_id}')
+        self.tmux('set-option', '-w', '-t', self.worker, '@drudwyn_project', session)
+        self.command('navigate', '--window', self.worker, client=self.clients[0])
+        other = self.selection(self.clients[1])
+        self.command('coordinator', 'toggle', client=self.clients[0])
+        self.assertTrue(self.selection(self.clients[0]).endswith(':'+self.home))
+        self.command('coordinator', 'toggle', client=self.clients[0])
+        self.assertTrue(self.selection(self.clients[0]).endswith(':'+self.worker))
+        self.assertEqual(self.selection(self.clients[1]), other)
+
     def worker_hook(self, event):
         pane = self.tmux('display-message', '-p', '-t', self.worker, '#{pane_id}')
         subprocess.run([str(BIN), 'hook', 'codex', event], env={**self.env, 'TMUX_PANE': pane}, text=True, capture_output=True, check=True)

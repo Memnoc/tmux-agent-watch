@@ -167,7 +167,13 @@ pub struct Workspace {
 impl Workspace {
     pub fn process_label(&self) -> String {
         match self.process.as_str() {
-            "running" => "Running process".into(),
+            "running" => {
+                if self.evidence == EvidenceSource::Hook {
+                    "Running process".into()
+                } else {
+                    "Running process · task activity unconfirmed (no lifecycle signal)".into()
+                }
+            }
             "starting" => "Launch in progress".into(),
             "ambiguous" => "Ambiguous: multiple agents; ownership unknown".into(),
             "exited" => format!(

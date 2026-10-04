@@ -44,7 +44,13 @@ enum Command {
     /// Refresh live lifecycle metadata without reading terminal content.
     Scan,
     /// Receive a content-blind lifecycle event from an agent integration.
-    Hook { agent: AgentArg, event: String },
+    Hook {
+        agent: AgentArg,
+        event: String,
+        /// Route Codex daemon events by their session working directory.
+        #[arg(long)]
+        session_cwd: bool,
+    },
     /// Render the two-row local status bar with global attention.
     StatusBar {
         #[arg(long)]
@@ -166,6 +172,8 @@ enum SessionCommand {
 
 #[derive(Debug, Subcommand)]
 enum CoordinatorCommand {
+    /// Toggle between coordinator and the previous worker in this terminal.
+    Toggle,
     /// Choose an existing shell or agent in this project. Preserve its name.
     Set {
         #[arg(long)]
@@ -454,6 +462,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             result?;
         }
         Command::Coordinator { command } => match command {
+            CoordinatorCommand::Toggle => tmux_drudwyn::coordinator::toggle()?,
             CoordinatorCommand::Set { window, session } => {
                 tmux_drudwyn::coordinator::set(&window, session.as_deref())?
             }
@@ -503,7 +512,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::StatusAction { target } => tmux_drudwyn::status_bar::action(&target)?,
         Command::Scan => lifecycle::scan()?,
-        Command::Hook { agent, event } => lifecycle::hook(agent.into(), &event)?,
+        Command::Hook {
+            agent,
+            event,
+            session_cwd,
+        } => {
+            if session_cwd {
+                if !matches!(agent, AgentArg::Codex) {
+                    return Err("--session-cwd is only supported for Codex".into());
+                }
+                lifecycle::codex_session_hook(&event)?;
+            } else {
+                lifecycle::hook(agent.into(), &event)?;
+            }
+        }
         Command::Hud {
             mode,
             session,

@@ -605,8 +605,10 @@ fn remove_unused_start(repo: &Path, target: &Path, branch: &str, commit: &str) -
     .is_ok()
 }
 
-/// Bounded startup observation uses process metadata only. A matching executable
-/// is not proof of readiness/acceptance; the resulting receipt says only sent.
+/// Wait for both the expected process and its noncanonical, no-echo input mode.
+/// Terminal driver flags contain no screen content and prevent pasting into the
+/// canonical terminal before an interactive editor has initialized. It is not
+/// proof of task acceptance; the receipt still says only sent.
 pub fn send_started(
     started: &Started,
     task: &str,
@@ -616,14 +618,17 @@ pub fn send_started(
     let mut ready = agent.is_none();
     for _ in 0..30 {
         let pane = bound_target(&started.pane_id)?;
-        if agent.is_none() || crate::domain::AgentKind::from_command(&pane.command) == agent {
+        let input_mode = agent.is_none() || editor_ready(&started.pane_id)?;
+        if input_mode
+            && (agent.is_none() || crate::domain::AgentKind::from_command(&pane.command) == agent)
+        {
             ready = true;
             break;
         }
         thread::sleep(Duration::from_millis(100));
     }
     if !ready {
-        return Err(Error::Invalid("Worker created; startup delayed or process unrecognized; task NOT sent. Inspect the pane and deliberately deliver when ready".into()));
+        return Err(Error::Invalid("Worker created; editor not ready or process unrecognized; task NOT sent. Inspect the pane and deliberately deliver when ready".into()));
     }
     if file {
         validate_task_file(&started.path, task)?;
@@ -635,6 +640,27 @@ pub fn send_started(
     } else {
         deliver_task(&started.pane_id, task)
     }
+}
+
+fn editor_ready(pane: &str) -> Result<bool, Error> {
+    let tty =
+        tmux(Command::new("tmux").args(["display-message", "-p", "-t", pane, "#{pane_tty}"]))?;
+    let terminal = fs::File::open(tty)?;
+    let mode = Command::new("stty")
+        .arg("-a")
+        .env("LC_ALL", "C")
+        .stdin(Stdio::from(terminal))
+        .output()?;
+    if !mode.status.success() {
+        return Ok(false);
+    }
+    let flags = String::from_utf8_lossy(&mode.stdout);
+    let has = |flag| {
+        flags
+            .split(|c: char| c.is_whitespace() || c == ';')
+            .any(|f| f == flag)
+    };
+    Ok(has("-icanon") && has("-echo"))
 }
 
 /// Text is held only in this call and a uniquely named, delete-on-paste buffer.

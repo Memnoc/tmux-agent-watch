@@ -350,6 +350,17 @@ while True:
                 self.assertEqual(self.tmux('show-option', '-t', self.session, '-qv', '@drudwyn_coordinator'), self.coordinator)
                 self.assertEqual(self.tmux('list-buffers', '-F', '#{buffer_name}'), '')
 
+    def test_process_exists_before_editor_ready_does_not_lose_task(self):
+        agent, script = self.raw_receiver()
+        task = 'delayed editor must receive this complete task'
+        result = self.cli('workspace', 'start', '--repo', str(self.repo), '--batch', self.batch,
+                          '--task-stdin', 'slow-editor', str(agent), str(script), '1.5',
+                          input=task, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pane = self.tmux('list-panes', '-a', '-F', '#{pane_id}').splitlines()[-1]
+        output = self.wait(pane, 'HASH:')
+        self.assertIn(hashlib.sha256(task.encode()).hexdigest(), ''.join(output.split()))
+
     def test_delayed_start_waits_boundedly_and_requires_deliberate_delivery_after_timeout(self):
         agent, script = self.raw_receiver()
         for delay, sent in [(0.6, True), (4.5, False)]:

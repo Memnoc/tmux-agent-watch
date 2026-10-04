@@ -160,7 +160,7 @@ class VerificationTest(WorkerIntegrationTest):
         self.tmux('send-keys', '-t', pane, 'V')
         self.wait_pane(pane, 'ASSEMBLED VERIFICATION')
         self.tmux('resize-window', '-t', pane, '-x', '48', '-y', '24')
-        output = self.wait_pane(pane, 'F6 Inspect live evidence')
+        output = self.wait_pane(pane, 'Inspect evidence')
         self.assertIn('[redacted]', output)
         self.assertNotIn(str(self.repo), output)
         self.tmux('send-keys', '-t', pane, 'Escape')

@@ -915,3 +915,36 @@ visible count; the selected window stays included and `+N` opens the remaining
 windows. Padded tab labels and quiet dividers sit on a distinct surface colour.
 Git +/- and global NEED remain visible when space permits; safe-font mode uses
 text identities. This layout adds no blank terminal rows.
+
+## Live worktree feedback improvements (October 2026)
+
+- `prefix + C` switches from a worker to its coordinator, and back to that
+  terminal's previous worker. The bookmark lives only in tmux. An existing user
+  binding is preserved; choose `@drudwyn-coordinator-key` to use another key.
+- Launch has separate name, branch and multiline task fields. Enter or Down
+  advances from name/branch; Enter inserts a line in Task. Tab/Shift-Tab moves
+  between fields. The selected field is highlighted.
+- Startup waits for the agent's noncanonical, no-echo terminal editor before
+  sending. A timeout leaves the worktree/window available and the task unsent.
+  A sent receipt still does not prove acceptance. Inspect before deliberate retry.
+- Recovery preselects a surviving task-file reference and validated retained
+  batch, and preserves the worker name and project when the stopped window's
+  metadata agrees. Missing or conflicting metadata stays unknown. Text prompts
+  and conversations are not saved.
+- Integrate shows existing destination branches with their checkout directories.
+  Select with arrows and Enter to preview; `e` opens manual branch/batch entry.
+  The preview remains a separate confirmation before Git changes anything.
+- Applying changes shows an in-progress screen and then a separate Integrated
+  result with the destination's current commit. Open/recover the destination or
+  Verify from that result. A blocked action exposes Refresh and Destination.
+- The Cockpit overview refreshes in the background every three seconds. Editing,
+  details and reviewed actions stay fixed while open. Hook-backed Working,
+  Needs input and Review remain distinct from a merely running process.
+
+Codex's installed adapter routes events by the hook session's working directory,
+not a shared daemon's inherited pane. It requires exactly one live Codex terminal
+at that directory and revalidates its process lifetime before updating state.
+Two terminals in the same directory remain ambiguous; use distinct worktrees or
+inspect them directly. Known packaged app-server-daemon executables are backend
+processes, not additional interactive workers. Unknown process arrangements
+remain conservative. No hook payload or terminal content is read.

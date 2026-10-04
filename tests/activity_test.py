@@ -132,6 +132,59 @@ class Activity(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, 'fake worker was not reaped')
             time.sleep(.01)
 
+    def test_open_cockpit_refreshes_attention_without_manual_reload(self):
+        ui = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', str(BIN), 'cockpit')
+        self.tmux('resize-window', '-t', ui, '-x', '120', '-y', '40')
+        deadline = time.monotonic() + 5
+        while 'WORKSPACE COCKPIT' not in self.tmux('capture-pane', '-p', '-t', ui):
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.02)
+        self.cli('hook', 'codex', 'stop')
+        deadline = time.monotonic() + 5
+        while '1 REVIEW' not in self.tmux('capture-pane', '-p', '-t', ui):
+            self.assertLess(time.monotonic(), deadline, 'Cockpit kept the old activity snapshot')
+            time.sleep(.05)
+
+    def test_packaged_daemon_is_not_a_second_interactive_worker(self):
+        backend = self.path/'packages/app-server-daemon/releases/test/bin/codex'
+        backend.parent.mkdir(parents=True)
+        shutil.copy2(shutil.which('sleep'), backend)
+        script = self.path/'family.py'
+        script.write_text('import ctypes, subprocess, time\n'
+                          'ctypes.CDLL(None).prctl(15, b"codex", 0, 0, 0)\n'
+                          f'subprocess.Popen([{str(backend)!r}, "300"])\n'
+                          'time.sleep(300)\n')
+        self.tmux('respawn-pane', '-k', '-t', self.pane, '/usr/bin/python3', str(script))
+        self.wait_fake_agents(2)
+        result = subprocess.run([str(BIN), 'hook', 'codex', 'stop'], env=self.env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('REVIEW', self.cli('status'))
+        self.assertEqual(self.option('process'), 'running')
+
+    def test_codex_adapter_routes_cwd(self):
+        other = self.path/'other'; other.mkdir()
+        target = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-c', str(other), str(self.fake), '300')
+        target_window = self.tmux('display-message', '-p', '-t', target, '#{window_id}')
+        time.sleep(.1)
+        # The adapter inherits the daemon's old pane, but runs in the event cwd.
+        result = subprocess.run([str(ROOT/'scripts/codex-hook.sh'), 'stop'],
+                                env=dict(self.env, DRUDWYN_V2_BIN=str(BIN)), cwd=other,
+                                input='private payload ignored', capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.tmux('show-option', '-wqv', '-t', target_window, '@drudwyn_state'), 'done')
+        self.assertNotEqual(self.option('state'), 'done')
+        self.assertEqual(result.stdout.strip(), '{}')
+        # Two possible clients in the same cwd must never receive guessed state.
+        self.tmux('new-window', '-d', '-c', str(other), str(self.fake), '300')
+        time.sleep(.1)
+        result = subprocess.run([str(ROOT/'scripts/codex-hook.sh'), 'permissionRequest'],
+                                env=dict(self.env, DRUDWYN_V2_BIN=str(BIN)), cwd=other,
+                                input='ignored', capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('ambiguous', result.stderr.lower())
+        self.assertEqual(self.tmux('show-option', '-wqv', '-t', target_window, '@drudwyn_state'), 'done')
+
     def test_reaped_child_keeps_observed_exit_and_review(self):
         pid, reap = self.reaping_worker()
         self.cli('hook', 'codex', 'stop')

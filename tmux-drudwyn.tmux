@@ -79,6 +79,11 @@ tmux bind-key "$(option @drudwyn-help-key H)" display-popup -E -w 72 -h 24 \
 tmux bind-key "$(option @drudwyn-options-key O)" display-popup -EE -w 96 -h 30 \
   "$PLUGIN_DIR/scripts/settings.sh"
 if [ "$(option @drudwyn-v2 on)" = on ]; then
+  coordinator_key="$(option @drudwyn-coordinator-key C)"
+  coordinator_binding="$(tmux list-keys -T prefix "$coordinator_key" 2>/dev/null || true)"
+  case "$coordinator_binding" in
+    ''|*'/scripts/coordinator-toggle.sh '*) tmux bind-key "$coordinator_key" run-shell "$PLUGIN_DIR/scripts/coordinator-toggle.sh #{q:client_name}" ;;
+  esac
   tmux bind-key "$(option @drudwyn-worktree-key W)" run-shell \
     "$PLUGIN_DIR/scripts/navigation-popup.sh #{q:client_name} cockpit --start"
   tmux bind-key "$(option @drudwyn-cockpit-key P)" run-shell \

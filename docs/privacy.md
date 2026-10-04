@@ -212,3 +212,5 @@ window closure; it is never held during Git. Closure rechecks stable pane IDs,
 process births and cwd inodes, and a tmux-side pane-set comparison prevents a newly
 split/replaced pane being swept into the removal. No branch deletion, force
 removal, durable receipt, push or deployment is added.
+
+Startup additionally observes terminal driver flags (canonical input and echo), never screen text. The Codex adapter uses its own session cwd to disambiguate shared-daemon hooks and never parses their payload. Runtime snapshots contain application code/assets only. Coordinator return bookmarks are non-content window IDs scoped to the live tmux session and requesting client.

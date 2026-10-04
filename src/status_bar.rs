@@ -680,11 +680,7 @@ fn balanced(
             let icon = if w.is_agent() {
                 let configured = style.icon(w);
                 if configured.is_empty() {
-                    if style.nerd {
-                        "󰚩"
-                    } else {
-                        "A"
-                    }
+                    if style.nerd { "󰚩" } else { "A" }
                 } else {
                     configured
                 }

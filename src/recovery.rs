@@ -211,6 +211,56 @@ pub fn list(repo: &Path) -> Result<Vec<Checkout>, Error> {
     Ok(result)
 }
 
+/// Recover presentation and project continuity only from surviving tmux
+/// windows. Conflicting or absent metadata is deliberately not reconstructed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Context {
+    pub project: String,
+    pub name: String,
+    pub batch: Option<String>,
+}
+pub(crate) fn context(checkout: &Checkout) -> Option<Context> {
+    let mut result = None;
+    for window in &checkout.stopped {
+        let row = tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            window,
+            "#{window_name}␟#{@drudwyn_project}␟#{@drudwyn_batch}",
+        ])
+        .ok()?;
+        let f: Vec<_> = row.split('␟').collect();
+        if f.len() != 3 || f[1].is_empty() {
+            return None;
+        }
+        let repository = crate::coordinator::repository(&checkout.path).ok()?;
+        let recorded = tmux(&["show-option", "-qv", "-t", f[1], "@drudwyn_project_repo"]).ok()?;
+        if recorded != repository {
+            return None;
+        }
+        let batch = if f[2].is_empty() {
+            None
+        } else {
+            let b = crate::batch::load(f[2]).ok()?;
+            if b.project != f[1] || b.repository != repository {
+                return None;
+            }
+            Some(b.id)
+        };
+        let candidate = Context {
+            project: f[1].into(),
+            name: f[0].into(),
+            batch,
+        };
+        if result.as_ref().is_some_and(|old| old != &candidate) {
+            return None;
+        }
+        result = Some(candidate);
+    }
+    result
+}
+
 pub enum Task {
     None,
     Text(String),
@@ -236,7 +286,6 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
         ));
     }
     let client = crate::navigation::client()?;
-    let project = crate::coordinator::project(&crate::navigation::current_session()?)?;
     let repo = &request.repo;
     let path = &request.path;
     let select = || -> Result<Checkout, Error> {
@@ -257,6 +306,19 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
             })
     };
     let checkout = select()?;
+    let retained = context(&checkout);
+    let chosen_batch = request
+        .batch
+        .as_deref()
+        .map(crate::batch::load)
+        .transpose()?;
+    let project = if let Some(b) = &chosen_batch {
+        b.project.clone()
+    } else if let Some(retained) = &retained {
+        retained.project.clone()
+    } else {
+        crate::coordinator::project(&crate::navigation::current_session()?)?
+    };
     if let Some(reason) = checkout.unavailable {
         return Err(Error::Invalid(reason));
     }
@@ -305,11 +367,7 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
         .coordinator
         .then(|| crate::coordinator::missing(&project))
         .transpose()?;
-    let batch = request
-        .batch
-        .as_deref()
-        .map(crate::batch::load)
-        .transpose()?;
+    let batch = chosen_batch;
     if batch
         .as_ref()
         .is_some_and(|b| b.repository != identity || b.project != project)
@@ -352,7 +410,10 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
             name: if request.coordinator {
                 "Coordinator".into()
             } else {
-                checkout.branch
+                retained
+                    .as_ref()
+                    .map(|c| c.name.clone())
+                    .unwrap_or(checkout.branch)
             },
             command,
             project: Some(project.clone()),
@@ -399,6 +460,12 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
         _ => {}
     }
     crate::navigation::open_for(&client, Some(&started.window_id), None)?;
+    let message = if request.agent.is_some() {
+        "Worker restarted; task sent. Fresh conversation; acceptance unconfirmed. Prefix + C returns to coordinator."
+    } else {
+        "Workspace shell opened. Prefix + C returns to coordinator."
+    };
+    let _ = tmux(&["display-message", "-c", &client, "-d", "6000", message]);
     Ok(started)
 }
 

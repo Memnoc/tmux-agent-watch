@@ -1,3 +1,7 @@
+Implementation resumed — 2026-10-04: Memnoc authorized all functional and UX
+feedback in [ticket25](25-live-worktree-test-findings.md), including ticket19.
+Baseline f530145; verification and independent crosscheck in progress.
+
 Live test follow-up — 2026-10-04: [ticket25](25-live-worktree-test-findings.md)
 records runtime path repair, uncertain recovery task delivery and form UX findings.
 The hands-on test is still in progress.

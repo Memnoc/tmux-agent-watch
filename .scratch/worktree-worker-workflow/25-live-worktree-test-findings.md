@@ -165,3 +165,41 @@ recovered with failed automatic task handoff, implemented after manual delivery,
 and integrated successfully through Cockpit. Destination checks passed separately.
 Second prepared task not launched; live multi-worker integration and cleanup not
 yet exercised in this hands-on run. Automation's broader coverage remains separate.
+
+## Implementation pass — 2026-10-04
+
+Baseline: f530145. Memnoc authorized the entire functional and UX feedback set.
+Implementation and verification receipt is being completed on the existing
+feature branch; main is not the integration destination for this work.
+
+Public seams remain the specification's CLI, real isolated Git/tmux, controlled
+process families, and actual keyboard/rendered UI. New regressions reproduced:
+
+- A Codex-named process exists 1.5 seconds before initializing terminal input;
+  old delivery lost the task. Waiting for noncanonical/no-echo editor mode passes.
+- A packaged daemon executable below the visible Codex terminal caused false
+  ambiguity. Executable-location classification removes only that known backend.
+- A hook inherited another client's TMUX_PANE; the old adapter marked the wrong
+  worker. Routing by unique session cwd with process-lifetime revalidation passes.
+  Ambiguous same-cwd clients are rejected; no payload is inspected.
+- The destination screen offered no selectable main checkout. The picker now
+  exposes branch/path and still requires preview plus explicit apply.
+- Integration retained the preview presentation after success. The new result
+  shows the actual destination commit and offers verification of that checkout.
+- An open Cockpit kept stale lifecycle state. Passive overview refresh now shows
+  attention without manual reload; active forms and review targets stay frozen.
+- Coordinator/worker toggling affects only its requesting client.
+
+Hook working-directory semantics were checked against the official
+[Codex hook contract](https://learn.chatgpt.com/docs/hooks) on 2026-10-04: command
+hooks execute in their session cwd. The adapter emits the neutral JSON result
+required by Stop. Linux executable-location evidence identifies packaged Codex
+backends; unfamiliar layouts still require explicit diagnosis rather than folding
+all nested agents into one. This pass has not run real Codex services in tests.
+
+All action screens use Rosé Pine hierarchy, focus colour, spacing and keycaps.
+Recovery preserves validated surviving window/project identity and preselects the
+retained batch. Startup/recovery show progress, successful transmission is no
+longer a generic ERROR, and missing activity signals are explicitly explained.
+A complete local runtime snapshot survives development checkout removal, with
+atomic selection and retained prior snapshots.

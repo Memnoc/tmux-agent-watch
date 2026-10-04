@@ -187,3 +187,45 @@ pub fn launch_project(repo: &Path) -> io::Result<Option<String>> {
     }
     Ok(Some(project))
 }
+
+/// One shortcut switches between a project's coordinator and the last worker
+/// visited by this client. The bookmark is live tmux metadata, keyed by client.
+pub fn toggle() -> io::Result<()> {
+    let client = navigation::client()?;
+    let rows = tmux(&[
+        "list-clients",
+        "-F",
+        "#{client_name}␟#{session_id}␟#{window_id}",
+    ])?;
+    let row = rows
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<_> = l.split('␟').collect();
+            (f.len() == 3 && f[0] == client).then_some(f)
+        })
+        .next()
+        .ok_or_else(|| io::Error::other("Requesting client disappeared"))?;
+    let project = project(row[1])?;
+    let coordinator = tmux(&["show-option", "-qv", "-t", &project, "@drudwyn_coordinator"])?;
+    let key = format!(
+        "@drudwyn_return_{}",
+        client
+            .bytes()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+    if row[2] == coordinator {
+        let worker = tmux(&["show-option", "-qv", "-t", &project, &key])?;
+        let windows = tmux(&["list-windows", "-t", &project, "-F", "#{window_id}"])?;
+        if worker.is_empty() || !windows.lines().any(|id| id == worker) {
+            return Err(io::Error::other(
+                "No previous worker available. Open a worker first.",
+            ));
+        }
+        navigation::open_for(&client, Some(&worker), Some(&project))
+    } else {
+        open_project(&project)?;
+        tmux(&["set-option", "-q", "-t", &project, &key, row[2]])?;
+        Ok(())
+    }
+}

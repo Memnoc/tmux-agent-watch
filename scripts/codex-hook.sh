@@ -5,7 +5,12 @@ source "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
 event="${1:-}"
 if [ "$(tmux_option @drudwyn-v2 on)" = on ]; then
-  exec "$PLUGIN_DIR/scripts/v2.sh" hook codex "$event"
+  # Codex command hooks run in the event session cwd. A shared daemon's
+  # inherited TMUX_PANE is not the identity of its currently active client.
+  [ -n "${TMUX:-}" ] || { printf '{}\n'; exit 0; }
+  "$PLUGIN_DIR/scripts/v2.sh" hook codex "$event" --session-cwd
+  printf '{}\n'
+  exit 0
 fi
 payload="$(cat)"
 window_id="${TMUX_PANE:+$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}')}"

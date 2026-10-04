@@ -9,8 +9,36 @@ import unittest
 from pathlib import Path
 from independent_navigation_test import IndependentNavigation, BIN
 
+def raw_agent(directory):
+    # Controlled TUI stand-in: unlike plain cat, initialize terminal input mode.
+    native = directory/'native'; native.mkdir()
+    shutil.copy('/bin/cat', native/'codex')
+    wrapper = directory/'codex'
+    wrapper.write_text('#!/bin/sh\nstty raw -echo\nexec ' + shlex.quote(str(native/'codex')) + '\n')
+    wrapper.chmod(0o755)
+
 class RecoveryTest(IndependentNavigation):
     # Reuse the isolated two-client fixture, not its unrelated test cases.
+    def test_recovery_preserves_name_and_project_from_stopped_window(self):
+        self.command('coordinator', 'set', '--window', self.home, client=self.clients[0])
+        initial = subprocess.check_output(['git', '-C', str(self.repo), 'rev-parse', 'HEAD'], text=True).strip()
+        result = self.command('workspace', 'start', '--repo', str(self.repo), '--base', 'main',
+                              '--name', 'greetings', 'work/greetings', str(Path(self.tmp.name)/'fake-worker/codex'), '300',
+                              client=self.clients[0])
+        path = result.stdout.strip()
+        window = result.stderr.split('window ')[1].split()[0]
+        self.tmux('send-keys', '-t', window, 'C-c')
+        time.sleep(.2)
+        self.tmux('new-session', '-d', '-s', 'chat', '-c', '/tmp')
+        session = self.tmux('display-message', '-p', '-t', 'chat', '#{session_id}')
+        self.command('navigate', '--session', session, client=self.clients[0])
+        recovered = self.command('workspace', 'recover', '--repo', str(self.repo), '--path', path,
+                                 '--shell', client=self.clients[0])
+        window = recovered.stdout.strip()
+        self.assertEqual(self.tmux('display-message', '-p', '-t', window, '#{window_name}'), 'greetings')
+        self.assertEqual(self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_project'),
+                         self.tmux('show-option', '-wqv', '-t', self.home, '@drudwyn_project'))
+
     def test_inventory_distinguishes_survivor_from_live_checkout(self):
         survivor = Path(self.tmp.name) / 'surviving checkout'
         subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-qb', 'survivor', str(survivor)], check=True)
@@ -50,7 +78,7 @@ class RecoveryTest(IndependentNavigation):
         subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-qb', 'restart', str(survivor)], check=True)
         fakebin = Path(self.tmp.name) / 'agents'
         fakebin.mkdir()
-        shutil.copy('/bin/cat', fakebin / 'codex')
+        raw_agent(fakebin)
         self.env['PATH'] = str(fakebin) + os.pathsep + self.env['PATH']
         self.assertEqual(shutil.which('codex', path=self.env['PATH']), str(fakebin / 'codex'))
         args = ['workspace', 'recover', '--repo', str(self.repo), '--path', str(survivor), '--agent', 'codex', '--unassociated']
@@ -65,7 +93,7 @@ class RecoveryTest(IndependentNavigation):
         self.assertEqual(self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_task_file'), 'task.md')
         pane = self.tmux('display-message', '-p', '-t', window, '#{pane_id}')
         pid = self.tmux('display-message', '-p', '-t', pane, '#{pane_pid}')
-        self.assertEqual(os.readlink('/proc/' + pid + '/exe'), str(fakebin / 'codex'))
+        self.assertEqual(os.readlink('/proc/' + pid + '/exe'), str(fakebin / 'native/codex'))
         self.assertNotIn('private task content', self.tmux('show-options', '-w', '-t', window))
         self.assertEqual(self.tmux('list-buffers', '-F', '#{buffer_name}'), '')
         self.command('workspace', 'deliver-task', window, '--task-file', 'task.md', '--retry', client=self.clients[0])
@@ -115,7 +143,7 @@ class RecoveryTest(IndependentNavigation):
         subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-qb', 'retained', str(survivor)], check=True)
         (survivor / 'task $literal;.md').write_text('never read me')
         fakebin = Path(self.tmp.name) / 'fakebin'; fakebin.mkdir()
-        shutil.copy('/bin/cat', fakebin / 'codex')
+        raw_agent(fakebin)
         self.env['PATH'] = str(fakebin) + os.pathsep + self.env['PATH']
         self.assertEqual(shutil.which('codex', path=self.env['PATH']), str(fakebin / 'codex'))
         args = ['workspace', 'recover', '--repo', str(self.repo), '--path', str(survivor), '--agent', 'codex', '--unassociated']
@@ -194,7 +222,7 @@ class RecoveryTest(IndependentNavigation):
         survivor = Path(self.tmp.name) / 'private-survivor'
         subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-qb', 'private-survivor', str(survivor)], check=True)
         fakebin = Path(self.tmp.name) / 'fakebin'; fakebin.mkdir()
-        shutil.copy('/bin/cat', fakebin / 'codex')
+        raw_agent(fakebin)
         fakepath = str(fakebin) + os.pathsep + self.env['PATH']
         self.assertEqual(shutil.which('codex', path=fakepath), str(fakebin / 'codex'))
         self.tmux('set-option', '-g', '@drudwyn-redact-labels', 'on')
