@@ -61,15 +61,15 @@ class WorkerLaunchTest(unittest.TestCase):
 
     def test_form_separates_name_branch_and_multiline_text(self):
         pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', self.session, '-c', str(self.repo), str(BIN), 'cockpit', '--start')
-        self.wait(pane, 'BATCH SETUP')
+        self.wait(pane, 'SET UP TASKS')
         window = self.tmux('display-message', '-p', '-t', pane, '#{window_id}')
         self.cli('batch', 'select', self.batch, '--window', window)
         self.tmux('send-keys', '-t', pane, 'Escape')
-        self.wait(pane, 'START WORKSPACE')
+        self.wait(pane, 'START A TASK')
         self.tmux('send-keys', '-t', pane, 'Escape')
         time.sleep(.15)
         self.tmux('send-keys', '-t', pane, 'n')
-        self.wait(pane, 'Short name')
+        self.wait(pane, 'Worker name')
         self.tmux('send-keys', '-t', pane, '-l', 'small')
         self.tmux('send-keys', '-t', pane, 'Tab')
         self.tmux('send-keys', '-t', pane, 'End', 'BSpace')
@@ -81,7 +81,7 @@ class WorkerLaunchTest(unittest.TestCase):
         screen = self.wait(pane, 'second line')
         self.assertIn('work/smalX', screen)
         self.assertIn('first line', screen)
-        self.assertIn('F6 start', screen)
+        self.assertIn('[F6] Start', screen)
         self.assertEqual(self.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').count('\n'), 1)
 
     def start_receiver(self, branch='short'):
@@ -142,6 +142,22 @@ while True:
         agent = self.root / 'codex'
         if not agent.exists(): agent.symlink_to(sys.executable)
         return agent, script
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux tty input queue')
+    def test_unconsumed_paste_times_out_without_submit_or_automatic_replay(self):
+        agent, script = self.raw_receiver()
+        script.write_text("import os, tty, time\ntty.setraw(0)\nos.write(1, b'\\x1b[?2004hREADY\\r\\n')\ntime.sleep(30)\n")
+        result = self.cli('workspace', 'start', '--repo', str(self.repo), '--batch', self.batch,
+                          '--task-stdin', 'no-reader', str(agent), str(script),
+                          input='synthetic task', check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('uncertain', result.stderr)
+        window = self.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').splitlines()[-1]
+        self.assertEqual(self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_delivery'), 'uncertain')
+        again = self.cli('workspace', 'deliver-task', window, input='synthetic task', check=False)
+        self.assertNotEqual(again.returncode, 0)
+        self.assertEqual(self.tmux('list-buffers', '-F', '#{buffer_name}'), '')
+        self.assertTrue((self.root / 'repo-worktrees' / 'no-reader').is_dir())
 
     def paused_delivery(self, window, operation='load-buffer', after=False):
         """Pause a real tmux operation without retaining the synthetic input."""
@@ -253,6 +269,29 @@ while True:
                 self.assertEqual(self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_delivery'), 'not_sent')
                 self.assertEqual(self.tmux('list-buffers', '-F', '#{buffer_name}'), '')
 
+    def test_submit_waits_until_editor_consumes_initial_paste(self):
+        # A raw terminal can exist before the editor consumes its first event.
+        # Enter in that initial paste batch is not an independent submit action.
+        agent, script = self.raw_receiver()
+        script.write_text("""import os, tty, time, hashlib
+
+tty.setraw(0)
+os.write(1,b'\\x1b[?2004hREADY\\r\\n')
+time.sleep(1.4)
+data=os.read(0,65536)
+value=data.replace(b'\\x1b[200~',b'').replace(b'\\x1b[201~',b'').replace(b'\\r',b'')
+os.write(1,b'PROMPT PRESENT\\r\\n')
+while True:
+    key=os.read(0,1)
+    if key==b'\\r':
+        os.write(1,b'HASH:'+hashlib.sha256(value).hexdigest().encode()+b'\\r\\n')
+""")
+        task='Implement the greeting task'
+        self.cli('workspace','start','--repo',str(self.repo),'--batch',self.batch,
+                 '--task-stdin','work/slow-consumer',str(agent),str(script),input=task)
+        window=self.tmux('list-windows','-t',self.session,'-F','#{window_id}').splitlines()[-1]
+        self.assertIn(hashlib.sha256(task.encode()).hexdigest(),self.wait(window,'HASH:').replace('\n',''))
+
     def test_single_start_sends_multiline_stdin_once_without_content_metadata(self):
         agent, script = self.raw_receiver()
         task = 'first private line\nsecond line with $literal and unicode café'
@@ -301,15 +340,15 @@ while True:
 
     def open_form(self, width=100):
         pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', self.session, '-c', str(self.repo), str(BIN), 'cockpit', '--start')
-        self.wait(pane, 'BATCH SETUP')
+        self.wait(pane, 'SET UP TASKS')
         window = self.tmux('display-message', '-p', '-t', pane, '#{window_id}')
         self.cli('batch', 'select', self.batch, '--window', window)
         self.tmux('send-keys', '-t', pane, 'Escape')
-        self.wait(pane, 'START WORKSPACE')
+        self.wait(pane, 'START A TASK')
         self.tmux('send-keys', '-t', pane, 'Escape')
         time.sleep(.15)
         self.tmux('send-keys', '-t', pane, 'n')
-        self.wait(pane, 'Short name')
+        self.wait(pane, 'Worker name')
         self.tmux('resize-window', '-t', window, '-x', str(width), '-y', '24')
         return pane
 
@@ -401,7 +440,7 @@ while True:
         self.tmux('send-keys', '-t', pane, '-l', 'file-form')
         self.tmux('send-keys', '-t', pane, 'Tab', 'Tab', 'F5')
         self.tmux('send-keys', '-t', pane, '-l', 'task.md')
-        self.wait(pane, 'Repository task file')
+        self.wait(pane, 'File with task instructions')
         self.tmux('send-keys', '-t', pane, 'F6')
         self.wait(pane, 'task sent;')
         window = self.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').splitlines()[-1]

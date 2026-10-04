@@ -250,7 +250,7 @@ class AssembledWorkflowTest(IndependentNavigation):
             self.assertEqual(self.git('rev-parse', 'main'), self.base)
             self.assertIn('Not verified', self.verify(self.repo).stdout)
             promoted = self.command('workspace', 'promote', '--path', str(target), '--base', 'main')
-            self.assertIn('PROMOTE PREVIEW', promoted.stdout)
+            self.assertIn('MERGE COMBINED BRANCH', promoted.stdout)
             self.assertIn('Integrated', self.command('workspace', 'promote', '--path', str(target),
                                                     '--base', 'main', '--apply', self.token(promoted)).stdout)
             self.assertIn('Not verified', self.verify(self.repo).stdout)

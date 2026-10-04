@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
@@ -888,13 +888,66 @@ fn transmit_task(
                 pane,
             ],
         )?;
-        thread::sleep(Duration::from_millis(750));
+        wait_for_paste(pane)?;
         validate()?;
         transmission(guard, &["send-keys", "-t", pane, "Enter"])?;
         receipt("sent")?;
         Ok(())
     };
     transmit().map_err(|_| Error::Invalid("Task delivery uncertain; inspect the coordinator/worker before deliberate retry; nothing automatically resent".into()))
+}
+
+/// Observe only the unread byte count, never terminal contents. A raw editor
+/// may be alive while startup still delays reading its first paste. Submitting
+/// before that read can fold Enter into the paste event instead of starting work.
+fn wait_for_paste(pane: &str) -> Result<(), Error> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+        let tty =
+            tmux(Command::new("tmux").args(["display-message", "-p", "-t", pane, "#{pane_tty}"]))?;
+        // Linux O_NOCTTY | O_NONBLOCK: never acquire or block on another pane's tty.
+        let terminal = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(0x100 | 0x800)
+            .open(tty)?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut quiet = Instant::now();
+        loop {
+            let mut pending: std::os::raw::c_int = 0;
+            unsafe extern "C" {
+                fn ioctl(
+                    fd: std::os::raw::c_int,
+                    request: std::os::raw::c_ulong,
+                    ...
+                ) -> std::os::raw::c_int;
+            }
+            // Linux TIOCINQ/FIONREAD writes one int to our valid pointer; it
+            // does not consume bytes or change the terminal's input mode.
+            let result = unsafe { ioctl(terminal.as_raw_fd(), 0x541B, &mut pending) };
+            if result < 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+            if pending > 0 {
+                quiet = Instant::now();
+            }
+            if quiet.elapsed() >= Duration::from_millis(750) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Invalid("Prompt pasted but editor has not consumed it; submission uncertain. Inspect before retrying.".into()));
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Existing transport behavior; input-queue observation is not available
+        // on these unverified platforms. Do not invent an acceptance receipt.
+        let _ = pane;
+        thread::sleep(Duration::from_millis(750));
+        Ok(())
+    }
 }
 
 /// A handoff has its own verified lifetime binding. It never invents managed

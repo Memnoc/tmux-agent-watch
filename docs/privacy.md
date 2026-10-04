@@ -30,6 +30,7 @@ for sensitive or organisational workflows without a separate assessment.
 | verification check identity, canonical checkout/inode fingerprint, tested revision, process birth identities, timestamps, exit and stale state | reconcile explicit assembled checks | current tmux server only | verification command and Cockpit, labels redacted |
 | expected merge refs/commits, destination directory identity, MERGE_HEAD inode/timestamps, project and handoff state | guard Continue/Abort and reconcile external resolution | current tmux server only | conflict command and Cockpit, labels redacted |
 | deliberately selected repository task-file reference (including lossless path encoding) | let the agent read the chosen task in its checkout | current tmux session | launch form and live window option |
+| terminal unread-input byte count (Linux) | wait for the editor to consume a paste before one submit | delivery call only; not retained | internal transport metadata |
 | task entered in the start form or stdin | deliver the initial instruction to the selected agent | form/command memory and delete-on-paste tmux buffer | selected third-party agent pane |
 
 The default Rust implementation does not read terminal scrollback, prompts,

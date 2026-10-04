@@ -635,10 +635,10 @@ The explicit legacy implementation retains its original clustered bar/separator.
 
 ### Integrate reviewed worker commits (Rust v2)
 
-Select a worker in Cockpit and press **i Integrate**. Its live batch supplies the
+Select a worker in Cockpit and press **i Merge changes**. Its live batch supplies the
 chosen destination. Without valid batch metadata, explicitly enter a destination
 branch or a live batch ID; Drudwyn never guesses a base. The target branch must
-have exactly one existing checkout. Use Batch setup when a destination needs to
+have exactly one existing checkout. Use Task setup when a destination needs to
 be created, or deliberately choose an existing branch after metadata loss.
 
 The preview shows source/target refs, full commit IDs, actual target checkout,
@@ -737,11 +737,11 @@ Assembled verification remains a separate action; integration never implies it.
 
 ### Verify the assembled checkout (Rust v2)
 
-Press **V Verify** in Cockpit. A validated live batch supplies its actual
+Press **V Run checks** in Cockpit. A validated live batch supplies its actual
 integration checkout; otherwise enter the destination checkout explicitly.
 Checkout paths must be UTF-8 and contain no control characters.
 Review that path, enter a short check identity and your chosen shell commands,
-then press **F5 Run visibly**. **Tab** changes fields, **F6** inspects the latest
+then press **F5 Run checks**. **Tab** changes fields, **F6** inspects the latest
 live receipt, and **Esc** cancels. Output runs in the foreground terminal; Enter
 returns to the form when the check ends. The command field is cleared on run.
 Nothing runs automatically after integration or an agent's Review event.
@@ -954,3 +954,40 @@ with `--no-daemon` for supported automatic signals; first inspect their work and
 use recovery's explicit task entry. Conversations are not restored. On platforms
 without observable process cwd, the adapter fails closed. No hook payload or
 terminal content is read. Errors include the remedy instead of hiding failures.
+
+
+### Guided task workflow
+
+1. **Start a task** (`n` in Cockpit). Task setup chooses **Start from**, the
+   version each worker receives, and **Merge into**, where completed changes go.
+   **F7** chooses the configured main branch or a separate branch for combining
+   work. Name a separate branch, for example `work/combined`. Preview with Enter,
+   inspect the branch and folder, then Enter again to confirm. Nothing merges yet.
+2. Give the worker a short name and its full task. Enter moves from name to branch
+   to task; inside Task, Enter adds a line. **F6** starts the worker and sends once.
+3. **Ready to review** means the agent finished its turn. Open the worker and
+   inspect its changes before merging. **Agent open** means only that its process
+   is alive; it does not establish that implementation or checks are complete.
+4. **Merge changes** (`i`) shows the worker/project folder and the receiving
+   branch. Enter previews a selected branch; `y` merges the reviewed version.
+   `d` opens technical details. **Already merged** offers checks and navigation,
+   without a redundant merge action. If the branch changes, `r` refreshes it.
+5. **Run checks** (`v` from the merge result, or `V` in Cockpit). Supply a **Check
+   name** and **Command to run** for that project. For the Python test playground,
+   use `python3 -m unittest discover -v`. F5 runs visibly; Enter returns to the
+   form and Esc returns to the merge result. The command clears after use.
+   **F2 Details** shows revision identifiers and separate worker-reported checks.
+   Passing checks describe the tested version, not later edits or deployment.
+
+Wide action screens show help on the right for the focused field. **F1 Help**
+provides the same explanation at every width, including the full error if one is
+present; PgUp/PgDn scroll and F1/Esc return without losing input. On short screens
+the masthead becomes compact to leave room for editing. Icons remain paired with
+text; configured bot/shell fallbacks continue to work. Rosé Pine is the default;
+Moon and Dawn remain optional themes.
+
+Linux delivery waits for the terminal input queue to drain before a single Enter.
+This observes a byte count, never terminal contents. A five-second timeout leaves
+an uncertain result for inspection, not an automatic retry. Other platforms retain
+the previous delay. The controlled regression passes; real Codex acceptance still
+needs the next manual comparison and is never inferred from transport success.

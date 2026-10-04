@@ -197,3 +197,14 @@ label worker-reported checks separately from checks actually run on merged code.
 Use visible choices and short field examples alongside these copy changes.
 No plain-language label may collapse agent completion, human review, merge and
 passing checks into a single success state.
+
+
+## Second feedback pass — implementation
+
+The user approved the complete operational and visual follow-up, including overall
+gaps, padding, labels, symbols and explanatory help. Ticket
+[26](../../.scratch/worktree-worker-workflow/26-guided-workflow-polish.md) records
+implementation and validation against baseline 0187ad2. Earlier proposals and live
+observations above remain historical evidence. The next manual comparison must
+still verify prompt submission without Enter and whether the guidance removes
+the need for this coordinating conversation to explain each step.

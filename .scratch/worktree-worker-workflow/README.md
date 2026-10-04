@@ -120,3 +120,5 @@ from integration success.
 - [13 — Verify the assembled checkout](13-assembled-verification.md)
 - [14 — Promote integration branches and clean up safely](14-promotion-and-cleanup.md)
 - [15 — Harden the assembled workflow](15-assembled-hardening.md)
+
+- [26 — Guided workflow and second live-test polish](26-guided-workflow-polish.md)

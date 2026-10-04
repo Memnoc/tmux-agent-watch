@@ -228,9 +228,9 @@ pub(crate) fn activity(state: crate::domain::Lifecycle) -> &'static str {
     use crate::domain::Lifecycle::*;
     match state {
         Working => "WORKING",
-        Running => "RUNNING",
+        Running => "AGENT OPEN",
         Waiting => "NEEDS INPUT",
-        Review => "REVIEW",
+        Review => "READY TO REVIEW",
         Failed => "FAILED",
         Starting => "STARTING",
         Unknown => "UNCONFIRMED",
