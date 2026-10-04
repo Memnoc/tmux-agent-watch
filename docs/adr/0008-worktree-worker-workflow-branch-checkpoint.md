@@ -137,3 +137,29 @@ test is skipped. Independent Standards and Spec reviews have no remaining findin
 The [comparison plan](../specs/2026-10-04-worktree-feedback-comparison.md) preserves
 the same baseline/tasks and separates automated evidence from pending real-agent
 acceptance and visual judgement. Main remains eaf2446, clean and unmerged.
+
+## October 4 second feedback pass — guided workflow
+
+The live repeat established hook-backed completion, merging and passing checks,
+but still required manual Enter after task paste and explanations from the
+coordinator. [Ticket26](../../.scratch/worktree-worker-workflow/26-guided-workflow-polish.md)
+implements the resulting operational and presentation improvements.
+
+The common flow now says Start a task → review → Merge changes → Run checks.
+Task setup exposes main versus a separate merge branch. Wide screens have focused
+help; F1 opens scrollable explanations at any width without losing input. F8
+keeps setup hashes in Details. Stable source/project folder identity accompanies
+merge choices and results. Already merged offers follow-up actions rather than
+another merge confirmation. Check receipts use separate lines and relative times,
+while worker-reported checks remain distinct from checks of the merged result.
+
+Shared Rosé Pine frames retain the hound, bot/shell icons, clear focus, quiet
+separators and task borders. Short terminals use a compact masthead to preserve
+editing space. Agent open describes process presence; Ready to review does not
+mean approved, merged or verified.
+
+Linux transport now waits for the paste's unread tty byte count to drain before
+one submit, with a bounded timeout and no automatic replay. Only metadata is
+observed. The delayed-editor regression passes; the next real-agent comparison
+must still establish whether this removes the manual Enter in Codex. Other
+platforms retain the earlier timing behavior and are not claimed validated.

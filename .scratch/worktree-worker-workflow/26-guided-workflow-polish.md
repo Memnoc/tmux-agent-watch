@@ -34,3 +34,18 @@ Red: verification UI rendered PassedCheck and all receipt fields on one line.
 Green: semantic lines preserve check identity, result and readable timestamps.
 
 Validation receipts and review will be recorded after the full run.
+
+## Review and regression corrections
+
+Crosscheck baseline 0187ad2; implementation c98970a; review corrections 7fb7744.
+Standards and Spec independently found three actionable issues: conflict help
+lost priority to its retained merge form; removal received merge instructions;
+and narrow setup previews could not scroll. All three were corrected and
+rechecked with no remaining blocking findings. Standards noted the existing
+string receipt API as a nonblocking future refactoring opportunity.
+
+Actual-key regressions now cover help preserving typed names, direct/separate
+branch choice, preview scrolling and F8 details, reopened Already merged behavior,
+conflict help, removal help, semantic check-receipt lines and uncertain delivery
+without replay. Actual controlled 120-column and 48-column captures are available
+at /tmp/drudwyn-feedback-ui/index.html (ephemeral). No live agent content was read.

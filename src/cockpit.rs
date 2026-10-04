@@ -2421,8 +2421,9 @@ fn render_setup_details(frame: &mut ratatui::Frame<'_>, app: &App) {
         "Starting version and merge branch",
         &[("PgUp/PgDn", "Scroll"), ("F8/Esc", "Back")],
     );
-    let report = if let Some(preview) = app.batch_form.as_ref().and_then(|f| f.preview.as_ref()) {
-        preview.display(app.config.redact_labels)
+    let report = if let Some(form) = &app.batch_form {
+        form.preview.as_ref().map(|preview| preview.display(app.config.redact_labels))
+            .unwrap_or_else(|| "Preview this setup with Enter first. Earlier saved settings are not the preview of these edits.".into())
     } else if let Some(batch) = &app.active_batch {
         batch.display(app.config.redact_labels)
     } else if let Some(point) = &app.start_point {

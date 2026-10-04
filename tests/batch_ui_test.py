@@ -83,6 +83,9 @@ class BatchUiTest(unittest.TestCase):
         self.wait("Merge into assemble")
 
     def test_help_keeps_input_and_merge_choice_is_explicit(self):
+        self.keys("F8")
+        self.wait("Preview this setup with Enter first")
+        self.keys("Escape")
         self.keys("F7")
         self.wait("(*) separate branch")
         self.keys("Enter")

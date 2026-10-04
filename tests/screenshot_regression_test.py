@@ -36,7 +36,7 @@ class ScreenshotRegression(IndependentNavigation):
         self.assertIn('[?] Actions', screen)
         self.tmux('send-keys', '-t', pane, '?')
         screen = self.wait_pane(pane, 'COCKPIT ACTIONS')
-        for action in ['Integrate', 'Promote', 'Conflict', 'Verify', 'Finish']:
+        for action in ['Merge changes', 'Merge combined branch', 'Conflict', 'Run checks', 'Remove worktree']:
             self.assertIn(action, screen)
         self.tmux('send-keys', '-t', pane, 'Escape')
         self.wait_pane(pane, 'MATCHING 4')
@@ -136,7 +136,7 @@ class ScreenshotRegression(IndependentNavigation):
         worker_rows=[line for line in screen.splitlines() if 'WORKING' in line and 'AGENT' in line]
         self.assertTrue(worker_rows,screen)
         self.assertIn(branch,worker_rows[0])
-        self.assertIn('Verification',screen)
+        self.assertIn('Checks on merged work',screen)
         self.assertIn('Not verified',screen)
         self.assertIn('[d] Full details',screen)
 
@@ -207,7 +207,7 @@ class ScreenshotRegression(IndependentNavigation):
         for column in ['WORKER', 'AGENT', 'ACTIVITY', 'BRANCH', 'GIT', 'INTEGRATION']:
             self.assertIn(column, header)
         self.assertIn('SELECTED WORKER', screen)
-        for total in ['1 WORK', '3 RUN', '0 UNCONFIRMED']:
+        for total in ['1 WORKING', '3 OPEN', '0 UNCONFIRMED']:
             self.assertIn(total, screen)
         self.assertIn('0 need you', screen)
         for name in ['worker-0', 'worker-1', 'worker-2']:
