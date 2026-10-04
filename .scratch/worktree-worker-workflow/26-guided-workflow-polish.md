@@ -1,6 +1,6 @@
 # 26 — Guided workflow and second live-test polish
 
-Status: implementation and validation in progress
+Status: implemented; automated validation passed; next live comparison pending
 Spec: docs/specs/2026-10-04-worktree-feedback-comparison.md
 Baseline: 0187ad2
 
@@ -49,3 +49,30 @@ branch choice, preview scrolling and F8 details, reopened Already merged behavio
 conflict help, removal help, semantic check-receipt lines and uncertain delivery
 without replay. Actual controlled 120-column and 48-column captures are available
 at /tmp/drudwyn-feedback-ui/index.html (ephemeral). No live agent content was read.
+
+
+## Final validation
+
+- Rust: 43 tests passed; formatting and diff whitespace checks passed.
+- Launch: 18 passed, including delayed consumption and unread-queue timeout.
+- Task setup: 2 passed, including F1 preservation, F7 branch choice, F8 details
+  and scrollable narrow preview. Unpreviewed edits never borrow earlier settings.
+- Recovery: 18 passed; integration: 25 passed; conflicts: 17 passed;
+  destination checks: 10 passed; promotion/cleanup: 15 passed.
+- Global overview: 11 passed; screenshot regressions: 14 passed; all status
+  layouts, activity, navigation, settings, privacy, packaging and runtime phases
+  passed. One optional tmux-resurrect test skipped (plugin unavailable).
+- Assembled release routes: direct main and separate integration branch both
+  passed with three controlled workers, two clients, recovery, conflict handling,
+  destination checks, promotion where relevant and guarded cleanup.
+- Full-suite execution resumed at the conflict phase after updating a wrapping
+  expectation; subsequent phases passed with fail-fast execution. Launch/setup
+  were rerun after final UI changes. No claim of a single uninterrupted green run.
+- Logs: /tmp/drudwyn-guidance-full.log, /tmp/drudwyn-guidance-tail.log,
+  /tmp/drudwyn-guidance-launch-final.log, /tmp/drudwyn-guidance-batch-final.log,
+  /tmp/drudwyn-guidance-rust-final.log. These are ephemeral, not product state.
+
+Standards: zero remaining blocking findings, one nonblocking receipt-API
+maintainability observation. Spec: zero remaining findings. Both review axes
+rechecked the corrections independently. Live Codex auto-submit and unaided-user
+usability remain the next comparison, not inferred from automated fake agents.

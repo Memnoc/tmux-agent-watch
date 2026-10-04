@@ -163,3 +163,9 @@ one submit, with a bounded timeout and no automatic replay. Only metadata is
 observed. The delayed-editor regression passes; the next real-agent comparison
 must still establish whether this removes the manual Enter in Codex. Other
 platforms retain the earlier timing behavior and are not claimed validated.
+
+Second-pass checks passed across Rust, Git/tmux operations, keyboard and visual
+regressions, privacy, packaging and both assembled release routes. Independent
+reviews found no remaining blockers. One optional session-restore test was skipped.
+The stable runtime snapshot can be updated without switching or modifying main.
+See ticket26 for exact receipts and the remaining live acceptance distinction.
