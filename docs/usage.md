@@ -21,10 +21,10 @@ See what is running, what needs attention, and where to act without leaving tmux
 | State | Evidence |
 | ----- | -------- |
 | Starting | A worker launch is in progress |
-| Running | A process exists; task activity is unknown |
+| Agent open (Running in CLI) | A process exists; task activity is unknown |
 | Working | A supported lifecycle hook reports activity |
 | Needs input | A supported hook requests interaction |
-| Review | A supported handoff calls for inspection; checks and integration remain separate |
+| Ready to review (Review in CLI) | A supported handoff calls for inspection; checks and integration remain separate |
 | Failed | An observed command failure, nonzero exit, or supported failure hook |
 | Unknown | Evidence is missing or ownership is ambiguous |
 
@@ -866,7 +866,7 @@ Cockpit uses a project-grouped worker table with aligned activity badges. At
 wide sizes, branch, Git and integration columns accompany a concise selected
 worker panel; narrower windows keep the inventory and expose all details with
 `d`. `UNCONFIRMED` means activity cannot be attributed confidently; it is not a
-failure or completion signal. `RUNNING` confirms process presence only.
+failure or completion signal. `AGENT OPEN` confirms process presence only.
 
 Workspace and Session navigators use the same hound masthead, separators and
 selection colors. Workspace/Cockpit popups occupy 90% of the client width and
@@ -962,7 +962,7 @@ terminal content is read. Errors include the remedy instead of hiding failures.
    version each worker receives, and **Merge into**, where completed changes go.
    **F7** chooses the configured main branch or a separate branch for combining
    work. Name a separate branch, for example `work/combined`. Preview with Enter,
-   inspect the branch and folder, then Enter again to confirm. Nothing merges yet.
+   inspect the branch and folder, then Enter again to confirm. Nothing merges yet. F8 opens setup Details.
 2. Give the worker a short name and its full task. Enter moves from name to branch
    to task; inside Task, Enter adds a line. **F6** starts the worker and sends once.
 3. **Ready to review** means the agent finished its turn. Open the worker and

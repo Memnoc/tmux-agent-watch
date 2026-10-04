@@ -324,7 +324,7 @@ class GlobalCockpitTest(IndependentNavigation):
         pane = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'project', '-c', str(self.repo), 'env', 'DRUDWYN_CLIENT=' + self.clients[0], str(BIN), 'cockpit', '--windows', '--search', 'pending-worker')
         self.wait_pane(pane, 'MATCHING 1')
         self.tmux('send-keys', '-t', pane, 'f')
-        self.wait_pane(pane, 'FINISH · CHOOSE MERGE BRANCH')
+        self.wait_pane(pane, 'CHOOSE BRANCH CONTAINING THIS WORK')
         self.tmux('send-keys', '-t', pane, 'e')
         self.tmux('send-keys', '-t', pane, '-l', 'main')
         self.tmux('send-keys', '-t', pane, 'Enter')

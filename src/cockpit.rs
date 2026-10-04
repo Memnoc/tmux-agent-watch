@@ -97,6 +97,7 @@ pub struct App {
     selection_changed: bool,
     details_open: bool,
     help_open: bool,
+    setup_details: bool,
     guidance_open: bool,
     guidance_scroll: u16,
     detail_scroll: u16,
@@ -187,6 +188,7 @@ struct IntegrationForm {
 }
 
 struct BatchForm {
+    scroll: u16,
     separate: bool,
     cursors: [usize; 4],
     fields: [String; 4],
@@ -233,6 +235,7 @@ impl App {
             selection_changed: false,
             details_open: false,
             help_open: false,
+            setup_details: false,
             guidance_open: false,
             guidance_scroll: 0,
             detail_scroll: 0,
@@ -982,6 +985,7 @@ impl App {
 
     fn begin_batch(&mut self) {
         self.batch_form = Some(BatchForm {
+            scroll: 0,
             separate: false,
             cursors: [4, 0, 0, 0],
             fields: ["base".into(), String::new(), String::new(), String::new()],
@@ -1000,6 +1004,23 @@ impl App {
         let Some(form) = &mut self.batch_form else {
             return;
         };
+        if form.preview.is_some() {
+            match key {
+                KeyCode::PageDown | KeyCode::Down => {
+                    form.scroll = form.scroll.saturating_add(5);
+                    return;
+                }
+                KeyCode::PageUp | KeyCode::Up => {
+                    form.scroll = form.scroll.saturating_sub(5);
+                    return;
+                }
+                KeyCode::Home => {
+                    form.scroll = 0;
+                    return;
+                }
+                _ => {}
+            }
+        }
         match key {
             KeyCode::F(7) => {
                 form.separate = !form.separate;
@@ -1061,6 +1082,7 @@ impl App {
                             reuse_existing: form.reuse,
                         };
                         form.preview = Some(batch::preview(request)?);
+                        form.scroll = 0;
                         Ok(None)
                     })()
                 };
@@ -1562,7 +1584,22 @@ fn event_loop(
                 continue;
             }
         }
-        if app.guidance_open {
+        if let Event::Key(key) = &input {
+            if key.kind == KeyEventKind::Press
+                && !app.guidance_open
+                && key.code == KeyCode::F(8)
+                && (app.task.is_some() || app.batch_form.is_some())
+            {
+                app.setup_details = !app.setup_details;
+                app.guidance_scroll = 0;
+                continue;
+            }
+            if app.setup_details && !app.guidance_open && key.code == KeyCode::Esc {
+                app.setup_details = false;
+                continue;
+            }
+        }
+        if app.guidance_open || app.setup_details {
             if let Event::Key(key) = input {
                 match key.code {
                     KeyCode::Down | KeyCode::PageDown => {
@@ -1960,6 +1997,10 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         render_context_help(frame, app);
         return;
     }
+    if app.setup_details {
+        render_setup_details(frame, app);
+        return;
+    }
     if let Some(form) = &app.verification {
         let body = action_screen(
             frame,
@@ -2200,7 +2241,37 @@ fn guidance(app: &App) -> (&'static str, &'static [&'static str]) {
             ),
         };
     }
+    if app.conflict.is_some() {
+        return (
+            "Resolve a merge conflict",
+            &[
+                "Git kept both branches, but some edits need to be combined in the destination folder.",
+                "Open the coordinator, resolve the files, and stage the resolution. Continue then finishes the merge.",
+                "Abort cancels this merge. Retry sends the coordinator handoff only when you explicitly choose it.",
+            ],
+        );
+    }
     if let Some(f) = &app.integration {
+        if f.action == CheckoutAction::Finish {
+            return if f.result.is_some() {
+                (
+                    "Worker folder removed",
+                    &[
+                        "The linked worktree folder is gone. Its Git branch and merged changes are kept.",
+                        "Esc returns to Cockpit. This did not push or deploy anything.",
+                    ],
+                )
+            } else {
+                (
+                    "Remove a finished worker folder",
+                    &[
+                        "Select the branch that already contains this worker's changes. Nothing is merged by this action.",
+                        "Stop the worker and any commands using its folder first. Drudwyn checks for changes and observed active processes.",
+                        "y removes the reviewed linked worktree folder. Its branch is kept. Esc goes back without removing it.",
+                    ],
+                )
+            };
+        }
         if f.result.is_some() {
             return (
                 "What happens next",
@@ -2229,16 +2300,6 @@ fn guidance(app: &App) -> (&'static str, &'static [&'static str]) {
                 "Open shell lets you inspect the folder. Restart with task creates a fresh agent conversation and sends the instructions you provide.",
                 "Previously known names and merge settings are reused when they can still be verified. A conversation is not restored.",
                 "Inspect uncertain task delivery before deliberately sending it again.",
-            ],
-        );
-    }
-    if app.conflict.is_some() {
-        return (
-            "Resolve a merge conflict",
-            &[
-                "Git kept both branches, but some edits need to be combined in the destination folder.",
-                "Open the coordinator, resolve the files, and stage the resolution. Continue then finishes the merge.",
-                "Abort cancels this merge. Retry sends the coordinator handoff only when you explicitly choose it.",
             ],
         );
     }
@@ -2316,6 +2377,7 @@ fn render_context_help(frame: &mut ratatui::Frame<'_>, app: &App) {
         .batch_form
         .as_ref()
         .and_then(|f| f.error.as_deref())
+        .or_else(|| app.conflict.as_ref().and_then(|f| f.error.as_deref()))
         .or_else(|| app.integration.as_ref().and_then(|f| f.error.as_deref()))
         .or_else(|| app.recovery.as_ref().and_then(|f| f.error.as_deref()))
         .or(app.error.as_deref());
@@ -2351,6 +2413,37 @@ fn render_context_help(frame: &mut ratatui::Frame<'_>, app: &App) {
     );
 }
 
+fn render_setup_details(frame: &mut ratatui::Frame<'_>, app: &App) {
+    let body = action_screen(
+        frame,
+        app,
+        "SETUP DETAILS",
+        "Starting version and merge branch",
+        &[("PgUp/PgDn", "Scroll"), ("F8/Esc", "Back")],
+    );
+    let report = if let Some(preview) = app.batch_form.as_ref().and_then(|f| f.preview.as_ref()) {
+        preview.display(app.config.redact_labels)
+    } else if let Some(batch) = &app.active_batch {
+        batch.display(app.config.redact_labels)
+    } else if let Some(point) = &app.start_point {
+        if app.config.redact_labels {
+            "Start from: [redacted]\nCommit: [redacted]".into()
+        } else {
+            format!(
+                "Start from: {}\nCommit: {}\nLocal version; remote freshness is unknown.",
+                point.reference, point.commit
+            )
+        }
+    } else {
+        "Preview task setup to inspect the selected starting version and folder.".into()
+    };
+    let paragraph = Paragraph::new(report).wrap(Wrap { trim: false });
+    let max = paragraph
+        .line_count(body.width)
+        .saturating_sub(body.height as usize) as u16;
+    frame.render_widget(paragraph.scroll((app.guidance_scroll.min(max), 0)), body);
+}
+
 fn render_batch(frame: &mut ratatui::Frame<'_>, app: &App, form: &BatchForm) {
     let label = |s: &str| {
         if app.config.redact_labels {
@@ -2371,8 +2464,10 @@ fn render_batch(frame: &mut ratatui::Frame<'_>, app: &App, form: &BatchForm) {
         &[
             ("Tab", "Next field"),
             ("F7", "Merge choice"),
+            ("F8", "Details"),
             ("F2", "Reuse branch"),
             ("Enter", "Preview / confirm"),
+            ("PgUp/PgDn", "Scroll preview"),
             ("Esc", "Back"),
         ],
     );
@@ -2388,10 +2483,6 @@ fn render_batch(frame: &mut ratatui::Frame<'_>, app: &App, form: &BatchForm) {
             Line::from(format!(
                 "Start from: {}",
                 label(p.source.reference.trim_start_matches("refs/heads/"))
-            )),
-            Line::from(format!(
-                "Starting version: {}",
-                label(&p.source.commit[..12.min(p.source.commit.len())])
             )),
             Line::from(format!("Merge into: {}", label(&p.destination))),
             Line::from(format!(
@@ -2480,15 +2571,15 @@ fn render_batch(frame: &mut ratatui::Frame<'_>, app: &App, form: &BatchForm) {
         lines.push(Line::default());
         lines.push(Line::styled(label(e), Style::default().fg(app.theme.love)));
     }
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let max = paragraph
+        .line_count(body.width)
+        .saturating_sub(body.height as usize);
     let offset = cursor
         .map(|(row, _)| row.saturating_sub(body.height.saturating_sub(2) as usize))
-        .unwrap_or(0);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((offset as u16, 0)),
-        body,
-    );
+        .unwrap_or(form.scroll as usize)
+        .min(max);
+    frame.render_widget(paragraph.scroll((offset as u16, 0)), body);
     if let Some((row, col)) = cursor {
         if !app.config.redact_labels
             && body.width > 3
@@ -2512,6 +2603,7 @@ fn render_launch(frame: &mut ratatui::Frame<'_>, app: &App, task: &str) {
             ("F4", "Agent"),
             ("F5", "Text / file"),
             ("F6", "Start worker"),
+            ("F8", "Details"),
             ("Esc", "Back"),
         ],
     );
@@ -2565,9 +2657,8 @@ fn render_launch(frame: &mut ratatui::Frame<'_>, app: &App, task: &str) {
             .as_ref()
             .map(|p| {
                 format!(
-                    "Start from {} ({}) · {} · F2 change / F3 setup",
+                    "Start from {} · {} · F2 change / F3 setup",
                     label(&p.reference),
-                    label(&p.commit[..12.min(p.commit.len())]),
                     if app.from_current {
                         "current branch"
                     } else {
@@ -4035,9 +4126,9 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         };
         lines.push(Line::from(value));
     }
-    lines.push(Line::from(" V verify · explicitly select assembled checks"));
+    lines.push(Line::from(" V Run checks · select a folder and command"));
     lines.push(Line::from(
-        " i integrate · preview explicit destination and ancestry",
+        " i Merge changes · choose and review the receiving branch",
     ));
     lines.push(Line::from(""));
     lines.push(Line::styled(
@@ -4647,13 +4738,14 @@ Checkout: /repo/assembled"
         assert!(content.contains("regression tests and fix any failures"));
     }
     #[test]
-    fn start_form_shows_base_commit_and_hides_it_when_redacted() {
+    fn setup_details_shows_base_commit_and_hides_it_when_redacted() {
         let mut app = App::new(vec![], Variant::Moon, Config::default());
         app.task = Some("Example task".into());
         app.start_point = Some(workspace::StartPoint {
             reference: "refs/remotes/origin/private-base".into(),
             commit: "123456789abcdef0123456789abcdef0123456789a".into(),
         });
+        app.setup_details = true;
         for redacted in [false, true] {
             app.config.redact_labels = redacted;
             let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
@@ -4669,6 +4761,7 @@ Checkout: /repo/assembled"
             assert_eq!(content.contains("private-base"), !redacted);
             assert_eq!(content.contains("123456789abc"), !redacted);
         }
+        app.setup_details = false;
         app.from_current = true;
         let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
         terminal.draw(|frame| render(frame, &app)).unwrap();

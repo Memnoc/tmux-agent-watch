@@ -102,6 +102,13 @@ class BatchUiTest(unittest.TestCase):
         self.keys("-l", str(self.root / "trunk-folder"))
         self.keys("Enter")
         self.wait("Merge into: trunk")
+        self.keys("NPage", "NPage")
+        self.wait("Enter: confirm setup and continue")
+        self.keys("Home")
+        self.wait("Start from:")
+        self.keys("F8")
+        self.wait(self.initial)
+        self.keys("Escape")
         self.assertFalse((self.root / "assembled").exists())
 
 

@@ -172,7 +172,7 @@ class VerificationTest(WorkerIntegrationTest):
         self.tmux('set-option', '-wu', '-t', self.worker, '@drudwyn_batch')
         self.tmux('kill-window', '-t', pane)
         pane = self.integration_ui()
-        self.wait_pane(pane, 'INTEGRATE')
+        self.wait_pane(pane, 'CHOOSE MERGE BRANCH')
         self.tmux('send-keys', '-t', pane, 'Escape')
         self.wait_pane(pane, 'Snapshot: r refresh')
         self.tmux('send-keys', '-t', pane, 'V')
