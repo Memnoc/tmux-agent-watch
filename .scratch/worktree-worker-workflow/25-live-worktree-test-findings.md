@@ -78,3 +78,32 @@ or pasting identifiers. Retain fresh preview/confirmation and stale-target guard
 Text entry, where retained, needs visible cursor/focus, branch-vs-path validation
 and a useful error example. Distinguish Preview, Back and Close; make nested Esc
 behavior obvious. Do not dismiss the discoverability problem as user error.
+
+## Integration completed, but feedback was missed — 09:01
+
+User pressed y on reviewed source adb161d into the playground main. Screenshot
+090155 shows a subtle Integrated line while the title remains INTEGRATE PREVIEW
+and the old plan, destination commit and review token still dominate the screen.
+User could not tell whether any action occurred and reports that progression and
+completion throughout the workflow are too quiet.
+
+Independent verification after the action: playground main HEAD is adb161d,
+source is its ancestor, working tree is clean, and both greeting unit tests pass
+in the destination. This was the real UI-triggered fast-forward; no merge command
+was run by the supervising agent. These independently run tests do not create a
+Drudwyn verification receipt, so the UI's not-verified label remains truthful.
+Development repository main remains eaf24469290cbf77dd1d2a6176fbd54f7ace1868.
+
+Required UX: visibly transition from Review to Integrating to Integrated (or
+Failed/Conflict), with a prominent result title and semantic colour plus text.
+After success, show actual destination/head and changed-file summary, move the
+old preview/token to details, and expose next actions (open destination, verify,
+return). Keep worker completion, successful merge and destination verification
+separate. Never invent completion percentages or imply that merge proves tests.
+The same clear in-progress/result feedback is needed for launch and recovery.
+
+Manual test checkpoint: one real worker created, interrupted by updater,
+recovered with failed automatic task handoff, implemented after manual delivery,
+and integrated successfully through Cockpit. Destination checks passed separately.
+Second prepared task not launched; live multi-worker integration and cleanup not
+yet exercised in this hands-on run. Automation's broader coverage remains separate.
