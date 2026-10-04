@@ -4,6 +4,63 @@ Status: reproduced observations; fixes pending
 Spec: docs/specs/2026-09-30-worktree-worker-workflow.md
 Implementation under test: 5a2c1d1 (checkpoint da60b1f)
 
+## Consolidated feedback checklist
+
+This checklist gathers the user's feedback from the October 4 hands-on run.
+Suggested treatments below are follow-up proposals, not completed fixes.
+
+- [ ] **Moving between testing and the coordinator is cumbersome.** The user
+  must return to this chat to report results. Navigation worked; returning to
+  chat must not be interpreted as selecting the wrong test session. Make the
+  coordinator easy to identify and return to while preserving worker context.
+- [ ] **Secondary popups look bland.** Bring batch setup, launch, recovery and
+  integration into the approved Cockpit's Rosé Pine (not Moon) visual language.
+  Improve hierarchy, spacing, focus and action styling.
+- [ ] **Form editing and focus are unclear.** Short name, branch and multiline
+  task navigation need obvious controls. The global Enter-newline hint is
+  misleading outside Task. Destination entry also felt copy/paste-only; this
+  is user-reported friction, not a reproduced keyboard-input failure.
+- [ ] **Expose destination choices.** Offer selectable existing branches and
+  checkouts, showing branch and directory together, instead of requiring a
+  memorized branch name or batch ID. Explain branch-vs-path mistakes clearly.
+- [ ] **Make Preview, Back and Close discoverable.** Enter retrying an invalid
+  preview and nested Escape behavior felt like a trap. Cancellation failure
+  itself has not been independently reproduced.
+- [ ] **Repair activity and attention signals.** A worker that had committed
+  its result still displayed process-derived RUNNING without a completion or
+  review signal. Repeated Hook failed messages also remain unresolved (see
+  ticket 19). Their causal relationship to this worker's state is unproven.
+  Distinguish a live process from active work, input needed and review readiness.
+- [ ] **Make progress and completion unmistakable.** Launch, recovery and
+  integration need clear action/result feedback. After integration the screen
+  still looked like a preview with an old destination commit. Show the actual
+  result prominently and provide visible next actions, keeping integration
+  and destination verification separate.
+
+Additional observed failures and continuity questions:
+
+- [ ] Runtime files disappeared when the development checkout returned to main.
+  Stable preview loading mitigates exit 127; durable installation remains open.
+- [ ] Recovery opened Codex but did not visibly deliver the supplied task,
+  despite a sent receipt. Manual pasting was required. Startup readiness is a
+  hypothesis, not a confirmed root cause.
+- [ ] Launch presented an ERROR alongside successful creation/task transmission;
+  clarify transport success, unknown acceptance and actual failure.
+- [ ] Review recovery continuity: window name changed, launch used the requesting
+  chat session, and blank batch association required a fresh destination choice.
+  These observations are not all established defects or promises to add state.
+
+## Current outcome and coverage
+
+One real worker completed and was integrated through the UI after manual task
+submission. The worktree survived the updater exit; recovery reopened the correct
+checkout. Playground main reached adb161d, remained clean, and both tests passed
+when checked independently. These checks do not register a UI verification receipt.
+
+The second task, simultaneous workers, conflict handoff, integration-branch
+promotion, verification through the UI and cleanup were not exercised manually.
+The automated scenarios below are separate evidence using controlled agents.
+
 ## Runtime checkout dependency — mitigated
 
 Switching the development checkout to main removed navigation-popup.sh while
@@ -56,7 +113,8 @@ so task-sent/acceptance-unknown is not presented as generic ERROR success/failur
 Automated assembled direct-base and integration-branch scenarios passed from
 the saved branch on2026-10-04 (2tests,25.121s), with controlled agents. This does
 not establish real Codex input acceptance; the manual test found that gap.
-The live test is incomplete: no worker implementation or merge verified yet.
+At the initial checkpoint, implementation and integration were still pending.
+Both were subsequently verified; see Current outcome and coverage above.
 User screenshots are the supplied evidence; no live conversation capture used.
 
 ## Integration destination form — live feedback, 08:59
