@@ -209,7 +209,7 @@ pub fn start(request: Start) -> Result<Started, Error> {
             branch: request.branch.clone(),
             name: name.to_owned(),
             command: if request.command.is_empty() {
-                vec!["codex".into()]
+                vec!["codex".into(), "--no-daemon".into()]
             } else {
                 request.command
             },

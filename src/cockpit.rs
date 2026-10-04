@@ -115,6 +115,7 @@ struct LaunchForm {
 }
 
 struct RecoveryForm {
+    context: Option<crate::recovery::Context>,
     repo: PathBuf,
     checkouts: Vec<crate::recovery::Checkout>,
     selected: usize,
@@ -449,6 +450,27 @@ impl App {
         form.result = None;
         form.preview = None;
         form.scroll = 0;
+        let branch = &form.fields[0];
+        if branch.starts_with('/')
+            || branch.starts_with("./")
+            || branch.starts_with("../")
+            || branch.starts_with("~/")
+            || (!branch.is_empty()
+                && PathBuf::from(branch).is_dir()
+                && workspace::git(
+                    &form.source,
+                    &[
+                        "show-ref",
+                        "--verify",
+                        "--",
+                        &format!("refs/heads/{branch}"),
+                    ],
+                )
+                .is_err())
+        {
+            form.error = Some("That looks like a checkout directory. Enter its branch name (for example main), or press Esc and select the branch + directory from the list.".into());
+            return;
+        }
         let destination = match (form.fields[0].is_empty(), form.fields[1].is_empty()) {
             (false, true) => crate::integration::Destination::Branch(form.fields[0].clone()),
             (true, false) => crate::integration::Destination::Batch(form.fields[1].clone()),
@@ -656,6 +678,7 @@ impl App {
         match crate::recovery::list(&repo) {
             Ok(checkouts) => {
                 self.recovery = Some(RecoveryForm {
+                    context: None,
                     selected: checkouts.iter().position(|c| c.path == repo).unwrap_or(0),
                     repo,
                     checkouts,
@@ -754,11 +777,14 @@ impl App {
                     form.file = !form.task.is_empty();
                     form.cursors = [form.task.len(), 0];
                     form.field = 0;
-                    form.batch = form
+                    form.context = form
                         .checkouts
                         .get(form.selected)
-                        .and_then(crate::recovery::context)
-                        .and_then(|c| c.batch)
+                        .and_then(crate::recovery::context);
+                    form.batch = form
+                        .context
+                        .as_ref()
+                        .and_then(|c| c.batch.clone())
                         .unwrap_or_default();
                     form.cursors[1] = form.batch.len();
                     form.error = None;
@@ -866,7 +892,11 @@ impl App {
             branch: self.launch.branch.clone(),
             start_point: point.commit,
             root: None,
-            command: vec![self.start_agent().command().into()],
+            command: if self.start_agent() == AgentKind::Codex {
+                vec!["codex".into(), "--no-daemon".into()]
+            } else {
+                vec![self.start_agent().command().into()]
+            },
         }) {
             Ok(created) => {
                 let task = self.task.take().unwrap_or_default();
@@ -1507,6 +1537,17 @@ fn event_loop(
             match key.code {
                 KeyCode::Esc => {
                     app.verification = None;
+                    if let Some(form) = &mut app.integration {
+                        if let Some(ActionPreview::Merge(p)) = &form.preview {
+                            form.verification = crate::verification::inspect(
+                                &p.target.path,
+                                app.config.redact_labels,
+                            )
+                            .unwrap_or_else(|_| {
+                                "Not verified · destination evidence unavailable".into()
+                            });
+                        }
+                    }
                     app.begin_refresh();
                 }
                 KeyCode::Tab => {
@@ -1842,11 +1883,23 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         .iter()
         .enumerate()
         {
-            let value = if app.config.redact_labels {
-                "[redacted]"
+            let (value, column) = if app.config.redact_labels {
+                ("[redacted]".to_owned(), 0)
             } else {
-                &form.fields[i]
+                input_view(
+                    &form.fields[i],
+                    form.cursors[i],
+                    body.width.saturating_sub(3) as usize,
+                )
             };
+            if form.field == i
+                && !app.config.redact_labels
+                && body.width > 3
+                && body.height > (3 * i + 1) as u16
+            {
+                frame
+                    .set_cursor_position((body.x + 2 + column as u16, body.y + (3 * i + 1) as u16));
+            }
             lines.push(Line::styled(
                 format!("{} {label}", if form.field == i { "›" } else { " " }),
                 Style::default().fg(app.theme.accent()),
@@ -2004,6 +2057,29 @@ fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
         }
         let modal = centered(area, 110, 25);
         frame.render_widget(Clear, modal);
+        if !app.config.redact_labels && modal.width > 46 {
+            let labels = [
+                "Source (base / current / local ref)",
+                "Integration branch (blank = direct)",
+                "Destination start (blank = base)",
+                "Dedicated checkout (blank = reuse)",
+            ];
+            let row = Paragraph::new(lines[..form.selected + 2].to_vec())
+                .wrap(Wrap { trim: false })
+                .line_count(modal.width.saturating_sub(6));
+            let col = input_view(
+                &form.fields[form.selected],
+                form.cursors[form.selected],
+                54.min(area.width.saturating_sub(46)) as usize,
+            )
+            .1;
+            if row < modal.height.saturating_sub(4) as usize {
+                frame.set_cursor_position((
+                    modal.x + 3 + labels[form.selected].len() as u16 + 4 + col as u16,
+                    modal.y + 2 + row as u16,
+                ));
+            }
+        }
         frame.render_widget(
             Paragraph::new(lines)
                 .wrap(Wrap { trim: false })
@@ -2531,10 +2607,7 @@ fn render_recovery(frame: &mut ratatui::Frame<'_>, app: &App, form: &RecoveryFor
             Constraint::Length(5),
         ])
         .split(area);
-        let context = form
-            .checkouts
-            .get(form.selected)
-            .and_then(crate::recovery::context);
+        let context = &form.context;
         frame.render_widget(
             Paragraph::new(vec![
                 Line::styled(

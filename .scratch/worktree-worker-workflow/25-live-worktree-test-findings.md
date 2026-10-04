@@ -180,8 +180,10 @@ process families, and actual keyboard/rendered UI. New regressions reproduced:
 - A packaged daemon executable below the visible Codex terminal caused false
   ambiguity. Executable-location classification removes only that known backend.
 - A hook inherited another client's TMUX_PANE; the old adapter marked the wrong
-  worker. Routing by unique session cwd with process-lifetime revalidation passes.
-  Ambiguous same-cwd clients are rejected; no payload is inspected.
+  worker. The initial cwd-only remedy failed independent review: unrelated clients could
+  share a directory. The final adapter requires process ancestry plus cwd and
+  revalidates origin identity under the guard. Managed defaults use --no-daemon;
+  shared backends and ambiguous nested agents are rejected; no payload is read.
 - The destination screen offered no selectable main checkout. The picker now
   exposes branch/path and still requires preview plus explicit apply.
 - Integration retained the preview presentation after success. The new result
@@ -203,3 +205,11 @@ retained batch. Startup/recovery show progress, successful transmission is no
 longer a generic ERROR, and missing activity signals are explicitly explained.
 A complete local runtime snapshot survives development checkout removal, with
 atomic selection and retained prior snapshots.
+
+Crosscheck found and corrected: unrelated-client hook attribution, unobservable
+process cwd fallback, recovery subprocess probes during rendering, stale
+verification on returning to Integrated, and directory-vs-branch guidance.
+Configured-adapter fixtures now execute under controlled terminal ancestors and
+reject external callers, packaged backends and nested independent agents.
+The installed `codex --help` confirms --no-daemon support; existing shared-daemon
+sessions are intentionally not rebound or restarted automatically.

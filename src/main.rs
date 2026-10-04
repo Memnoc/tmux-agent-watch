@@ -47,7 +47,7 @@ enum Command {
     Hook {
         agent: AgentArg,
         event: String,
-        /// Route Codex daemon events by their session working directory.
+        /// Verify Codex hook terminal ancestry and its session working directory.
         #[arg(long)]
         session_cwd: bool,
     },

@@ -941,10 +941,16 @@ text identities. This layout adds no blank terminal rows.
   details and reviewed actions stay fixed while open. Hook-backed Working,
   Needs input and Review remain distinct from a merely running process.
 
-Codex's installed adapter routes events by the hook session's working directory,
-not a shared daemon's inherited pane. It requires exactly one live Codex terminal
-at that directory and revalidates its process lifetime before updating state.
-Two terminals in the same directory remain ambiguous; use distinct worktrees or
-inspect them directly. Known packaged app-server-daemon executables are backend
-processes, not additional interactive workers. Unknown process arrangements
-remain conservative. No hook payload or terminal content is read.
+Managed default Codex workers use `codex --no-daemon` (supported by the tested
+Codex 0.160.0). Explicit custom launch commands are preserved. The installed
+adapter requires a unique terminal agent in the hook's actual process ancestry,
+checks that agent's own cwd, and revalidates its PID/birth before updating state.
+It never guesses ownership from cwd or a shared daemon's inherited pane. Two
+separate terminals in the same directory can report independently; nested agents
+in one pane remain ambiguous. Known packaged app-server-daemon executables are
+backend processes, not additional interactive workers, and events originating
+under them are rejected. Existing shared-daemon sessions need a deliberate restart
+with `--no-daemon` for supported automatic signals; first inspect their work and
+use recovery's explicit task entry. Conversations are not restored. On platforms
+without observable process cwd, the adapter fails closed. No hook payload or
+terminal content is read. Errors include the remedy instead of hiding failures.

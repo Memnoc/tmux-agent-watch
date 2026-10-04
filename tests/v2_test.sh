@@ -117,9 +117,21 @@ agent="$(tmux -L "$SOCKET" show-option -wqv -t "$agent_window" @drudwyn_agent)"
 }
 printf 'ok: v2 scan classifies process identity and erases legacy content\n'
 
-printf '%s' '{"prompt":"private customer material"}' |
-  TMUX="$socket_path,$server_pid,0" TMUX_PANE="$agent_pane" DRUDWYN_V2_BIN="$real_binary" \
-  "$ROOT/scripts/codex-hook.sh" permissionRequest
+# Execute the configured adapter below a controlled terminal agent. A random
+# test-runner process with an inherited TMUX_PANE is not hook provenance.
+cat > "$TMP_DIR/adapter-origin.py" <<'PYTHON'
+import ctypes, subprocess, sys, time
+ctypes.CDLL(None).prctl(15, b"codex", 0, 0, 0)
+r = subprocess.run([sys.argv[1], "permissionRequest"], input='{"prompt":"private customer material"}', text=True)
+open(sys.argv[2], 'w').write(str(r.returncode))
+time.sleep(30)
+PYTHON
+tmux -L "$SOCKET" respawn-pane -k -t "$agent_pane" python3 "$TMP_DIR/adapter-origin.py" "$ROOT/scripts/codex-hook.sh" "$TMP_DIR/adapter-result"
+for attempt in {1..100}; do
+  [ ! -f "$TMP_DIR/adapter-result" ] || break
+  sleep .05
+done
+[ "$(cat "$TMP_DIR/adapter-result")" = 0 ]
 state="$(tmux -L "$SOCKET" show-option -wqv -t "$agent_window" @drudwyn_state)"
 message="$(tmux -L "$SOCKET" show-option -wqv -t "$agent_window" @drudwyn_message)"
 agent="$(tmux -L "$SOCKET" show-option -wqv -t "$agent_window" @drudwyn_agent)"

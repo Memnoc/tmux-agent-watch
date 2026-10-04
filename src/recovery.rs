@@ -493,7 +493,11 @@ pub(crate) fn agent_command(agent: crate::domain::AgentKind) -> Result<Vec<Strin
     } else {
         std::env::current_dir()?.join(executable)
     };
-    Ok(vec![executable.to_string_lossy().into_owned()])
+    let mut command = vec![executable.to_string_lossy().into_owned()];
+    if agent == crate::domain::AgentKind::Codex {
+        command.push("--no-daemon".into());
+    }
+    Ok(command)
 }
 
 // Lossless operational path metadata, never a guess at tmux display escaping.

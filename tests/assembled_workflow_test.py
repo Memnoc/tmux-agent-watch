@@ -9,6 +9,7 @@ import hashlib
 import os
 import re
 import shutil
+import shlex
 import signal
 import subprocess
 import sys
@@ -81,8 +82,12 @@ class AssembledWorkflowTest(IndependentNavigation):
         self.agents = self.root / 'agents'
         self.agents.mkdir()
         self.agent = self.agents / 'codex'
-        shutil.copy(shutil.which('cat'), self.agent)
-        self.assertEqual(hashlib.sha256(self.agent.read_bytes()).digest(),
+        native = self.agents / 'native'; native.mkdir()
+        self.native_agent = native / 'codex'
+        shutil.copy(shutil.which('cat'), self.native_agent)
+        self.agent.write_text('#!/bin/sh\nstty raw -echo\nexec ' + shlex.quote(str(self.native_agent)) + '\n')
+        self.agent.chmod(0o755)
+        self.assertEqual(hashlib.sha256(self.native_agent.read_bytes()).digest(),
                          hashlib.sha256(Path(shutil.which('cat')).read_bytes()).digest())
         self.env['PATH'] = str(self.agents) + os.pathsep + self.env['PATH']
         self.assertEqual(shutil.which('codex', path=self.env['PATH']), str(self.agent))
@@ -100,7 +105,7 @@ class AssembledWorkflowTest(IndependentNavigation):
 
     def assert_agent(self, window):
         pid = self.tmux('display-message', '-p', '-t', window, '#{pane_pid}')
-        self.assertEqual(Path('/proc', pid, 'exe').resolve(), self.agent.resolve())
+        self.assertEqual(Path('/proc', pid, 'exe').resolve(), self.native_agent.resolve())
 
     def stop_agent(self, window):
         self.tmux('set', '-w', '-t', window, 'remain-on-exit', 'on')

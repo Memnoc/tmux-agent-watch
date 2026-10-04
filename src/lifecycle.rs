@@ -31,7 +31,7 @@ pub enum LifecycleError {
     #[error("unsupported lifecycle event: {0}")]
     UnsupportedEvent(String),
     #[error(
-        "Codex activity unavailable: session cwd has no unique live terminal (missing or ambiguous ownership). Open the worker and inspect its activity."
+        "Codex activity unavailable: hook has no verified terminal ancestor (missing or ambiguous ownership). Shared-daemon sessions need a deliberate restart with codex --no-daemon; inspect the worker before restarting."
     )]
     CwdOwnership,
     #[error("could not serialize lifecycle updates: {0}")]
@@ -144,48 +144,87 @@ fn packaged_codex_backend(pid: &str, command: &str) -> bool {
         && executable.file_name().is_some_and(|n| n == "codex")
 }
 
-/// Codex runs command hooks in the session cwd, even when the daemon inherited
-/// another client's TMUX_PANE. Resolve a unique terminal by actual process cwd;
-/// never fall back to the inherited pane on zero or multiple matches.
-fn codex_cwd_pane() -> Result<String, LifecycleError> {
+/// Configured hooks require process ancestry, not a shared daemon's inherited
+/// pane or a cwd guess. Cwd is only a consistency check. No payload is read.
+fn codex_hook_origin() -> Result<(String, String), LifecycleError> {
     let cwd = env::current_dir()?.canonicalize()?;
     let all = processes()?;
+    let own = std::process::id().to_string();
+    let mut current = all
+        .iter()
+        .find(|p| p.pid == own)
+        .ok_or(LifecycleError::CwdOwnership)?;
+    let mut origin = None;
+    for _ in 0..128 {
+        // A backend is not a terminal, even if originally started under one.
+        if packaged_codex_backend(&current.pid, "codex") {
+            return Err(LifecycleError::CwdOwnership);
+        }
+        if current.agent.is_some() {
+            if current.agent != Some(AgentKind::Codex) || current.exited {
+                return Err(LifecycleError::CwdOwnership);
+            }
+            origin = Some(current);
+            break;
+        }
+        current = all
+            .iter()
+            .find(|p| p.pid == current.parent && p.pid != current.pid)
+            .ok_or(LifecycleError::CwdOwnership)?;
+    }
+    let origin = origin.ok_or(LifecycleError::CwdOwnership)?;
+    let path = fs::read_link(format!("/proc/{}/cwd", origin.pid))
+        .and_then(|p| p.canonicalize())
+        .map_err(|_| LifecycleError::CwdOwnership)?;
+    if path != cwd {
+        return Err(LifecycleError::CwdOwnership);
+    }
     let rows = tmux_output(&[
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}␟#{pane_pid}␟#{pane_dead}␟#{pane_current_path}",
+        "#{pane_id}␟#{pane_pid}␟#{pane_dead}",
     ])?;
     let mut candidates = std::collections::BTreeSet::new();
     for row in rows.lines() {
         let f: Vec<_> = row.split(SEPARATOR).collect();
-        if f.len() != 4 || f[2] != "0" {
+        if f.len() != 3 || f[2] != "0" || !belongs_to(origin, f[1], &all) {
             continue;
+        }
+        let mut ancestor = origin;
+        for _ in 0..128 {
+            if packaged_codex_backend(&ancestor.pid, "codex") {
+                return Err(LifecycleError::CwdOwnership);
+            }
+            if ancestor.pid == f[1] {
+                break;
+            }
+            ancestor = all
+                .iter()
+                .find(|p| p.pid == ancestor.parent && p.pid != ancestor.pid)
+                .ok_or(LifecycleError::CwdOwnership)?;
         }
         let agents: Vec<_> = all
             .iter()
             .filter(|p| !p.exited && p.agent.is_some() && belongs_to(p, f[1], &all))
             .collect();
-        for p in agents.iter().filter(|p| p.agent == Some(AgentKind::Codex)) {
-            let path = fs::read_link(format!("/proc/{}/cwd", p.pid))
-                .unwrap_or_else(|_| std::path::PathBuf::from(f[3]));
-            if path.canonicalize().ok().as_ref() == Some(&cwd) {
-                if agents.len() != 1 {
-                    return Err(LifecycleError::CwdOwnership);
-                }
-                candidates.insert(f[0].to_owned());
-            }
+        if agents.len() != 1 {
+            return Err(LifecycleError::CwdOwnership);
         }
+        candidates.insert(f[0].to_owned());
     }
     if candidates.len() != 1 {
         return Err(LifecycleError::CwdOwnership);
     }
-    Ok(candidates.into_iter().next().unwrap())
+    Ok((
+        candidates.into_iter().next().unwrap(),
+        format!("{}:{}", origin.pid, origin.birth),
+    ))
 }
 
 pub fn codex_session_hook(event: &str) -> Result<(), LifecycleError> {
-    let pane = codex_cwd_pane()?;
-    apply_hook(AgentKind::Codex, event, &pane, true)
+    let origin = codex_hook_origin()?;
+    apply_hook(AgentKind::Codex, event, &origin.0, Some(&origin.1))
 }
 
 fn belongs_to(process: &Process, root: &str, all: &[Process]) -> bool {
@@ -483,14 +522,14 @@ pub fn starting(pane: &str, pid: &str, agent: Option<AgentKind>) -> Result<(), L
 
 pub fn hook(agent: AgentKind, event: &str) -> Result<(), LifecycleError> {
     let pane = env::var("TMUX_PANE").map_err(|_| LifecycleError::MissingPane)?;
-    apply_hook(agent, event, &pane, false)
+    apply_hook(agent, event, &pane, None)
 }
 
 fn apply_hook(
     agent: AgentKind,
     event: &str,
     pane: &str,
-    session_cwd: bool,
+    origin: Option<&str>,
 ) -> Result<(), LifecycleError> {
     let lifecycle = map_event(agent, event)
         .ok_or_else(|| LifecycleError::UnsupportedEvent(event.to_owned()))?;
@@ -498,8 +537,11 @@ fn apply_hook(
     // the pane's unique agent, not proof of the caller's identity or event time.
     let observed = observe_hook_target(&pane, agent)?;
     let guard = LifecycleGuard::acquire()?;
-    if session_cwd && codex_cwd_pane()? != pane {
-        return Err(LifecycleError::ChangedAgent);
+    if let Some(origin) = origin {
+        let current = codex_hook_origin()?;
+        if current.0 != pane || current.1 != origin {
+            return Err(LifecycleError::ChangedAgent);
+        }
     }
     let current = observe_hook_target(&pane, agent)?;
     if observed.identity != current.identity || observed.root_birth != current.root_birth {

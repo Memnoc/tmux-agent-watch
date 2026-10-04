@@ -162,28 +162,69 @@ class Activity(unittest.TestCase):
         self.assertIn('REVIEW', self.cli('status'))
         self.assertEqual(self.option('process'), 'running')
 
-    def test_codex_adapter_routes_cwd(self):
-        other = self.path/'other'; other.mkdir()
-        target = self.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-c', str(other), str(self.fake), '300')
-        target_window = self.tmux('display-message', '-p', '-t', target, '#{window_id}')
-        time.sleep(.1)
-        # The adapter inherits the daemon's old pane, but runs in the event cwd.
-        result = subprocess.run([str(ROOT/'scripts/codex-hook.sh'), 'stop'],
-                                env=dict(self.env, DRUDWYN_V2_BIN=str(BIN)), cwd=other,
-                                input='private payload ignored', capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.tmux('show-option', '-wqv', '-t', target_window, '@drudwyn_state'), 'done')
-        self.assertNotEqual(self.option('state'), 'done')
-        self.assertEqual(result.stdout.strip(), '{}')
-        # Two possible clients in the same cwd must never receive guessed state.
-        self.tmux('new-window', '-d', '-c', str(other), str(self.fake), '300')
-        time.sleep(.1)
-        result = subprocess.run([str(ROOT/'scripts/codex-hook.sh'), 'permissionRequest'],
-                                env=dict(self.env, DRUDWYN_V2_BIN=str(BIN)), cwd=other,
-                                input='ignored', capture_output=True, text=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('ambiguous', result.stderr.lower())
-        self.assertEqual(self.tmux('show-option', '-wqv', '-t', target_window, '@drudwyn_state'), 'done')
+    def hook_worker(self, directory, *, backend=False, nested=False):
+        """Controlled terminal agent executes the installed adapter as a child."""
+        trigger = directory/'trigger'; result = directory/'result'
+        script = directory/'worker.py'
+        adapter = str(ROOT/'scripts/codex-hook.sh')
+        script.write_text('import ctypes, subprocess, pathlib, time, json, os\n'
+            'ctypes.CDLL(None).prctl(15, b"codex", 0, 0, 0)\n'
+            f'os.chdir({str(directory)!r})\n'
+            f'trigger=pathlib.Path({str(trigger)!r})\n'
+            'while not trigger.exists(): time.sleep(.01)\n'
+            f'r=subprocess.run([{adapter!r}, "stop"], env={{**os.environ, "DRUDWYN_V2_BIN": {str(BIN)!r}, "TMUX_PANE": {self.pane!r}}}, input="ignored payload", capture_output=True, text=True)\n'
+            f'pathlib.Path({str(result)!r}).write_text(json.dumps([r.returncode,r.stdout,r.stderr]))\n'
+            'time.sleep(300)\n')
+        executable = shutil.which('python3')
+        if backend:
+            location = directory/'packages/app-server-daemon/current/bin'
+            location.mkdir(parents=True)
+            executable = location/'codex'; shutil.copy(shutil.which('python3'), executable)
+        if nested:
+            outer = directory/'outer.py'
+            outer.write_text('import ctypes, subprocess, time\n'
+                'ctypes.CDLL(None).prctl(15, b"codex", 0, 0, 0)\n'
+                f'subprocess.Popen([{shutil.which("python3")!r}, {str(script)!r}])\n'
+                'time.sleep(300)\n')
+            script = outer
+        pane = self.tmux('new-window','-d','-P','-F','#{pane_id}','-c',str(directory),str(executable),str(script))
+        return pane, trigger, result
+
+    def hook_result(self, trigger, result):
+        import json
+        trigger.touch()
+        deadline=time.monotonic()+5
+        while not result.exists():
+            self.assertLess(time.monotonic(),deadline)
+            time.sleep(.02)
+        return json.loads(result.read_text())
+
+    def test_codex_adapter_requires_origin_not_cwd(self):
+        other=self.path/'other'; other.mkdir()
+        target, trigger, result = self.hook_worker(other)
+        target_window=self.tmux('display','-p','-t',target,'#{window_id}')
+        # Same cwd and a stale inherited pane do not defeat actual ancestry.
+        self.tmux('new-window','-d','-c',str(other),str(self.fake),'300')
+        code, out, err=self.hook_result(trigger,result)
+        self.assertEqual(code,0,err); self.assertEqual(out.strip(),'{}')
+        self.assertEqual(self.tmux('show','-wqv','-t',target_window,'@drudwyn_state'),'done')
+        self.assertNotEqual(self.option('state'),'done')
+        # A helper outside the terminal must not mutate that worker even in its cwd.
+        r=subprocess.run([str(ROOT/'scripts/codex-hook.sh'),'permissionRequest'],
+            env=dict(self.env,DRUDWYN_V2_BIN=str(BIN)),cwd=other,input='ignored',capture_output=True,text=True)
+        self.assertNotEqual(r.returncode,0)
+        self.assertIn('verified terminal ancestor',r.stderr)
+        self.assertEqual(self.tmux('show','-wqv','-t',target_window,'@drudwyn_state'),'done')
+
+    def test_codex_adapter_rejects_backend_and_nested_agents(self):
+        for label, flags in [('backend',dict(backend=True)),('nested',dict(nested=True)),('backend-child',dict(backend=True,nested=True))]:
+            directory=self.path/label; directory.mkdir()
+            pane,trigger,result=self.hook_worker(directory,**flags)
+            code,out,err=self.hook_result(trigger,result)
+            self.assertNotEqual(code,0,(label,out,err))
+            self.assertIn('ambiguous ownership',err)
+            window=self.tmux('display','-p','-t',pane,'#{window_id}')
+            self.assertNotEqual(self.tmux('show','-wqv','-t',window,'@drudwyn_state'),'done')
 
     def test_reaped_child_keeps_observed_exit_and_review(self):
         pid, reap = self.reaping_worker()

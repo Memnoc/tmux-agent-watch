@@ -402,6 +402,26 @@ class WorkerIntegrationTest(IndependentNavigation):
         self.tmux('send-keys', '-t', pane, 'i')
         return pane
 
+    def test_integrating_is_visible_while_git_is_in_progress(self):
+        wrappers=Path(self.tmp.name)/'slow-git'; wrappers.mkdir()
+        release=wrappers/'release'
+        git_path=subprocess.check_output(['sh','-c','command -v git'],text=True).strip()
+        wrapper=wrappers/'git'
+        wrapper.write_text('#!/bin/sh\ncase " $* " in *" merge "*)\n'
+            'while [ ! -e '+shlex.quote(str(release))+' ]; do sleep .02; done;; esac\n'
+            'exec '+shlex.quote(git_path)+' "$@"\n')
+        wrapper.chmod(0o755)
+        self.addCleanup(release.touch)
+        pane=self.integration_ui(['PATH='+str(wrappers)+':'+os.environ['PATH']])
+        self.wait_pane(pane,'INTEGRATE PREVIEW')
+        self.tmux('send-keys','-t',pane,'y')
+        screen=self.wait_pane(pane,'INTEGRATING')
+        self.assertIn('IN PROGRESS',screen)
+        self.assertEqual(self.git('rev-parse','HEAD'),self.base)
+        release.touch()
+        self.wait_pane(pane,'INTEGRATED')
+        self.assertEqual(self.git('rev-parse','HEAD'),self.commit)
+
     def test_destination_picker_and_prominent_result(self):
         self.tmux('set', '-wu', '-t', self.worker, '@drudwyn_batch')
         pane = self.integration_ui()
@@ -420,6 +440,44 @@ class WorkerIntegrationTest(IndependentNavigation):
         self.tmux('send-keys', '-t', pane, 'v')
         screen = self.wait_pane(pane, 'ASSEMBLED VERIFICATION')
         self.assertIn(str(self.repo), screen)
+        self.tmux('send-keys','-t',pane,'-l','smoke')
+        self.tmux('send-keys','-t',pane,'Tab')
+        self.tmux('send-keys','-t',pane,'-l','true')
+        self.tmux('send-keys','-t',pane,'F5')
+        self.wait_pane(pane,'Press Enter to return')
+        self.tmux('send-keys','-t',pane,'Enter')
+        self.wait_pane(pane,'ASSEMBLED VERIFICATION')
+        self.tmux('send-keys','-t',pane,'Escape')
+        screen=self.wait_pane(pane,'INTEGRATED')
+        self.assertIn('Passed',screen)
+        self.assertNotIn('Not verified',screen)
+
+    def test_manual_destination_accepts_branch_named_like_directory(self):
+        self.git('branch','docs','main')
+        target=Path(self.tmp.name)/'docs-checkout'
+        self.git('worktree','add',str(target),'docs')
+        (self.source/'docs').mkdir()
+        self.tmux('set','-wu','-t',self.worker,'@drudwyn_batch')
+        pane=self.integration_ui()
+        self.wait_pane(pane,'CHOOSE DESTINATION')
+        self.tmux('send-keys','-t',pane,'e')
+        self.tmux('send-keys','-t',pane,'-l','docs')
+        self.tmux('send-keys','-t',pane,'Enter')
+        screen=self.wait_pane(pane,'INTEGRATE PREVIEW')
+        self.assertIn('refs/heads/docs',screen)
+
+    def test_manual_destination_explains_directory_and_returns_to_choices(self):
+        self.tmux('set','-wu','-t',self.worker,'@drudwyn_batch')
+        pane=self.integration_ui()
+        self.wait_pane(pane,'CHOOSE DESTINATION')
+        self.tmux('send-keys','-t',pane,'e')
+        self.tmux('send-keys','-t',pane,'-l',str(self.repo))
+        self.tmux('send-keys','-t',pane,'Enter')
+        screen=self.wait_pane(pane,'checkout directory')
+        self.assertIn('main',screen)
+        self.tmux('send-keys','-t',pane,'Escape')
+        self.wait_pane(pane,'Select the branch')
+        self.assertEqual(self.git('rev-parse','HEAD'),self.base)
 
     def test_cockpit_preview_cancel_and_apply_preserves_both_client_selections(self):
         before = [self.selection(c) for c in self.clients]

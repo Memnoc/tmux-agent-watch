@@ -213,4 +213,4 @@ process births and cwd inodes, and a tmux-side pane-set comparison prevents a ne
 split/replaced pane being swept into the removal. No branch deletion, force
 removal, durable receipt, push or deployment is added.
 
-Startup additionally observes terminal driver flags (canonical input and echo), never screen text. The Codex adapter uses its own session cwd to disambiguate shared-daemon hooks and never parses their payload. Runtime snapshots contain application code/assets only. Coordinator return bookmarks are non-content window IDs scoped to the live tmux session and requesting client.
+Startup additionally observes terminal driver flags (canonical input and echo), never screen text. The Codex adapter verifies its terminal ancestor and that process's cwd, rechecks identity under the lifecycle guard, and never parses hook payloads. Shared-daemon origins cannot prove terminal ownership and are rejected; managed default Codex workers use --no-daemon. Runtime snapshots contain application code/assets only. Coordinator return bookmarks are non-content window IDs scoped to the live tmux session and requesting client.

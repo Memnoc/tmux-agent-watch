@@ -3,6 +3,7 @@
 set -eu
 
 PLUGIN_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+PREVIOUS_PLUGIN_DIR="$(tmux show-option -gqv @drudwyn_plugin_dir 2>/dev/null || true)"
 tmux set-option -gq @drudwyn_plugin_dir "$PLUGIN_DIR"
 
 bash "$PLUGIN_DIR/scripts/migrate-options.sh"
@@ -37,9 +38,10 @@ cleanup_plugin_hooks() {
   local hook slot command
   for hook in client-attached after-new-window after-select-pane after-select-window; do
     while read -r slot command; do
-      case "$command" in
-        *"$PLUGIN_DIR"*) tmux set-hook -gu "$slot" ;;
-      esac
+      if [[ "$command" == *"$PLUGIN_DIR"* ]] ||
+        { [ -n "$PREVIOUS_PLUGIN_DIR" ] && [[ "$command" == *"$PREVIOUS_PLUGIN_DIR"* ]]; }; then
+        tmux set-hook -gu "$slot"
+      fi
     done < <(tmux show-hooks -g "$hook" 2>/dev/null || true)
   done
 }
