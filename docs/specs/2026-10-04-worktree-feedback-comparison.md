@@ -47,10 +47,10 @@ The original updater interruption cannot be recreated honestly unless it recurs.
 | Chat/coordinator/worker navigation | Repeated context switching | Pending; per-client coordinator toggle passes automation |
 | Form editing | Enter/arrows confusing; cursor hard to find | Pending; field navigation, multiline and cursor fixtures pass |
 | Launch/recovery task | Empty Codex editor despite sent receipt | Prompt reached the editor; user still had to press Enter. Automatic submission remains broken in this live run. Recovery not repeated yet. |
-| Activity | RUN persisted after completion; hooks failed | Pending new standalone worker; ancestry adapter regressions pass |
+| Activity | RUN persisted after completion; hooks failed | Greetings completion recorded as done, source hook, while the process remained running. Screenshot 11:48:23 confirms REVIEW on greetings under drudwyn-compare, 1 REVIEW in Cockpit and 1 NEED in the bar. |
 | Destination | Path pasted into branch field | Pending; branch+checkout picker and validation pass |
-| Integration progress/result | Quiet line under old preview | Pending; gated Git progress and distinct actual-head result pass |
-| Assembled checks | Ran outside Drudwyn; no UI receipt | Pending; visible checks and refreshed Passed receipt pass |
+| Integration progress/result | Quiet line under old preview | Screenshot 11:51:24 shows INTEGRATED in the correct comparison checkout at bc32dee. Intermediate progress was not independently observed in this live run. |
+| Assembled checks | Ran outside Drudwyn; no UI receipt | Ran through Drudwyn: 2 tests OK, exit 0, Passed receipt at bc32dee. Verification form renders receipt fields concatenated; return to Integrated still to be checked. |
 | Recovery continuity | Name/project/batch uncertain | Pending; retained identity and explicit missing-metadata paths pass |
 | Secondary popup styling | Bland, weak hierarchy | User reports much improved appearance; asks for clearer labels, separation and contextual guidance. |
 
@@ -104,3 +104,56 @@ Acceptance direction: repeat launch through integration with guidance supplied
 by Drudwyn itself, recording any step that still requires this chat to explain it.
 These are recorded follow-up requirements/proposals, not implemented changes.
 The installed test runtime remains unchanged while this live comparison runs.
+
+## Live repeat checkpoint — greetings finished
+
+Read-only inspection after the user reported completion:
+
+- work/greetings HEAD: bc32dee090f2c94056526bb39634920ed7cb7943.
+- Worker checkout is clean; commit adds greetings.py and test_greetings.py.
+- Window @32 (greetings) records state=done, source=hook, process=running,
+  delivery=sent. This is real hook completion evidence, unlike the first run.
+  It does not prove tests passed or establish the on-screen Review rendering.
+- Destination main remains clean at ce51f1e; no integration has happened yet.
+- No conversation or terminal content was captured. Checks were not run outside
+  Drudwyn; the next steps are UI integration followed by visible verification.
+
+## Live repeat checkpoint — worker identity at integration
+
+Screenshots 11:48:23 and 11:48:30 confirm the new greetings worker is visibly
+REVIEW under drudwyn-compare. Cockpit totals show 1 REVIEW / 1 need you and the
+ambient bar shows 1 NEED. This establishes both hook evidence and its projection.
+
+The highlighted row is the retained earlier work/greetings worker under session
+7, so Integrate correctly lists the earlier playground's main checkout, not the
+comparison checkout. No new integration is established by these screenshots.
+Guidance: return to Cockpit, select greetings under drudwyn-compare, then inspect
+its integration preview for /tmp/drudwyn-worktree-comparison-20261004.
+
+Usability finding: near-identical branch names across retained runs are easy to
+confuse, and the destination picker omits prominent source-worker/project context.
+The next polish pass should keep source identity visible throughout the action,
+make the selected row's project unmistakable, and make attention workers easy to
+find without requiring the user to remember the correct session grouping. Keep
+global visibility; do not infer a target solely from the invoking chat session.
+
+## Live repeat checkpoint — UI integration and verification
+
+Screenshots 11:51:08/11:51:24 establish the reviewed fast-forward and distinct
+INTEGRATED result in /tmp/drudwyn-worktree-comparison-20261004 at bc32dee. The
+worker is retained. This is integration evidence, separate from checks.
+
+Screenshots 11:55:28/11:56:13 show python3 -m unittest discover -v run through
+Drudwyn's visible verification action: 2 tests, OK, exit 0, Assembled verification
+Passed for check greetings and the same revision. The user returned to the
+verification form; return to the Integrated result remains to be observed.
+
+Rendering defect: that form joins the receipt fields without separators,
+producing PassedCheck / greetingsCheckout / ... and wrapping one long line.
+Restore semantic line/section boundaries, a prominent pass/fail result and
+readable metadata. Raw epoch timestamps add needless interpretation work.
+The transient command field is empty after execution by design; it is not proof
+of lost input. Make this intentional clearing understandable in contextual help.
+The first screenshot is partially occluded by the desktop launcher, but the test
+count, OK, Passed and exit 0 remain visible. No need to repeat checks for a clearer
+screenshot or infer failure from the result-formatting bug.
