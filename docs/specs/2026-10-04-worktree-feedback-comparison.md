@@ -258,7 +258,7 @@ blocking findings after these corrections. Final validation receipts are in the
 ticket; the user's successful merge/check route above remains the live evidence.
 
 
-## October 5 final live test — startup confirmed, merge/check pending
+## October 5 final live test — passed
 
 Runtime ede1b6d; fresh disposable project
 `/tmp/drudwyn-final-check-20261005-pzz3zgvb`, session drudwyn-final.
@@ -271,3 +271,23 @@ its user-driven merge and checks before it is recorded as complete.
 The navigator screenshot also exposed a colored badge touching the branch;
 [ticket27](../../.scratch/worktree-worker-workflow/27-check-output-and-label-spacing.md)
 records the reproduced background-padding defect and correction.
+
+
+After the user completed the remaining steps, read-only inspection confirmed:
+
+- Automatic task submission was confirmed by the user in this fresh run.
+- Both main and work/finalworker point to
+  `94691d32f21ec1c78cb1e34658443d6c826c72f9`; the worker commit is contained in main.
+- Both the primary checkout and retained worker checkout are clean.
+- Drudwyn's saved check `finalworkerchecks` reports Passed, exit 0, against that
+  exact merged revision. The coordinator inspected the saved receipt without
+  substituting another test run.
+- Runtime 3e120c2 includes the final badge-gutter correction; startup was exercised
+  on ede1b6d, whose startup behavior is unchanged in 3e120c2.
+
+This completes the final live start → automatic submission → worker commit →
+merge → destination checks route. Together with the recorded regression suite,
+it validates the core workflow for daily use on this Linux/tmux setup. Worker
+cleanup was not part of this final manual pass; its safeguards remain covered by
+the automated suite. This receipt does not merge or publish the Drudwyn feature
+branch, and does not claim new platform coverage.

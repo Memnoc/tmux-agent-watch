@@ -204,3 +204,13 @@ checkout directories, helper death and stalled setup metadata. Live helper lifet
 metadata drives recovery guidance; it contains no task text. The two-minute limit
 bounds setup waiting. Entering normal transport first marks delivery uncertain,
 so later delays cannot be mistaken for a definitely-unsent expired wait.
+
+
+## October 5 final live acceptance
+
+The [final comparison receipt](../specs/2026-10-04-worktree-feedback-comparison.md#october-5-final-live-test--passed)
+confirms automatic Codex startup, worker commit 94691d3 merged into the disposable
+project's main, clean checkouts, and a saved Passed/exit-0 destination check for
+that exact revision. Runtime 3e120c2 includes the final navigator badge gap.
+The core workflow is accepted for daily use on the tested setup. Implementation
+remains on work/worktree-worker-workflow; the Drudwyn main checkout is unchanged.
