@@ -208,3 +208,30 @@ implementation and validation against baseline 0187ad2. Earlier proposals and li
 observations above remain historical evidence. The next manual comparison must
 still verify prompt submission without Enter and whether the guidance removes
 the need for this coordinating conversation to explain each step.
+
+## October 5 live repeat — completed with manual task submission
+
+Runtime: 4c4fe84. Fresh fixture: `/tmp/drudwyn-worktree-check-20261005`,
+starting from ce51f1e. Session drudwyn-check; worker wttester on work/wttester.
+
+- Setup and task form opened correctly. User found `base` changing to `main`
+  between setup and preview confusing; display the resolved default branch
+  consistently in both screens.
+- Screenshot 09:54:33 shows the task in Codex's editor. User explicitly confirmed
+  pressing Enter to start it. Automatic submission still fails in this real run;
+  previous controlled transport tests did not establish live acceptance.
+- Worker committed greetings.py and test_greetings.py as a25686d. Read-only
+  metadata showed state=done, source=hook, delivery=sent, process=running.
+- Screenshot 10:28:09 confirms the intended worker and destination in Merge
+  changes. The yellow Not verified / missing live evidence wording needed an
+  explanation. Prefer Tests haven't been run here yet for that pre-check state.
+- User reports the remaining flow went well and was easy to follow.
+- Final read-only Git inspection: main is a25686d, work/wttester is contained in
+  main, and both checkouts are clean. Worker checkout remains available.
+- Drudwyn's saved destination receipt reports Passed, check wttest, exit 0,
+  tested revision a25686d71a8721313dad1da5b6344cf6dee3aff5. No extra test command
+  was run by the coordinator to substitute for this in-product result.
+
+Result: live merge and destination checks passed; usability improved according
+ to the user. Automatic task submission and the two wording issues remain open.
+This is not a fully hands-off launch pass or a deployment claim.
