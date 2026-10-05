@@ -235,3 +235,24 @@ starting from ce51f1e. Session drudwyn-check; worker wttester on work/wttester.
 Result: live merge and destination checks passed; usability improved according
  to the user. Automatic task submission and the two wording issues remain open.
 This is not a fully hands-off launch pass or a deployment claim.
+
+
+## October 5 final correction — automated comparison
+
+[Ticket28](../../.scratch/worktree-worker-workflow/28-startup-gate-and-clear-defaults.md)
+implements the three remaining findings. An installed Codex 0.160.0 fixture using
+an isolated home/config and local dummy provider now verifies that trusted
+projects submit automatically. For first-time folder access, Drudwyn waits for
+the user's setup decision, then submits once without a second Enter. This proves
+input acceptance in that version; it does not claim model implementation quality
+or infer what the original unseen startup screen contained.
+
+Setup and preview now show the same resolved default branch name. A destination
+without checks shows Tests haven't been run here yet in a neutral style. Failed,
+stale and unavailable checks retain their distinct states.
+
+Pending tasks are discarded when the worker or checkout changes. Helper death
+and expired setup waits produce recovery guidance rather than a stale promise of
+automatic submission. Independent Standards and Spec reviews report no remaining
+blocking findings after these corrections. Final validation receipts are in the
+ticket; the user's successful merge/check route above remains the live evidence.

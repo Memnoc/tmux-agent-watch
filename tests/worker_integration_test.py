@@ -509,7 +509,7 @@ class WorkerIntegrationTest(IndependentNavigation):
         pane = self.integration_ui()
         preview = self.wait_pane(pane, 'MERGE CHANGES')
         self.assertIn('Merge into: main', preview)
-        self.assertIn('Not verified', preview)
+        self.assertIn("Tests haven't been run here yet.", preview)
         self.tmux('send-keys', '-t', pane, 'Escape')
         self.wait_pane(pane, 'WORKSPACE COCKPIT')
         self.assertEqual(self.git('rev-parse', 'HEAD'), self.base)

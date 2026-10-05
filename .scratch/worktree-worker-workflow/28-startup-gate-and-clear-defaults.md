@@ -30,7 +30,11 @@ Startup now requires stable editor mode (including that non-content cursor flag)
 After the short readiness window, a Codex helper can wait up to two minutes with
 task text held solely in stdin/process memory. It holds the existing checkout
 lock, revalidates pane/process/checkout identity, and sends once after setup.
-Closed/replaced workers discard the pending task; timeouts return to not_sent.
+Closed/replaced workers or changed checkout identity discard the pending task.
+Live helper lifetime metadata exposes interrupted/expired waits and a deliberate
+restart action. The two-minute deadline bounds waiting for setup, including
+stalled metadata calls. Normal transmission marks uncertainty before leaving
+that waiting phase, so its later interruption cannot falsely claim not sent.
 There is no automatic retry after partial/uncertain transmission. No screen
 capture, prompt file, persistent registry, trust bypass, or user config edit is
 introduced. Current protocol checks are validated against Codex 0.160.0; the
@@ -59,3 +63,22 @@ base while preview showed trunk. Old merge preview exposed missing live evidence
 Green checks cover those paths, trusted/untrusted real Codex submission, pending
 worker replacement, ordinary delivery guards, recovery, and branch/check wording.
 Final test and review results will be appended below.
+
+## Independent review corrections
+
+Standards found that a pending worker could change its real cwd and that blocked
+metadata could outlive the stated setup wait. Spec found the renamed/replaced
+checkout case and stale waiting promises after helper death. Regression tests
+reproduced the wrong-folder and replaced-folder sends against the old binary.
+
+The helper now validates the held directory inode and actual worker cwd before
+sending, bounds setup observation with its own process group watchdog, and bounds
+its initial acknowledgement. Non-content helper PID/birth/deadline metadata lets
+Cockpit derive interrupted, expired or changed-worker guidance without storing
+tasks. A killed helper cannot leave a promise of future submission. Normal
+transmission records uncertainty before leaving the setup-wait phase; an expired
+setup timestamp cannot later claim that an in-progress transport never sent.
+A stalled-transport regression also proves overlapping retry is refused.
+
+Final rechecks: Standards — no remaining blocking findings. Spec — no remaining
+findings. Both reviewed the corrected working diff; validation is recorded below.

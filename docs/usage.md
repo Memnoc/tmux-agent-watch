@@ -989,8 +989,8 @@ Moon and Dawn remain optional themes.
 Linux delivery waits for the terminal input queue to drain before a single Enter.
 This observes a byte count, never terminal contents. A five-second timeout leaves
 an uncertain result for inspection, not an automatic retry. Other platforms retain
-the previous delay. The controlled regression passes; real Codex acceptance still
-needs the next manual comparison and is never inferred from transport success.
+the previous delay. Installed Codex 0.160.0 submission is tested with an isolated local dummy provider;
+acceptance of real implementation work is never inferred from transport success.
 
 ### Reading check output
 

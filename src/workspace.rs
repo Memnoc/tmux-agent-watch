@@ -693,21 +693,28 @@ fn defer_task(pane: &DeliveryTarget, task: &str) -> Result<TaskDelivery, Error> 
             .take()
             .ok_or_else(|| io::Error::other("Task input unavailable"))?
             .write_all(task.as_bytes())?;
-        let mut reply = String::new();
-        io::BufReader::new(
-            child
-                .stdout
-                .take()
-                .ok_or_else(|| io::Error::other("Startup acknowledgement unavailable"))?,
-        )
-        .read_line(&mut reply)?;
+        let output = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("Startup acknowledgement unavailable"))?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let mut reply = String::new();
+            let result = io::BufReader::new(output)
+                .read_line(&mut reply)
+                .map(|_| reply);
+            let _ = tx.send(result);
+        });
+        let reply = rx.recv_timeout(Duration::from_secs(5)).map_err(|_| {
+            Error::Invalid("Startup wait could not be confirmed; task not sent".into())
+        })??;
         if reply.trim() != "waiting" {
             return Err(Error::Invalid("Could not wait for Codex setup; task not sent. Open the worker and inspect before retrying.".into()));
         }
         Ok(())
     })();
     if let Err(error) = result {
-        let _ = child.kill();
+        kill_delivery_group(child.id());
         let _ = child.wait();
         return Err(error);
     }
@@ -723,11 +730,35 @@ pub fn await_task(target: &str, pid: &str, checkout: &str, task: &str) -> Result
     if task.trim().is_empty() {
         return Err(Error::Invalid("Task is empty; not sent".into()));
     }
+    // Only the dedicated helper group may be timed out; never a caller's shell.
+    let own = std::process::id();
+    unsafe extern "C" {
+        fn getpgrp() -> std::os::raw::c_int;
+    }
+    if unsafe { getpgrp() } != own as i32 {
+        return Err(Error::Invalid(
+            "Startup delivery requires its own process group".into(),
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let expires = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        + 120;
+    let waiting = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let watchdog = waiting.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(120));
+        if watchdog.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            kill_delivery_group(own);
+        }
+    });
     let pane = bound_target(target)?;
     if pane.pid != pid || pane.checkout != checkout || pane.command != "codex" {
         return Err(Error::Invalid("Worker changed; task not sent".into()));
     }
-    let _guard = delivery_guard(&pane)?;
+    let guard = delivery_guard(&pane)?;
     let previous = tmux(Command::new("tmux").args([
         "show-option",
         "-wqv",
@@ -740,22 +771,39 @@ pub fn await_task(target: &str, pid: &str, checkout: &str, task: &str) -> Result
             "A delivery was already attempted; nothing resent".into(),
         ));
     }
+    let birth = delivery_process_birth(&own.to_string()).ok_or_else(|| {
+        Error::Invalid("Cannot observe startup helper lifetime; task not sent".into())
+    })?;
+    set_window(
+        &pane.window,
+        "@drudwyn_delivery_wait",
+        &format!("{own}:{birth}:{expires}"),
+    )?;
     set_window(&pane.window, "@drudwyn_delivery", "waiting")?;
     println!("waiting");
     io::stdout().flush()?;
-    let deadline = Instant::now() + Duration::from_secs(120);
     let outcome = (|| {
         let mut ready_since = None;
         while Instant::now() < deadline {
-            same_process(&pane)?;
+            validate_pending(&pane, &guard)?;
             if editor_ready(&pane.pane)? {
                 let since = ready_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= Duration::from_millis(250) {
+                    // Leave the setup-wait state before handing off to normal
+                    // transport. A later stalled transport must never look like
+                    // an expired, definitely-unsent setup wait.
+                    set_window(&pane.window, "@drudwyn_delivery", "uncertain")?;
+                    if !waiting.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                        return Err(Error::Invalid("Setup wait expired; task not sent".into()));
+                    }
                     return transmit_task(
                         &pane.pane,
                         task,
-                        None,
-                        || validate_editor(&pane),
+                        Some(&guard),
+                        || {
+                            validate_pending(&pane, &guard)?;
+                            validate_editor(&pane)
+                        },
                         |state| set_window(&pane.window, "@drudwyn_delivery", state),
                     );
                 }
@@ -775,10 +823,130 @@ pub fn await_task(target: &str, pid: &str, checkout: &str, task: &str) -> Result
             "@drudwyn_delivery",
         ]))?;
         if state == "waiting" {
-            set_window(&pane.window, "@drudwyn_delivery", "not_sent")?;
+            set_window(&pane.window, "@drudwyn_delivery", "setup_changed")?;
         }
     }
     outcome
+}
+
+fn kill_delivery_group(pid: u32) {
+    unsafe extern "C" {
+        fn kill(pid: std::os::raw::c_int, signal: std::os::raw::c_int) -> std::os::raw::c_int;
+    }
+    // The helper is spawned with process_group(0). Its group contains only it
+    // and its metadata commands, never the tmux server or the worker agent.
+    unsafe {
+        kill(-(pid as i32), 9);
+    }
+}
+
+fn validate_pending(pane: &DeliveryTarget, directory: &fs::File) -> Result<(), Error> {
+    same_process(pane)?;
+    let path = crate::recovery::decode(&pane.checkout)
+        .ok_or_else(|| Error::Invalid("Checkout identity unavailable".into()))?;
+    let held = directory.metadata()?;
+    let current = fs::metadata(&path)?;
+    if held.dev() != current.dev() || held.ino() != current.ino() {
+        return Err(Error::Invalid(
+            "Checkout changed; pending task discarded".into(),
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    let cwd = fs::read_link(format!("/proc/{}/cwd", pane.pid))?.canonicalize()?;
+    #[cfg(not(target_os = "linux"))]
+    let cwd = PathBuf::from(tmux(Command::new("tmux").args([
+        "display-message",
+        "-p",
+        "-t",
+        &pane.pane,
+        "#{pane_current_path}",
+    ]))?)
+    .canonicalize()?;
+    if !cwd.starts_with(path.canonicalize()?) {
+        return Err(Error::Invalid(
+            "Worker left its checkout; pending task discarded".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn delivery_process_birth(pid: &str) -> Option<String> {
+    if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let fields: Vec<_> = stat.rsplit_once(") ")?.1.split_whitespace().collect();
+        if matches!(fields.first().copied(), Some("Z" | "X" | "x")) {
+            return None;
+        }
+        Some(fields.get(19)?.to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let out = Command::new("ps")
+            .args(["-p", pid, "-o", "lstart=,stat="])
+            .output()
+            .ok()?;
+        let text = String::from_utf8(out.stdout).ok()?;
+        let fields: Vec<_> = text.split_whitespace().collect();
+        if !out.status.success() || fields.len() != 6 || fields[5].starts_with(['Z', 'X']) {
+            return None;
+        }
+        Some(crate::recovery::encode(Path::new(&fields[..5].join(" "))))
+    }
+}
+
+/// Derive live waiting state from non-content lifetime metadata. A killed helper
+/// cannot leave an enduring promise that its now-discarded task will be sent.
+pub(crate) fn observed_delivery(state: &str, wait: &str, launch_matches: bool) -> String {
+    if state != "waiting" {
+        return if launch_matches {
+            state.into()
+        } else {
+            String::new()
+        };
+    }
+    if !launch_matches {
+        return "setup_changed".into();
+    }
+    let fields: Vec<_> = wait.split(':').collect();
+    if fields.len() != 3 {
+        return "setup_interrupted".into();
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let Ok(end) = fields[2].parse::<u64>() else {
+        return "setup_interrupted".into();
+    };
+    // Wall-clock jumps and whole-second rounding cannot prove that a sender
+    // stopped. Only report definitely-unsent expiry after its lifetime ends.
+    if delivery_process_birth(fields[0]).as_deref() == Some(fields[1]) {
+        return "waiting".into();
+    }
+    if now >= end {
+        "setup_expired".into()
+    } else {
+        "setup_interrupted".into()
+    }
+}
+
+pub(crate) fn delivery_label(state: &str) -> &str {
+    match state {
+        "waiting" => "Finish Codex setup in the worker; task starts afterward.",
+        "setup_expired" => "Setup wait expired; task not sent. Restart with the task.",
+        "setup_interrupted" => "Setup wait interrupted; task not sent. Restart with the task.",
+        "setup_changed" => {
+            "Worker or folder changed; pending task discarded. Inspect before restarting."
+        }
+        "not_sent" => "Task not sent; open the worker and restart with the task.",
+        "uncertain" => "Delivery uncertain; inspect the worker before sending again.",
+        "" => "unknown",
+        _ => state,
+    }
 }
 
 fn validate_editor(pane: &DeliveryTarget) -> Result<(), Error> {

@@ -3997,6 +3997,21 @@ fn render_summary(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         ui::ellipsize(app.workspace_label(w), content.width as usize),
         Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
     );
+    if let Some(detail) = detail.filter(|d| {
+        matches!(
+            d.delivery.as_str(),
+            "waiting" | "setup_expired" | "setup_interrupted" | "setup_changed"
+        )
+    }) {
+        lines.push(Line::styled(
+            "Task delivery",
+            Style::default().fg(theme.accent()),
+        ));
+        lines.push(Line::from(crate::workspace::delivery_label(
+            &detail.delivery,
+        )));
+        lines.push(Line::default());
+    }
     for (label, value) in fields {
         if lines.len() + 2 > budget {
             break;
@@ -4207,13 +4222,7 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             ),
             (
                 "DELIVERY",
-                if detail.delivery == "waiting" {
-                    "Waiting for Codex setup; open worker. Task starts afterward."
-                } else if detail.delivery.is_empty() {
-                    "unknown"
-                } else {
-                    &detail.delivery
-                },
+                crate::workspace::delivery_label(&detail.delivery),
             ),
         ] {
             lines.push(detail_line(

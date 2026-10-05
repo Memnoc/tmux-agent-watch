@@ -197,3 +197,10 @@ checkout lock and launch identity checks. This preserves the stateless design.
 Default source labels now show the resolved branch consistently; the untested
 destination state uses a neutral plain-language message. CLI and technical
 details retain the underlying evidence distinctions.
+
+
+Review hardened the transient wait against worker cwd changes, renamed/replaced
+checkout directories, helper death and stalled setup metadata. Live helper lifetime
+metadata drives recovery guidance; it contains no task text. The two-minute limit
+bounds setup waiting. Entering normal transport first marks delivery uncertain,
+so later delays cannot be mistaken for a definitely-unsent expired wait.

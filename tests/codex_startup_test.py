@@ -60,7 +60,11 @@ wire_api = "responses"
 requires_openai_auth = false
 '''
         self.tmux('set-environment','-g','CODEX_HOME',str(self.home))
-        # Never copy user credentials/config/hooks into this test home.
+        isolated_home = self.root/'isolated-home'
+        isolated_home.mkdir()
+        self.tmux('set-environment','-g','HOME',str(isolated_home))
+        self.tmux('set-environment','-g','XDG_CONFIG_HOME',str(isolated_home/'.config'))
+        # Never copy user credentials/config/hooks/skills into this test home.
         for name in ('OPENAI_API_KEY','CODEX_API_KEY','OPENAI_BASE_URL'):
             self.tmux('set-environment','-gu',name,check=False)
 

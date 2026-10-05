@@ -566,13 +566,13 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
         "list-panes",
         "-a",
         "-F",
-        "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_dead}␟#{@drudwyn_launch_pane}␟#{@drudwyn_launch_pid}␟#{@drudwyn_launch_checkout}␟#{@drudwyn_recovery_checkout}␟#{@drudwyn_batch}␟#{@drudwyn_task_reference}␟#{@drudwyn_delivery}",
+        "#{window_id}␟#{pane_id}␟#{pane_pid}␟#{pane_dead}␟#{@drudwyn_launch_pane}␟#{@drudwyn_launch_pid}␟#{@drudwyn_launch_checkout}␟#{@drudwyn_recovery_checkout}␟#{@drudwyn_batch}␟#{@drudwyn_task_reference}␟#{@drudwyn_delivery}␟#{@drudwyn_delivery_wait}",
     ])?;
     let records: HashMap<_, _> = rows
         .lines()
         .filter_map(|row| {
             let f: Vec<_> = row.split('␟').collect();
-            (f.len() == 11).then(|| (f[1], f))
+            (f.len() == 12).then(|| (f[1], f))
         })
         .collect();
     let mut batches = HashMap::new();
@@ -678,11 +678,17 @@ fn enrich(workspaces: &mut [Workspace]) -> io::Result<(HashMap<String, Detail>, 
                 });
             }
             detail.source_commit = detail.batch.as_ref().map(|b| b.source.commit.clone());
-            detail.delivery = if f[4] == f[1] && f[5] == f[2] {
-                f[10].into()
-            } else {
-                String::new()
-            };
+            detail.delivery = crate::workspace::observed_delivery(
+                f[10],
+                f[11],
+                f[4] == f[1] && f[5] == f[2] && f[3] == "0",
+            );
+            if matches!(
+                detail.delivery.as_str(),
+                "waiting" | "setup_expired" | "setup_interrupted" | "setup_changed"
+            ) {
+                detail.warning = Some(crate::workspace::delivery_label(&detail.delivery).into());
+            }
         } else {
             detail.warning =
                 Some("Selected pane disappeared during refresh; refresh before action".into());

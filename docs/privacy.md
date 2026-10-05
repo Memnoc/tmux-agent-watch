@@ -219,9 +219,16 @@ Startup additionally observes terminal driver flags (canonical input and echo), 
 ### Waiting for Codex startup
 
 If a new Codex worker is still showing setup, a helper can hold the task in memory
-for at most two minutes. It reads terminal mode/cursor visibility and validates
+while waiting for setup for at most two minutes. After readiness it enters the
+normal transient delivery path, marking uncertainty before preparation. The
+setup deadline never labels an in-progress send as definitely unsent.
+It reads terminal mode/cursor visibility and validates
 the original pane, process and checkout; it does not read the screen or respond
 to setup prompts. Text travels only over an anonymous stdin pipe and the existing
 delete-on-paste channel. The existing checkout lock prevents concurrent sends.
-Closing/replacing the worker or reaching the deadline discards the pending text;
-there is no persistent queue or automatic replay after uncertain transmission.
+Closing/replacing the worker, changing its checkout, or reaching the setup
+deadline discards the pending text. A dedicated helper process group bounds even
+stalled setup metadata calls; its PID, birth identity and expiry are non-content
+live metadata used to show interrupted/expired waits. No persistent queue or
+automatic replay after uncertain transmission is introduced. Transport retains
+its existing subprocess lifetime and delete-on-paste/cleanup semantics.
