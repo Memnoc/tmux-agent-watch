@@ -1,6 +1,6 @@
 # 28 — Finish startup handling and clear up remaining labels
 
-Status: implemented; final validation and review pending
+Status: complete
 Spec: docs/specs/2026-10-04-worktree-feedback-comparison.md
 Review baseline: bf8ae52 (before this implementation)
 
@@ -62,7 +62,7 @@ Red: old sender answered the synthetic SETUP GATE. Old default source showed
 base while preview showed trunk. Old merge preview exposed missing live evidence.
 Green checks cover those paths, trusted/untrusted real Codex submission, pending
 worker replacement, ordinary delivery guards, recovery, and branch/check wording.
-Final test and review results will be appended below.
+Final test and review results are recorded below.
 
 ## Independent review corrections
 
@@ -82,3 +82,33 @@ A stalled-transport regression also proves overlapping retry is refused.
 
 Final rechecks: Standards — no remaining blocking findings. Spec — no remaining
 findings. Both reviewed the corrected working diff; validation is recorded below.
+
+## Final validation
+
+- `cargo fmt --check`, `git diff --check`, and all 43 Rust tests passed.
+- Complete `tests/run.sh` passed with the installed-Codex opt-in enabled:
+  `/tmp/drudwyn-core-stable-suite.log`. This covers real Git/tmux launch,
+  recovery, merge/conflict/check/cleanup routes, global Cockpit, rendered UI,
+  status layouts, lifecycle, independent clients, privacy and packaging/runtime
+  checks, then both assembled workflows using the release build. The optional
+  tmux-resurrect save-script test was skipped because its script was not supplied.
+- Real Codex 0.160.0: trusted and first-time setup routes each submitted exactly
+  one synthetic task to the local dummy provider. No live account/model work.
+- Five pending-task lifecycle cases passed in the full suite, including a real
+  two-minute deadline with deliberately blocked metadata. A sixth regression
+  for wall-clock expiry against a still-live helper was added during final
+  review, reproduced red, then passed separately after its fix:
+  `/tmp/drudwyn-wait-clock-{red,green}.log`. Rust checks were rerun afterward.
+  Matching helper liveness now takes precedence over wall-clock expiry.
+- Final independent Standards and Spec rechecks: no remaining blockers.
+
+An earlier full run exposed an assertion for the intentionally replaced warning
+text; it was updated to the new user-visible behavior. A subsequent attempt
+interrupted one launch while the executable was concurrently rebuilt; the final
+run used the stabilized implementation. The final clock-label correction was
+verified separately before the suite's remaining checks and release build.
+
+Validation was performed on this Linux/tmux setup. Other Unix metadata paths are
+preserved; this receipt does not claim a new macOS live test. The existing user's
+successful merge/check repeat remains the manual acceptance evidence. The new
+startup fixture specifically adds the previously missing real-editor acceptance.
