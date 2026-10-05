@@ -36,7 +36,7 @@ class BalancedStatus(StatusATest):
                 middle = 'main +1 -2'
                 self.assertIn(middle, row)
                 self.assertLessEqual(abs(row.index(middle) + len(middle)/2 - width/2), .5)
-            self.assertIn('#26233a', output)
+            self.assertIn('#[bg=#191724,', output)
         before = [self.selection(c) for c in self.clients]
         self.resize_client(self.clients[0], 160)
         screen, _ = self.terminal(self.clients[0], 160, '1 NEED')
@@ -127,7 +127,8 @@ class BalancedStatus(StatusATest):
             self.assertEqual(plain(separator), '─' * 80)
             output = self.command('status-bar', '--session', '$0', '--window', self.home,
                                   '--width', '80', '--row', 'balanced', client=self.clients[0]).stdout
-            self.assertIn(surface, output)
+            self.assertIn(f'#[bg={base},', output)
+            self.assertNotIn(f'bg={surface}', output)
         subprocess.run(['bash', str(ROOT / 'scripts/hud-install.sh'), '--disable'], env=self.env, check=True)
         self.assertEqual(self.tmux('show', '-gqv', 'status'), 'on')
         self.assertEqual(self.tmux('show', '-gqv', 'status-format[0]'), 'original bar')

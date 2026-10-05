@@ -712,7 +712,7 @@ fn balanced(
             cut(&format!("{identity}{suffix}"), left_budget)
         })
         .unwrap_or_else(|| cut(" Selected unavailable", left_budget));
-    let bg = hex(style.theme.surface());
+    let bg = hex(style.theme.base);
     let mut out = format!("#[bg={bg},fg={}]", hex(style.theme.accent()));
     out.push_str(&range(&format!("windows:{session}"), &escape(&left)));
     out.push_str(&" ".repeat(middle_start.saturating_sub(cells(&left))));

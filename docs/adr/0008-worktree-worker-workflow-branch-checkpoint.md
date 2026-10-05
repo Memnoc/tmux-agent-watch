@@ -177,3 +177,10 @@ polishes the live check output with themed status headings, clear output/result
 separation and return guidance. Technical receipt fields remain in Details; child
 output continues directly to the terminal without capture or storage. Workspace
 activity labels have bounded padded columns and readable selection contrast.
+
+## October 5 status-bar background
+
+The balanced status bar now uses the selected theme's main background, matching
+the terminal and separator row. The visible separator supplies the separation;
+a contrasting full-width panel is no longer used in this layout. This applies
+to Rosé Pine, Moon and Dawn.
