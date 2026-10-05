@@ -256,3 +256,18 @@ and expired setup waits produce recovery guidance rather than a stale promise of
 automatic submission. Independent Standards and Spec reviews report no remaining
 blocking findings after these corrections. Final validation receipts are in the
 ticket; the user's successful merge/check route above remains the live evidence.
+
+
+## October 5 final live test — startup confirmed, merge/check pending
+
+Runtime ede1b6d; fresh disposable project
+`/tmp/drudwyn-final-check-20261005-pzz3zgvb`, session drudwyn-final.
+The user explicitly reports that everything started automatically. The worker
+work/finalworker committed 94691d3. At the 15:06 navigator-spacing report,
+read-only inspection found main still at initial c585ffa and no destination
+verification receipt. Automatic startup is confirmed; this fresh run still needs
+its user-driven merge and checks before it is recorded as complete.
+
+The navigator screenshot also exposed a colored badge touching the branch;
+[ticket27](../../.scratch/worktree-worker-workflow/27-check-output-and-label-spacing.md)
+records the reproduced background-padding defect and correction.

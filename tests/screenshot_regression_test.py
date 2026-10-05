@@ -19,6 +19,18 @@ class ScreenshotRegression(IndependentNavigation):
             self.assertRegex(row, r'READY TO REVIEW {2,}main')
             header = next(line for line in screen.splitlines() if 'ACTIVITY' in line and 'BRANCH' in line)
             self.assertEqual(row.index('main'), header.index('BRANCH'))
+            # Whitespace inside a colored badge is not a gap between columns.
+            from terminal_cells import TerminalCells
+            rendered = TerminalCells(width, 40)
+            for y, line in enumerate(self.tmux('capture-pane', '-p', '-e', '-t', pane).splitlines()):
+                rendered.feed(f'\x1b[{y+1};1H' + line)
+            y, row = next((y, line) for y, line in enumerate(rendered.lines())
+                          if 'READY TO REVIEW' in line and 'main' in line)
+            branch = row.index('main')
+            self.assertEqual(row[branch-2:branch], '  ')
+            for x in range(branch-2, branch):
+                self.assertEqual(rendered.styles[y][x][1], ('rgb', 25, 23, 36),
+                                 'Activity badge background must stop before the branch column')
 
         self.tmux('send-keys', '-t', pane, '/')
         self.tmux('send-keys', '-t', pane, '-l', 'worker')

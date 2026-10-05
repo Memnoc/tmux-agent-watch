@@ -722,13 +722,18 @@ fn render_window_group(
             };
             cells.push(ui::cell(
                 &format!(" {label}"),
-                activity,
+                activity.saturating_sub(2),
                 if item.managed {
                     ui::activity_style(item.lifecycle, theme)
                 } else {
                     muted
                 },
             ));
+        }
+        // Keep the column gap outside the badge's background. Padding the
+        // styled span alone leaves its color touching the branch text.
+        if activity > 0 {
+            cells.push(Span::raw("  "));
         }
         if branch > 0 {
             cells.push(ui::cell(

@@ -35,3 +35,22 @@ with controlled workers, recovery, conflicts, checks and cleanup. Actual termina
 captures of Passed and Failed are at /tmp/drudwyn-feedback-ui/check-output.html
 (ephemeral). Logs: /tmp/drudwyn-modal-screens-final.log,
 /tmp/drudwyn-output-suite.log, /tmp/drudwyn-modal-assembled.log.
+
+
+## October 5 follow-up — badge background reached the branch
+
+The 15:06 screenshot shows that text padding alone did not create a visible gap:
+the activity span painted its trailing spaces with the badge background all the
+way to the branch column. The previous text-only gap assertion passed this case.
+
+Extended the existing actual-terminal regression to check both whitespace and
+Rosé Pine background cells before the branch at 200/160 columns. It failed with
+pine (49,116,143) where the neutral base (25,23,36) was required. The renderer now
+reserves the final two activity-column cells as an unstyled gutter, preserving
+column positions, badge text padding and selected-row contrast.
+
+Validation: all 15 screenshot regressions and 13 navigator tests passed (one
+optional tmux-resurrect test skipped), plus formatting and whitespace checks.
+Logs: /tmp/drudwyn-badge-gap-red.log, /tmp/drudwyn-badge-gap-green.log and
+/tmp/drudwyn-badge-navigator.log. Checking rendered background cells, rather than
+only spaces in captured text, prevents recurrence of this visual defect.
