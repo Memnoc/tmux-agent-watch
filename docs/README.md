@@ -9,6 +9,7 @@
 | Migrate from tmux-agent-watch without losing settings | [Upgrade to Drudwyn](upgrading-to-drudwyn.md) |
 | Install the plugin or update an existing checkout | [Installation and updates](installation.md) |
 | Navigate agents, manage worktrees, or save sessions | [Daily use](usage.md) |
+| Start from one branch and merge into another | [Choose starting and merge branches](usage.md#choose-starting-and-merge-branches) |
 | Connect agent lifecycle hooks | [Agent integrations](agents.md) |
 | Change themes, shortcuts, or defaults | [Configuration](configuration.md) |
 | Fix a missing binary, stale state, or shortcut conflict | [Troubleshooting](troubleshooting.md) |

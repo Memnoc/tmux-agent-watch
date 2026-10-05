@@ -530,15 +530,68 @@ An existing shell can also be selected with `coordinator set --window ID`. This 
 in tmux and must be selected again after that metadata is lost.
 
 
+### Choose starting and merge branches
+
+**Start from** chooses the version of the project each worker receives.
+**Merge into** chooses the branch that receives the worker's changes when you
+approve a merge. Those can be different branches. Each worker still gets its
+own branch and folder for doing the task.
+
+For a small change, you can start from `main` and merge back into `main`. For
+several tasks you want to combine and check together first, start from `main`
+and merge into a separate branch such as `work/combined`:
+
+```text
+main → worker's own branch → work/combined → main (if you later choose)
+```
+
+To set up the separate-branch route:
+
+1. Open **Task setup** (`b` in Cockpit, or **F3** in the task form).
+2. Set **Start from** to `main`.
+3. Press **F7** to choose **separate branch** and enter its name in
+   **Merge branch**. Typing a name in that field also selects this choice.
+4. Fill the remaining fields as shown below, then press **Enter** to preview.
+5. Check the starting branch, merge branch and folder. Press **Enter** again
+   to confirm the setup, then describe and start your worker's task.
+
+| Field | Example | What it means |
+| --- | --- | --- |
+| Start from | `main` | Workers begin with the committed code on local `main`. |
+| Merge branch | `work/combined` | Approved worker changes will go here. |
+| New branch starts from (optional) | `main` | Create `work/combined` from local `main` too. This is independent of where workers start. |
+| Folder for merged work (optional) | `../project-combined` | Create a separate folder for the merge branch; choose a path that does not already exist. |
+
+Confirming setup creates the new branch and folder. It does not merge the
+worker's work. After the worker finishes, review its changes, use **Merge
+changes**, and run checks on the merged result. `main` stays unchanged while
+you combine work in `work/combined`. Later, you can explicitly
+[merge the combined branch into the configured main branch](#promote-an-assembly-and-finish-workers-rust-v2)
+and run checks there too.
+
+If the merge branch **already exists**, enter its name and enable **F2 → Reuse
+branch**. Leave **New branch starts from** empty: the existing branch keeps its
+current code. If it already has a folder, Drudwyn uses that folder. Otherwise,
+supply an unused path in **Folder for merged work** so Drudwyn can create one.
+
+**Current form wording:** although **Folder for merged work** is labelled
+optional, you must supply it whenever the destination branch has no existing
+folder. Leaving it empty works when Drudwyn can reuse an existing folder.
+
+These examples explicitly select local `main`. Leaving a starting-point field
+at its default uses the configured base branch's locally saved upstream version
+when available, otherwise the local branch; Drudwyn does not fetch updates.
+The preview shows the actual choice. Your configured base may have a name other
+than `main`.
+
 ### Batch source and destination (Rust v2)
 
-After explicitly selecting the project coordinator, press `b` in Cockpit or
-open New workspace. Use Tab to move between Source, Integration branch,
-Destination start, and Dedicated checkout. Leave Integration branch empty to
-integrate directly into the displayed configured base (which need not be `main`).
-For a new integration branch, choose its name and optionally its starting ref;
-the default starting point is the configured base. This destination starting
-point is independent of the worker source.
+After selecting the project coordinator, open **Task setup** with `b` in
+Cockpit. The [branch-choice walkthrough](#choose-starting-and-merge-branches)
+explains the fields and the two merge routes. Use **Tab** to move between
+**Start from**, **Merge branch**, **New branch starts from**, and **Folder for
+merged work**. **F7** switches between the configured base branch and a separate
+merge branch.
 
 Enter first previews the resolved commits and checkout. Enter again confirms;
 Esc cancels without creating anything. A suitable existing destination checkout
@@ -962,7 +1015,9 @@ terminal content is read. Errors include the remedy instead of hiding failures.
    version each worker receives, and **Merge into**, where completed changes go.
    **F7** chooses the configured main branch or a separate branch for combining
    work. Name a separate branch, for example `work/combined`. Preview with Enter,
-   inspect the branch and folder, then Enter again to confirm. Nothing merges yet. F8 opens setup Details.
+   inspect the branch and folder, then Enter again to confirm. Nothing merges yet.
+   F8 opens setup Details. See [Choose starting and merge branches](#choose-starting-and-merge-branches)
+   for a complete example and the folder requirements.
 2. Give the worker a short name and its full task. Enter moves from name to branch
    to task; inside Task, Enter adds a line. **F6** starts the worker and sends once.
 3. **Ready to review** means the agent finished its turn. Open the worker and
