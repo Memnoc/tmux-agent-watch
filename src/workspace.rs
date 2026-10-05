@@ -1,7 +1,7 @@
 use std::{
     ffi::OsString,
     fs,
-    io::{self, Write},
+    io::{self, BufRead, Write},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
         fs::MetadataExt,
@@ -605,6 +605,22 @@ fn remove_unused_start(repo: &Path, target: &Path, branch: &str, commit: &str) -
     .is_ok()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskDelivery {
+    Sent,
+    Waiting,
+}
+impl TaskDelivery {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Sent => "Task sent; acceptance and implementation unknown",
+            Self::Waiting => {
+                "Task waiting: open the worker and finish Codex setup. The task starts automatically afterward (within 2 minutes)."
+            }
+        }
+    }
+}
+
 /// Wait for both the expected process and its noncanonical, no-echo input mode.
 /// Terminal driver flags contain no screen content and prevent pasting into the
 /// canonical terminal before an interactive editor has initialized. It is not
@@ -614,35 +630,178 @@ pub fn send_started(
     task: &str,
     file: bool,
     agent: Option<crate::domain::AgentKind>,
-) -> Result<(), Error> {
+) -> Result<TaskDelivery, Error> {
     let mut ready = agent.is_none();
+    let mut ready_since = None;
     for _ in 0..30 {
         let pane = bound_target(&started.pane_id)?;
         let input_mode = agent.is_none() || editor_ready(&started.pane_id)?;
         if input_mode
             && (agent.is_none() || crate::domain::AgentKind::from_command(&pane.command) == agent)
         {
-            ready = true;
-            break;
+            let since = ready_since.get_or_insert_with(Instant::now);
+            if since.elapsed() >= Duration::from_millis(250) {
+                ready = true;
+                break;
+            }
+        } else {
+            ready_since = None;
         }
         thread::sleep(Duration::from_millis(100));
     }
-    if !ready {
-        return Err(Error::Invalid("Worker created; editor not ready or process unrecognized; task NOT sent. Inspect the pane and deliberately deliver when ready".into()));
-    }
     if file {
         validate_task_file(&started.path, task)?;
-        deliver(
-            &started.pane_id,
-            &format!("Read the repository task file {task:?} and carry out its instructions."),
-            false,
-        )
-    } else {
-        deliver_task(&started.pane_id, task)
     }
+    let prompt = if file {
+        format!("Read the repository task file {task:?} and carry out its instructions.")
+    } else {
+        task.to_owned()
+    };
+    if !ready {
+        let pane = bound_target(&started.pane_id)?;
+        if agent == Some(crate::domain::AgentKind::Codex)
+            && crate::domain::AgentKind::from_command(&pane.command) == agent
+        {
+            return defer_task(&pane, &prompt);
+        }
+        return Err(Error::Invalid("Worker created; editor not ready or process unrecognized; task NOT sent. Inspect the pane and deliberately deliver when ready".into()));
+    }
+    deliver_task(&started.pane_id, &prompt)?;
+    Ok(TaskDelivery::Sent)
+}
+
+/// A bounded helper owns only transient stdin memory. Its checkout lock prevents
+/// concurrent delivery; no task bytes enter argv, tmux options, or a file.
+fn defer_task(pane: &DeliveryTarget, task: &str) -> Result<TaskDelivery, Error> {
+    use std::os::unix::process::CommandExt;
+    let mut child = Command::new(std::env::current_exe()?)
+        .args([
+            "workspace",
+            "await-task",
+            &pane.pane,
+            &pane.pid,
+            &pane.checkout,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()?;
+    let result = (|| -> Result<(), Error> {
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("Task input unavailable"))?
+            .write_all(task.as_bytes())?;
+        let mut reply = String::new();
+        io::BufReader::new(
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("Startup acknowledgement unavailable"))?,
+        )
+        .read_line(&mut reply)?;
+        if reply.trim() != "waiting" {
+            return Err(Error::Invalid("Could not wait for Codex setup; task not sent. Open the worker and inspect before retrying.".into()));
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(TaskDelivery::Waiting)
+}
+
+/// Internal helper entry point. Bind to the exact launch before acknowledging;
+/// a closed, replaced, or changed worker can never receive the pending task.
+pub fn await_task(target: &str, pid: &str, checkout: &str, task: &str) -> Result<(), Error> {
+    if task.trim().is_empty() {
+        return Err(Error::Invalid("Task is empty; not sent".into()));
+    }
+    let pane = bound_target(target)?;
+    if pane.pid != pid || pane.checkout != checkout || pane.command != "codex" {
+        return Err(Error::Invalid("Worker changed; task not sent".into()));
+    }
+    let _guard = delivery_guard(&pane)?;
+    let previous = tmux(Command::new("tmux").args([
+        "show-option",
+        "-wqv",
+        "-t",
+        &pane.window,
+        "@drudwyn_delivery",
+    ]))?;
+    if !previous.is_empty() && previous != "not_sent" {
+        return Err(Error::Invalid(
+            "A delivery was already attempted; nothing resent".into(),
+        ));
+    }
+    set_window(&pane.window, "@drudwyn_delivery", "waiting")?;
+    println!("waiting");
+    io::stdout().flush()?;
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let outcome = (|| {
+        let mut ready_since = None;
+        while Instant::now() < deadline {
+            same_process(&pane)?;
+            if editor_ready(&pane.pane)? {
+                let since = ready_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= Duration::from_millis(250) {
+                    return transmit_task(
+                        &pane.pane,
+                        task,
+                        None,
+                        || validate_editor(&pane),
+                        |state| set_window(&pane.window, "@drudwyn_delivery", state),
+                    );
+                }
+            } else {
+                ready_since = None;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        Err(Error::Invalid("Codex setup wait expired; task not sent. Finish setup and deliberately restart with the task.".into()))
+    })();
+    if outcome.is_err() && same_process(&pane).is_ok() {
+        let state = tmux(Command::new("tmux").args([
+            "show-option",
+            "-wqv",
+            "-t",
+            &pane.window,
+            "@drudwyn_delivery",
+        ]))?;
+        if state == "waiting" {
+            set_window(&pane.window, "@drudwyn_delivery", "not_sent")?;
+        }
+    }
+    outcome
+}
+
+fn validate_editor(pane: &DeliveryTarget) -> Result<(), Error> {
+    same_process(pane)?;
+    if pane.command == "codex" && !editor_ready(&pane.pane)? {
+        return Err(Error::Invalid("Codex is showing setup or another dialog. Open the worker and finish setup before sending a task.".into()));
+    }
+    Ok(())
 }
 
 fn editor_ready(pane: &str) -> Result<bool, Error> {
+    // Codex setup dialogs also use raw mode, but hide the input cursor. This
+    // terminal-mode flag is content-blind; never inspect prompt or screen text.
+    let state = tmux(Command::new("tmux").args([
+        "display-message",
+        "-p",
+        "-t",
+        pane,
+        "#{pane_current_command}|#{cursor_flag}",
+    ]))?;
+    if state == "codex|0" {
+        return Ok(false);
+    }
     let tty =
         tmux(Command::new("tmux").args(["display-message", "-p", "-t", pane, "#{pane_tty}"]))?;
     let terminal = fs::File::open(tty)?;
@@ -825,7 +984,7 @@ pub fn deliver(target: &str, task: &str, retry: bool) -> Result<(), Error> {
         &pane.pane,
         task,
         None,
-        || same_process(&pane),
+        || validate_editor(&pane),
         |state| set_window(&pane.window, "@drudwyn_delivery", state),
     )
 }

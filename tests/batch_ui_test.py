@@ -55,6 +55,16 @@ class BatchUiTest(unittest.TestCase):
             time.sleep(.02)
         self.fail(f"Missing {needle!r}: {output}")
 
+    def test_default_branch_name_is_consistent_before_and_after_preview(self):
+        screen=self.wait('SET UP TASKS')
+        self.assertIn('trunk (default branch)',screen)
+        self.keys('Tab','Tab','Tab')
+        self.keys('-l',str(self.root/'default-target'))
+        self.keys('Enter')
+        screen=self.wait('REVIEW TASK SETUP')
+        self.assertIn('Start from: trunk (default branch)',screen)
+        self.assertFalse((self.root/'default-target').exists())
+
     def test_setup_cancel_confirm_and_reopen_keeps_destination_and_pin(self):
         self.keys("Tab")
         self.tmux("send-keys", "-t", self.pane, "-l", "assemble")

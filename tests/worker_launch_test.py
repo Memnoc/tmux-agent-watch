@@ -292,6 +292,59 @@ while True:
         window=self.tmux('list-windows','-t',self.session,'-F','#{window_id}').splitlines()[-1]
         self.assertIn(hashlib.sha256(task.encode()).hexdigest(),self.wait(window,'HASH:').replace('\n',''))
 
+    def test_codex_setup_gate_keeps_task_pending_until_user_opens_editor(self):
+        agent, script = self.raw_receiver()
+        script.write_text("""import os, tty, hashlib
+
+tty.setraw(0)
+os.write(1,b'\\x1b[?25l\\x1b[?2004hSETUP GATE\\r\\n')
+while os.read(0,1)!=b'\\r': pass
+os.write(1,b'\\x1b[?25hEDITOR READY\\r\\n')
+data=b''
+while True:
+ data+=os.read(0,1)
+ if data.endswith(b'\\r'):
+  value=data[:-1].replace(b'\\x1b[200~',b'').replace(b'\\x1b[201~',b'')
+  os.write(1,b'HASH:'+hashlib.sha256(value).hexdigest().encode()+b'\\r\\n')
+  data=b''
+""")
+        task='Synthetic task after setup'
+        result=self.cli('workspace','start','--repo',str(self.repo),'--batch',self.batch,
+                        '--task-stdin','work/setup',str(agent),str(script),input=task)
+        window=self.tmux('list-windows','-t',self.session,'-F','#{window_id}').splitlines()[-1]
+        screen=self.tmux('capture-pane','-p','-t',window)
+        self.assertNotIn('EDITOR READY',screen, 'Drudwyn must not answer the setup gate')
+        self.assertIn('Task waiting',result.stdout)
+        self.assertEqual(self.tmux('show-option','-wqv','-t',window,'@drudwyn_delivery'),'waiting')
+        duplicate=self.cli('workspace','deliver-task',window,input=task,check=False)
+        self.assertNotEqual(duplicate.returncode,0)
+        self.assertEqual(self.tmux('list-buffers','-F','#{buffer_name}'),'')
+        self.tmux('send-keys','-t',window,'Enter')
+        screen=self.wait(window,'HASH:')
+        self.assertIn(hashlib.sha256(task.encode()).hexdigest(),screen.replace('\n',''))
+        self.assertEqual(screen.count('HASH:'),1)
+        for _ in range(40):
+            if self.tmux('show-option','-wqv','-t',window,'@drudwyn_delivery')=='sent': break
+            time.sleep(.05)
+        self.assertEqual(self.tmux('show-option','-wqv','-t',window,'@drudwyn_delivery'),'sent')
+
+    def test_pending_task_is_discarded_when_worker_is_replaced(self):
+        agent, script = self.raw_receiver()
+        gate=self.root/'gate.py'
+        gate.write_text("import os,tty,time\ntty.setraw(0)\nos.write(1,b'\\x1b[?25lSETUP\\r\\n')\ntime.sleep(30)\n")
+        result=self.cli('workspace','start','--repo',str(self.repo),'--batch',self.batch,
+                        '--task-stdin','work/replace-pending',str(agent),str(gate),input='must not reach replacement')
+        self.assertIn('Task waiting',result.stdout)
+        window=self.tmux('list-windows','-t',self.session,'-F','#{window_id}').splitlines()[-1]
+        self.tmux('respawn-pane','-k','-t',window,str(agent),str(script))
+        self.wait(window,'READY')
+        time.sleep(1)
+        self.assertNotIn('HASH:',self.tmux('capture-pane','-p','-t',window))
+        self.assertEqual(self.tmux('list-buffers','-F','#{buffer_name}'),'')
+        result=self.cli('workspace','deliver-task',window,input='also refused',check=False)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('process changed',result.stderr)
+
     def test_single_start_sends_multiline_stdin_once_without_content_metadata(self):
         agent, script = self.raw_receiver()
         task = 'first private line\nsecond line with $literal and unicode café'
@@ -378,7 +431,7 @@ while True:
                 self.tmux('send-keys', '-t', pane, 'NPage')
                 self.wait(pane, 'line 19:')
                 self.tmux('send-keys', '-t', pane, 'F6')
-                self.wait(pane, 'task sent;')
+                self.wait(pane, 'Task sent;')
                 worker = self.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').splitlines()[-1]
                 worker_pane = self.tmux('display-message', '-p', '-t', worker, '#{pane_id}')
                 screen = self.wait(worker_pane, 'HASH:')
@@ -442,7 +495,7 @@ while True:
         self.tmux('send-keys', '-t', pane, '-l', 'task.md')
         self.wait(pane, 'File with task instructions')
         self.tmux('send-keys', '-t', pane, 'F6')
-        self.wait(pane, 'task sent;')
+        self.wait(pane, 'Task sent;')
         window = self.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').splitlines()[-1]
         self.assertEqual(self.tmux('show-option', '-wqv', '-t', window, '@drudwyn_task_file'), 'task.md')
 

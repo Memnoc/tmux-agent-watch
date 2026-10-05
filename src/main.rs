@@ -330,6 +330,13 @@ enum WorkspaceCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Internal bounded startup delivery; input remains transient.
+    #[command(hide = true)]
+    AwaitTask {
+        pane: String,
+        pid: String,
+        checkout: String,
+    },
     /// Deliver a task from stdin without placing it in arguments or persistent state.
     DeliverTask {
         window_id: String,
@@ -826,8 +833,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     started.window_id, started.pane_id
                 );
                 if task_stdin || file {
-                    workspace::send_started(&started, &task, file, agent)?;
-                    println!("Task sent; acceptance and implementation unknown");
+                    let delivery = workspace::send_started(&started, &task, file, agent)?;
+                    println!("{}", delivery.message());
                 }
             }
             WorkspaceCommand::Finish {
@@ -886,6 +893,15 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     );
                 }
+            }
+            WorkspaceCommand::AwaitTask {
+                pane,
+                pid,
+                checkout,
+            } => {
+                let mut task = String::new();
+                std::io::stdin().read_to_string(&mut task)?;
+                workspace::await_task(&pane, &pid, &checkout, &task)?;
             }
             WorkspaceCommand::DeliverTask {
                 window_id,

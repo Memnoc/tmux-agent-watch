@@ -64,7 +64,12 @@ bash tests/run.sh
 ```
 
 The integration tests create disposable tmux servers. Run them in an environment
-that permits local tmux sockets. For a UI change, also exercise the affected action
+that permits local tmux sockets. For the opt-in installed-Codex input regression, run
+`DRUDWYN_CODEX_TEST_BIN=/absolute/path/to/codex python3 tests/codex_startup_test.py`.
+It uses disposable configuration and a local dummy provider, without credentials
+or model calls. The normal suite skips this check unless that variable is set.
+
+For a UI change, also exercise the affected action
 in tmux and describe the result in your PR. For documentation-only changes, check
 relative links, heading anchors, and `git diff --check`.
 

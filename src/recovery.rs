@@ -454,13 +454,25 @@ pub fn recover(request: Request) -> Result<crate::workspace::Started, Error> {
         crate::coordinator::restore(&started.window_id, &project, &expected)?;
     }
     drop(directory); // Delivery reacquires this inode and revalidates its binding.
-    match task {
-        Task::Text(task) => crate::workspace::send_started(&started, &task, false, request.agent)?,
-        Task::File(task) => crate::workspace::send_started(&started, &task, true, request.agent)?,
-        _ => {}
-    }
+    let delivery = match task {
+        Task::Text(task) => Some(crate::workspace::send_started(
+            &started,
+            &task,
+            false,
+            request.agent,
+        )?),
+        Task::File(task) => Some(crate::workspace::send_started(
+            &started,
+            &task,
+            true,
+            request.agent,
+        )?),
+        _ => None,
+    };
     crate::navigation::open_for(&client, Some(&started.window_id), None)?;
-    let message = if request.agent.is_some() {
+    let message = if delivery == Some(crate::workspace::TaskDelivery::Waiting) {
+        crate::workspace::TaskDelivery::Waiting.message()
+    } else if request.agent.is_some() {
         "Worker restarted; task sent. Fresh conversation; acceptance unconfirmed. Use the coordinator shortcut to return."
     } else {
         "Workspace shell opened. Use the coordinator shortcut to return."

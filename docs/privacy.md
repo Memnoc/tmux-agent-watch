@@ -31,7 +31,7 @@ for sensitive or organisational workflows without a separate assessment.
 | expected merge refs/commits, destination directory identity, MERGE_HEAD inode/timestamps, project and handoff state | guard Continue/Abort and reconcile external resolution | current tmux server only | conflict command and Cockpit, labels redacted |
 | deliberately selected repository task-file reference (including lossless path encoding) | let the agent read the chosen task in its checkout | current tmux session | launch form and live window option |
 | terminal unread-input byte count (Linux) | wait for the editor to consume a paste before one submit | delivery call only; not retained | internal transport metadata |
-| task entered in the start form or stdin | deliver the initial instruction to the selected agent | form/command memory and delete-on-paste tmux buffer | selected third-party agent pane |
+| task entered in the start form or stdin | deliver the initial instruction to the selected agent | form/command memory (including a bounded startup helper) and delete-on-paste tmux buffer | selected third-party agent pane |
 
 The default Rust implementation does not read terminal scrollback, prompts,
 responses, permission text,
@@ -215,3 +215,13 @@ split/replaced pane being swept into the removal. No branch deletion, force
 removal, durable receipt, push or deployment is added.
 
 Startup additionally observes terminal driver flags (canonical input and echo), never screen text. The Codex adapter verifies its terminal ancestor and that process's cwd, rechecks identity under the lifecycle guard, and never parses hook payloads. Shared-daemon origins cannot prove terminal ownership and are rejected; managed default Codex workers use --no-daemon. Runtime snapshots contain application code/assets only. Coordinator return bookmarks are non-content window IDs scoped to the live tmux session and requesting client.
+
+### Waiting for Codex startup
+
+If a new Codex worker is still showing setup, a helper can hold the task in memory
+for at most two minutes. It reads terminal mode/cursor visibility and validates
+the original pane, process and checkout; it does not read the screen or respond
+to setup prompts. Text travels only over an anonymous stdin pipe and the existing
+delete-on-paste channel. The existing checkout lock prevents concurrent sends.
+Closing/replacing the worker or reaching the deadline discards the pending text;
+there is no persistent queue or automatic replay after uncertain transmission.

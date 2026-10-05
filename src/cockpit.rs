@@ -188,6 +188,7 @@ struct IntegrationForm {
 }
 
 struct BatchForm {
+    default_source: Option<String>,
     scroll: u16,
     separate: bool,
     cursors: [usize; 4],
@@ -946,9 +947,10 @@ impl App {
                     Some(self.start_agent()),
                 );
                 match sent {
-                    Ok(()) => {
+                    Ok(delivery) => {
                         self.notice = Some(format!(
-                            "WORKER CREATED · task sent; acceptance unconfirmed. Select the worker and Enter to open. {}",
+                            "WORKER CREATED · {} Select the worker and Enter to open. {}",
+                            delivery.message(),
                             created.window_id
                         ))
                     }
@@ -984,11 +986,18 @@ impl App {
     }
 
     fn begin_batch(&mut self) {
+        let default_source = std::env::current_dir()
+            .ok()
+            .and_then(|repo| {
+                workspace::resolve_start_point(&repo, &self.config.base_branch, false).ok()
+            })
+            .map(|point| short_source(&point.reference).to_owned());
         self.batch_form = Some(BatchForm {
+            default_source,
             scroll: 0,
             separate: false,
-            cursors: [4, 0, 0, 0],
-            fields: ["base".into(), String::new(), String::new(), String::new()],
+            cursors: [0, 0, 0, 0],
+            fields: [String::new(), String::new(), String::new(), String::new()],
             selected: 0,
             reuse: false,
             preview: None,
@@ -1072,7 +1081,11 @@ impl App {
                             repo: std::env::current_dir()?,
                             session: crate::navigation::current_session()?,
                             base: self.config.base_branch.clone(),
-                            source: form.fields[0].clone(),
+                            source: if form.fields[0].is_empty() {
+                                "base".into()
+                            } else {
+                                form.fields[0].clone()
+                            },
                             integration: (!form.fields[1].is_empty())
                                 .then(|| form.fields[1].clone()),
                             destination_start: (!form.fields[2].is_empty())
@@ -2190,8 +2203,8 @@ fn guidance(app: &App) -> (&'static str, &'static [&'static str]) {
                 "Where tasks start",
                 &[
                     "New workers get their own folder and branch, starting from this version.",
-                    "base uses the configured main branch. current uses your current branch. You can also enter a local branch name.",
-                    "Use current when your task instructions are committed on your planning branch. No remote fetch is performed.",
+                    "Leave the displayed default, or type a local branch name. Type current to use the branch you are working on.",
+                    "The default uses the saved upstream version when available; otherwise it uses the local main branch. The actual branch name is shown. No remote fetch is performed.",
                 ],
             ),
             1 => (
@@ -2452,6 +2465,12 @@ fn render_setup_details(frame: &mut ratatui::Frame<'_>, app: &App) {
     frame.render_widget(paragraph.scroll((app.guidance_scroll.min(max), 0)), body);
 }
 
+fn short_source(reference: &str) -> &str {
+    reference
+        .trim_start_matches("refs/heads/")
+        .trim_start_matches("refs/remotes/")
+}
+
 fn render_batch(frame: &mut ratatui::Frame<'_>, app: &App, form: &BatchForm) {
     let label = |s: &str| {
         if app.config.redact_labels {
@@ -2489,8 +2508,13 @@ fn render_batch(frame: &mut ratatui::Frame<'_>, app: &App, form: &BatchForm) {
             ),
             Line::default(),
             Line::from(format!(
-                "Start from: {}",
-                label(p.source.reference.trim_start_matches("refs/heads/"))
+                "Start from: {}{}",
+                label(short_source(&p.source.reference)),
+                if form.fields[0].is_empty() || form.fields[0] == "base" {
+                    " (default branch)"
+                } else {
+                    ""
+                }
             )),
             Line::from(format!("Merge into: {}", label(&p.destination))),
             Line::from(format!(
@@ -2556,7 +2580,12 @@ fn render_batch(frame: &mut ratatui::Frame<'_>, app: &App, form: &BatchForm) {
             if i == form.selected {
                 cursor = Some((lines.len(), col));
             }
-            let value = if value.is_empty() && i == 1 && !form.separate {
+            let value = if i == 0 && (value.is_empty() || form.fields[0] == "base") {
+                form.default_source
+                    .as_ref()
+                    .map(|name| format!("{} (default branch)", label(name)))
+                    .unwrap_or_else(|| "Default branch unavailable; enter a branch".into())
+            } else if value.is_empty() && i == 1 && !form.separate {
                 format!("{} (selected above)", label(&app.config.base_branch))
             } else if value.is_empty() && i > 1 {
                 "Use the default".into()
@@ -2864,6 +2893,10 @@ fn check_lines(report: &str, theme: Theme, details: bool) -> Vec<Line<'static>> 
             }
             let value = if line.starts_with("Reported worker checks:") {
                 "Worker-reported checks: no results supplied".to_owned()
+            } else if line == "Assembled verification: Not verified · missing live evidence"
+                && !details
+            {
+                "Tests haven't been run here yet.".to_owned()
             } else if let Some(v) = line.strip_prefix("Assembled verification:") {
                 format!("Checks on merged changes:{v}")
             } else if let Some(v) = line
@@ -2907,7 +2940,11 @@ fn check_lines(report: &str, theme: Theme, details: bool) -> Vec<Line<'static>> 
                 line.to_owned()
             };
             let color = if line.contains("verification:") {
-                if line.contains("Passed") {
+                if line == "Assembled verification: Not verified · missing live evidence"
+                    && !details
+                {
+                    theme.subtle()
+                } else if line.contains("Passed") {
                     theme.foam()
                 } else if line.contains("Failed") {
                     theme.love
@@ -4170,7 +4207,9 @@ fn render_detail(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             ),
             (
                 "DELIVERY",
-                if detail.delivery.is_empty() {
+                if detail.delivery == "waiting" {
+                    "Waiting for Codex setup; open worker. Task starts afterward."
+                } else if detail.delivery.is_empty() {
                     "unknown"
                 } else {
                     &detail.delivery

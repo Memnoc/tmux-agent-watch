@@ -184,3 +184,16 @@ The balanced status bar now uses the selected theme's main background, matching
 the terminal and separator row. The visible separator supplies the separation;
 a contrasting full-width panel is no longer used in this layout. This applies
 to Rosé Pine, Moon and Dawn.
+
+## October 5 startup-gate correction
+
+[Ticket28](../../.scratch/worktree-worker-workflow/28-startup-gate-and-clear-defaults.md)
+records the remaining live-test fixes. Raw tty mode alone could not distinguish
+Codex's first-run folder-access screen from its editor. Delivery now waits for
+stable editor mode, leaving setup decisions to the user. A bounded helper keeps
+the pending task only in memory and submits once after setup, with the existing
+checkout lock and launch identity checks. This preserves the stateless design.
+
+Default source labels now show the resolved branch consistently; the untested
+destination state uses a neutral plain-language message. CLI and technical
+details retain the underlying evidence distinctions.

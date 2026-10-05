@@ -1002,3 +1002,19 @@ revision and timing details. Command output streams directly to the terminal.
 Workspace activity labels occupy a padded column, so longer labels such as
 Ready to review stay separate from branch names. Selected rows use light text
 for readability.
+
+### First-time Codex startup
+
+On a trusted project, Start worker delivers and submits the task automatically.
+If Codex first asks you to complete setup or confirm folder access, Drudwyn says
+**Task waiting**. Open that worker and answer Codex's own prompt. Drudwyn keeps
+the task in memory for up to two minutes and submits it after the editor opens;
+you do not need to paste it again or press Enter on the task.
+
+If that wait expires or the worker closes, the pending text is discarded. Finish
+setup, then explicitly restart with your task. A sent receipt still does not
+prove the agent accepted or completed work.
+
+Task setup shows the actual default branch name in both the form and preview.
+Leave that default in place or enter another local branch. Before destination
+tests have run, the merge screen says **Tests haven't been run here yet**.
