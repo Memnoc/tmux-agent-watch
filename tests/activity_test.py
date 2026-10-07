@@ -212,19 +212,32 @@ class Activity(unittest.TestCase):
         # A helper outside the terminal must not mutate that worker even in its cwd.
         r=subprocess.run([str(ROOT/'scripts/codex-hook.sh'),'permissionRequest'],
             env=dict(self.env,DRUDWYN_V2_BIN=str(BIN)),cwd=other,input='ignored',capture_output=True,text=True)
-        self.assertNotEqual(r.returncode,0)
-        self.assertIn('verified terminal ancestor',r.stderr)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertEqual(r.stdout.strip(),'{}')
+        self.assertEqual(r.stderr,'')
         self.assertEqual(self.tmux('show','-wqv','-t',target_window,'@drudwyn_state'),'done')
 
-    def test_codex_adapter_rejects_backend_and_nested_agents(self):
+    def test_codex_adapter_skips_backend_and_nested_agents(self):
         for label, flags in [('backend',dict(backend=True)),('nested',dict(nested=True)),('backend-child',dict(backend=True,nested=True))]:
             directory=self.path/label; directory.mkdir()
             pane,trigger,result=self.hook_worker(directory,**flags)
             code,out,err=self.hook_result(trigger,result)
-            self.assertNotEqual(code,0,(label,out,err))
-            self.assertIn('ambiguous ownership',err)
+            self.assertEqual(code,0,(label,out,err))
+            self.assertEqual(out.strip(),'{}')
+            self.assertEqual(err,'')
             window=self.tmux('display','-p','-t',pane,'#{window_id}')
             self.assertNotEqual(self.tmux('show','-wqv','-t',window,'@drudwyn_state'),'done')
+
+    def test_codex_adapter_preserves_unexpected_failures(self):
+        failing = self.path / 'failing-backend'
+        failing.write_text('#!/bin/sh\nprintf "unexpected backend failure\\n" >&2\nexit 7\n')
+        failing.chmod(0o755)
+        result = subprocess.run([str(ROOT/'scripts/codex-hook.sh'), 'stop'],
+            env=dict(self.env, DRUDWYN_V2_BIN=str(failing)),
+            input='ignored', capture_output=True, text=True)
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('unexpected backend failure', result.stderr)
 
     def test_reaped_child_keeps_observed_exit_and_review(self):
         pid, reap = self.reaping_worker()

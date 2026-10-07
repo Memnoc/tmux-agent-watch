@@ -8,7 +8,21 @@ if [ "$(tmux_option @drudwyn-v2 on)" = on ]; then
   # Require verified terminal ancestry and matching cwd. A shared daemon's
   # inherited TMUX_PANE does not identify the active client.
   [ -n "${TMUX:-}" ] || { printf '{}\n'; exit 0; }
-  "$PLUGIN_DIR/scripts/v2.sh" hook codex "$event" --session-cwd
+  if diagnostic="$("$PLUGIN_DIR/scripts/v2.sh" hook codex "$event" --session-cwd 2>&1)"; then
+    :
+  else
+    status=$?
+    case "$diagnostic" in
+      'tmux-drudwyn: Codex activity unavailable: hook has no verified terminal ancestor ('*)
+        # Observational hooks cannot attribute shared-daemon or ambiguous calls.
+        # Skip the update without guessing a pane or failing the Codex tool call.
+        ;;
+      *)
+        printf '%s\n' "$diagnostic" >&2
+        exit "$status"
+        ;;
+    esac
+  fi
   printf '{}\n'
   exit 0
 fi
